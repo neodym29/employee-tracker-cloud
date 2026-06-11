@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ensureSchema, getPool } from '@/lib/db';
+import { ensureSchema, getPool, health } from '@/lib/db';
 
 function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
@@ -9,6 +9,7 @@ export async function POST(req: NextRequest) {
   const expected = process.env.INGEST_API_KEY;
   if (!expected) return NextResponse.json({ ok: false, error: 'INGEST_API_KEY is not configured' }, { status: 503 });
   if (req.headers.get('x-ingest-key') !== expected) return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
+  if (!health().configured) return NextResponse.json({ ok: false, error: 'DATABASE_URL or POSTGRES_URL is not configured' }, { status: 503 });
 
   const body = await req.json().catch(() => ({}));
   const employeeEmail = asString(body.employee_email, 'ibrahim@neodym.ai').toLowerCase();
