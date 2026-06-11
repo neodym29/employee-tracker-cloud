@@ -1,0 +1,21 @@
+[Unit]
+Description=Transparent employee activity logger
+After=graphical-session.target
+Wants=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Desktop/employee_tracker
+Environment=PYTHONPATH=%h/Desktop/employee_tracker/src
+Environment=DISPLAY=:0
+Environment=WAYLAND_DISPLAY=wayland-0
+Environment=EMPLOYEE_TRACKER_ENABLE_SCREENSHOTS=1
+Environment=EMPLOYEE_TRACKER_WORKSPACE=%h
+Environment=EMPLOYEE_TRACKER_FILE_ROOTS=%h/Downloads:%h/Documents:%h/Pictures:%h/Music:%h/Videos
+Environment=EMPLOYEE_TRACKER_FILE_SCAN_SECONDS=30
+ExecStart=/usr/bin/python3 -m employee_tracker.cli run
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

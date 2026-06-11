@@ -1,0 +1,2 @@
+[console_scripts]
+employee-tracker = employee_tracker.cli:main

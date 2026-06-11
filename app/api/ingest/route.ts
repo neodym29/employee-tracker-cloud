@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ensureSchema, getPool, health } from '@/lib/db';
+import { ensureSchema, getPool, health, userByEnrollmentToken } from '@/lib/db';
 
 function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
@@ -7,12 +7,14 @@ function asString(value: unknown, fallback = ''): string {
 
 export async function POST(req: NextRequest) {
   const expected = process.env.INGEST_API_KEY;
-  if (!expected) return NextResponse.json({ ok: false, error: 'INGEST_API_KEY is not configured' }, { status: 503 });
-  if (req.headers.get('x-ingest-key') !== expected) return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
   if (!health().configured) return NextResponse.json({ ok: false, error: 'DATABASE_URL or POSTGRES_URL is not configured' }, { status: 503 });
 
   const body = await req.json().catch(() => ({}));
-  const employeeEmail = asString(body.employee_email, 'ibrahim@neodym.ai').toLowerCase();
+  const enrollmentToken = req.headers.get('x-enrollment-token') || '';
+  const tokenUser = enrollmentToken ? await userByEnrollmentToken(enrollmentToken) : null;
+  const sharedKeyOk = Boolean(expected && req.headers.get('x-ingest-key') === expected);
+  if (!sharedKeyOk && !tokenUser) return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
+  const employeeEmail = (tokenUser?.email || asString(body.employee_email, 'ibrahim@neodym.ai')).toLowerCase();
   if (!employeeEmail.endsWith('@neodym.ai')) return NextResponse.json({ ok: false, error: 'Only neodym.ai employees are accepted in this prototype' }, { status: 400 });
   const hostname = asString(body.hostname, 'unknown-host');
   const osUser = asString(body.os_user, 'unknown-user');

@@ -15,6 +15,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <div className="brand"><div className="logo" /> Neodym Tracker Cloud</div>
             <div style={{display:'flex', gap:12, flexWrap:'wrap'}}>
               <a href="/">Home</a>
+              <a href="/signup">Employee signup</a>
+              <a href="/admin/approve">Approve</a>
               <a href="/dashboard">Admin dashboard</a>
               <a href="/employee">Employee setup</a>
               <a href="/api/health">Health</a>

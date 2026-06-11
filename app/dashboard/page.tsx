@@ -26,7 +26,8 @@ export default async function Dashboard() {
       </section>
       <section className="card" style={{marginTop:16}}>
         <h2>Accounts</h2>
-        <table className="table"><thead><tr><th>Email</th><th>Role</th><th>Status</th><th>OS user</th></tr></thead><tbody>{data.users.map((u:any)=><tr key={u.email}><td>{u.email}</td><td>{u.role}</td><td>{u.approval_status}</td><td>{u.employee_username || '—'}</td></tr>)}</tbody></table>
+        <p><a className="button" href="/admin/approve">Approve employee / generate installer</a></p>
+        <table className="table"><thead><tr><th>Email</th><th>Role</th><th>Status</th><th>OS user</th><th>Token</th></tr></thead><tbody>{data.users.map((u:any)=><tr key={u.email}><td>{u.email}</td><td>{u.role}</td><td>{u.approval_status}</td><td>{u.employee_username || '—'}</td><td>{u.enrollment_token_hint || '—'}</td></tr>)}</tbody></table>
       </section>
       <section className="card" style={{marginTop:16}}>
         <h2>Devices</h2>

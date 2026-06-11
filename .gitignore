@@ -3,5 +3,10 @@ node_modules
 .vercel
 .env*.local
 .env
+.env.supabase
 .DS_Store
 npm-debug.log*
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/

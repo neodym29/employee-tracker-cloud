@@ -7,7 +7,7 @@ export default function Home() {
       <section className="card">
         <span className="pill">Cloud prototype · neodym.ai</span>
         <h1>Employee tracker, wired for real device enrollment.</h1>
-        <p className="muted">This Vercel-safe version separates the admin UI from local SQLite and expects employee PCs to upload activity through a cloud ingest API backed by Postgres.</p>
+        <p className="muted">This Vercel-safe version separates the admin UI from local SQLite. Employees sign up, admins approve them, and the generated installer downloads the tracker code plus dependencies and enrolls the PC against the cloud ingest API backed by Postgres/Supabase.</p>
         <div className="grid">
           <div className="card"><div className="metricLabel">Admin</div><div className="metric">hello@neodym.ai</div></div>
           <div className="card"><div className="metricLabel">Employee test</div><div className="metric">ibrahim@neodym.ai</div></div>

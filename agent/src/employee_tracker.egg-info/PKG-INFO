@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: employee-tracker
+Version: 0.1.0
+Summary: Transparent Ubuntu background activity logger with workspace file activity tracking
+Requires-Python: >=3.10
