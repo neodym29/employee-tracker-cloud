@@ -1,5 +1,7 @@
 import { health, readDashboard } from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+
 const demo = {
   users: [
     { email: 'hello@neodym.ai', role: 'admin', approval_status: 'approved', employee_username: null, created_at: 'seed' },
