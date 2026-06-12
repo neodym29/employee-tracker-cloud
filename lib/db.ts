@@ -221,6 +221,18 @@ export async function userByEnrollmentToken(token: string) {
   return result.rows[0] || null;
 }
 
+export async function approvedEmployeeInstallerToken(email: string, companyId: string) {
+  const db = getPool();
+  await ensureSchema();
+  const result = await db.query(
+    `select email, enrollment_token
+     from app_users
+     where email=$1 and company_id=$2 and approval_status='approved' and enrollment_token is not null`,
+    [email.trim().toLowerCase(), companyId],
+  );
+  return result.rows[0] as { email: string; enrollment_token: string } | undefined;
+}
+
 export async function companyByDomain(domain: string) {
   const db = getPool();
   await ensureSchema();

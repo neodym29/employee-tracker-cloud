@@ -13,17 +13,26 @@ type UserRow = {
   enrollment_token_hint?: string | null;
 };
 
+type InstallerPlatform = 'linux' | 'macos' | 'windows';
+
 type ApprovalResult = {
   ok?: boolean;
   email?: string;
   installer_url?: string;
+  platform?: InstallerPlatform;
   error?: string;
   message?: string;
 };
 
+function installerCommand(url: string, platform: InstallerPlatform | undefined) {
+  if (platform === 'windows') return `Invoke-WebRequest '${url}' -OutFile install-neodym-tracker.ps1\npowershell -ExecutionPolicy Bypass -File .\\install-neodym-tracker.ps1`;
+  return `curl -fsSL '${url}' -o install-neodym-tracker.sh\nbash install-neodym-tracker.sh`;
+}
+
 export default function ApprovalClient({ users }: { users: UserRow[] }) {
   const [rows, setRows] = useState(users);
   const [busyEmail, setBusyEmail] = useState('');
+  const [installerPlatform, setInstallerPlatform] = useState<InstallerPlatform>('linux');
   const [result, setResult] = useState<ApprovalResult | null>(null);
 
   const employees = useMemo(
@@ -39,7 +48,7 @@ export default function ApprovalClient({ users }: { users: UserRow[] }) {
       const res = await fetch('/api/approve', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, platform: installerPlatform }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.ok) {
@@ -70,6 +79,16 @@ export default function ApprovalClient({ users }: { users: UserRow[] }) {
 
       <section className="card" style={{ marginTop: 16 }}>
         <h2>Signup requests</h2>
+        <div className="cardFilters" style={{ marginBottom: 12 }}>
+          <label>
+            Installer OS
+            <select className="installer-platform" value={installerPlatform} onChange={(event) => setInstallerPlatform(event.target.value as InstallerPlatform)}>
+              <option value="linux">Linux</option>
+              <option value="macos">macOS</option>
+              <option value="windows">Windows</option>
+            </select>
+          </label>
+        </div>
         {employees.length === 0 ? (
           <p className="muted">No employee signups yet.</p>
         ) : (
@@ -119,8 +138,7 @@ export default function ApprovalClient({ users }: { users: UserRow[] }) {
         <section className="card" style={{ marginTop: 16 }}>
           <h2>Installer for {result.email}</h2>
           <p><a href={result.installer_url}>{result.installer_url}</a></p>
-          <pre>{`curl -fsSL '${result.installer_url}' -o install-neodym-tracker.sh
-bash install-neodym-tracker.sh`}</pre>
+          <pre>{installerCommand(result.installer_url, result.platform)}</pre>
         </section>
       )}
     </>

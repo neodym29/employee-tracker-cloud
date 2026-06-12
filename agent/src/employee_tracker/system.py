@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import os
-import pwd
+try:
+    import pwd
+except ImportError:  # Windows has no pwd module.
+    pwd = None  # type: ignore[assignment]
 import re
 import select
 import socket
@@ -1236,6 +1239,8 @@ def _read_identity(path: Path) -> tuple[int | None, str | None]:
         uid = _safe_int(parts[1])
         if uid is None:
             return None, None
+        if pwd is None:
+            return uid, str(uid)
         try:
             return uid, pwd.getpwuid(uid).pw_name
         except KeyError:

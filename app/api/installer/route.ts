@@ -15,6 +15,8 @@ export async function GET(req: NextRequest) {
   const base = process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin;
   const repo = process.env.NEXT_PUBLIC_GITHUB_REPO || 'https://github.com/neodym29/employee-tracker-cloud';
   const archive = `${repo.replace(/\.git$/, '')}/archive/refs/heads/main.tar.gz`;
+  const platformParam = req.nextUrl.searchParams.get('platform') || 'linux';
+  const platform = platformParam === 'windows' || platformParam === 'macos' || platformParam === 'linux' ? platformParam : 'linux';
   const script = `#!/usr/bin/env bash
 set -euo pipefail
 
@@ -297,11 +299,124 @@ systemctl --user status employee-tracker.service --no-pager --lines=12 || true
 
 echo "Done. This PC is enrolled as ${user.email} and will upload activity to ${base}/api/ingest"
 `;
-  return new NextResponse(script, {
+  const macosScript = `#!/usr/bin/env bash
+set -euo pipefail
+APP_DIR="$HOME/Library/Application Support/NeodymEmployeeTracker"
+SRC_DIR="$APP_DIR/source"
+VENV_DIR="$APP_DIR/.venv"
+ENV_DIR="$HOME/Library/Application Support/NeodymEmployeeTracker"
+ENV_FILE="$ENV_DIR/cloud.env"
+PLIST_DIR="$HOME/Library/LaunchAgents"
+PLIST_FILE="$PLIST_DIR/com.neodym.employee-tracker.plist"
+RUNNER="$APP_DIR/run-tracker.sh"
+echo "Installing Neodym employee tracker for ${user.email} on macOS"
+mkdir -p "$APP_DIR" "$ENV_DIR" "$PLIST_DIR"
+rm -rf "$SRC_DIR"
+mkdir -p "$SRC_DIR"
+curl -fsSL ${shq(archive)} | tar -xz --strip-components=1 -C "$SRC_DIR"
+python3 -m venv "$VENV_DIR"
+"$VENV_DIR/bin/python" -m pip install --upgrade pip
+"$VENV_DIR/bin/python" -m pip install "$SRC_DIR/agent"
+cat > "$ENV_FILE" <<'ENV'
+EMPLOYEE_TRACKER_COMPANY_DOMAIN=${user.domain}
+EMPLOYEE_TRACKER_EMPLOYEE_EMAIL=${user.email}
+EMPLOYEE_TRACKER_USERNAME=${user.employee_username || user.email.split('@')[0]}
+EMPLOYEE_TRACKER_CLOUD_API=${base}/api/ingest
+EMPLOYEE_TRACKER_ENROLLMENT_TOKEN=${token}
+EMPLOYEE_TRACKER_WORKSPACE=$HOME
+EMPLOYEE_TRACKER_DIR=$HOME/Library/Application Support/NeodymEmployeeTracker/data
+EMPLOYEE_TRACKER_DB=$HOME/Library/Application Support/NeodymEmployeeTracker/data/activity.sqlite3
+EMPLOYEE_TRACKER_SCREENSHOT_DIR=$HOME/Library/Application Support/NeodymEmployeeTracker/data/screenshots
+EMPLOYEE_TRACKER_FILE_ROOTS=$HOME/Downloads:$HOME/Documents:$HOME/Desktop:$HOME/Pictures:$HOME/Music:$HOME/Movies
+EMPLOYEE_TRACKER_FILE_SCAN_SECONDS=30
+EMPLOYEE_TRACKER_PROCESS_SCAN_SECONDS=30
+EMPLOYEE_TRACKER_POLL_SECONDS=1
+EMPLOYEE_TRACKER_CLOUD_UPLOAD_SECONDS=1
+EMPLOYEE_TRACKER_ENABLE_SCREENSHOTS=1
+ENV
+cat > "$RUNNER" <<RUNNER
+#!/usr/bin/env bash
+set -a
+source "$ENV_FILE"
+set +a
+exec "$VENV_DIR/bin/employee-tracker" run
+RUNNER
+chmod +x "$RUNNER"
+cat > "$PLIST_FILE" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.neodym.employee-tracker</string>
+  <key>ProgramArguments</key><array><string>$RUNNER</string></array>
+  <key>EnvironmentVariables</key><dict><key>EMPLOYEE_TRACKER_ENV_FILE</key><string>$ENV_FILE</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$APP_DIR/tracker.log</string>
+  <key>StandardErrorPath</key><string>$APP_DIR/tracker.err.log</string>
+</dict></plist>
+PLIST
+launchctl unload "$PLIST_FILE" >/dev/null 2>&1 || true
+launchctl load "$PLIST_FILE"
+echo "Done. This Mac is enrolled as ${user.email} and will upload activity to ${base}/api/ingest"
+`;
+  const windowsScript = `$ErrorActionPreference = 'Stop'
+$AppDir = Join-Path $env:LOCALAPPDATA 'NeodymEmployeeTracker'
+$SrcDir = Join-Path $AppDir 'source'
+$VenvDir = Join-Path $AppDir '.venv'
+$EnvDir = Join-Path $env:APPDATA 'NeodymEmployeeTracker'
+$EnvFile = Join-Path $EnvDir 'cloud.env'
+$Runner = Join-Path $AppDir 'run-tracker.ps1'
+Write-Host 'Installing Neodym employee tracker for ${user.email} on Windows'
+New-Item -ItemType Directory -Force -Path $AppDir, $EnvDir | Out-Null
+Remove-Item -Recurse -Force $SrcDir -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path $SrcDir | Out-Null
+$Archive = Join-Path $env:TEMP 'neodym-tracker.tar.gz'
+Invoke-WebRequest -Uri '${archive}' -OutFile $Archive
+& tar.exe -xzf $Archive --strip-components=1 -C $SrcDir
+$Python = (Get-Command py -ErrorAction SilentlyContinue)?.Source
+if ($Python) { & py -3 -m venv $VenvDir } else { & python -m venv $VenvDir }
+$VenvPython = Join-Path $VenvDir 'Scripts\\python.exe'
+& $VenvPython -m pip install --upgrade pip
+& $VenvPython -m pip install (Join-Path $SrcDir 'agent')
+@'
+EMPLOYEE_TRACKER_COMPANY_DOMAIN=${user.domain}
+EMPLOYEE_TRACKER_EMPLOYEE_EMAIL=${user.email}
+EMPLOYEE_TRACKER_USERNAME=${user.employee_username || user.email.split('@')[0]}
+EMPLOYEE_TRACKER_CLOUD_API=${base}/api/ingest
+EMPLOYEE_TRACKER_ENROLLMENT_TOKEN=${token}
+EMPLOYEE_TRACKER_WORKSPACE=%USERPROFILE%
+EMPLOYEE_TRACKER_DIR=%LOCALAPPDATA%\\NeodymEmployeeTracker\\data
+EMPLOYEE_TRACKER_DB=%LOCALAPPDATA%\\NeodymEmployeeTracker\\data\\activity.sqlite3
+EMPLOYEE_TRACKER_SCREENSHOT_DIR=%LOCALAPPDATA%\\NeodymEmployeeTracker\\data\\screenshots
+EMPLOYEE_TRACKER_FILE_ROOTS=%USERPROFILE%\\Downloads;%USERPROFILE%\\Documents;%USERPROFILE%\\Desktop;%USERPROFILE%\\Pictures;%USERPROFILE%\\Music;%USERPROFILE%\\Videos
+EMPLOYEE_TRACKER_FILE_SCAN_SECONDS=30
+EMPLOYEE_TRACKER_PROCESS_SCAN_SECONDS=30
+EMPLOYEE_TRACKER_POLL_SECONDS=1
+EMPLOYEE_TRACKER_CLOUD_UPLOAD_SECONDS=1
+EMPLOYEE_TRACKER_ENABLE_SCREENSHOTS=1
+'@ | Set-Content -Encoding UTF8 $EnvFile
+$Exe = Join-Path $VenvDir 'Scripts\\employee-tracker.exe'
+@"
+Get-Content '$EnvFile' | ForEach-Object {
+  if ($_ -match '^([^=]+)=(.*)$') {
+    [Environment]::SetEnvironmentVariable($Matches[1], [Environment]::ExpandEnvironmentVariables($Matches[2]), 'Process')
+  }
+}
+& '$Exe' run
+"@ | Set-Content -Encoding UTF8 $Runner
+$TaskAction = 'powershell -ExecutionPolicy Bypass -File "' + $Runner + '"'
+schtasks.exe /Create /TN 'Neodym Employee Tracker' /TR $TaskAction /SC ONLOGON /RL LIMITED /F | Out-Null
+schtasks.exe /Run /TN 'Neodym Employee Tracker' | Out-Null
+Write-Host 'Done. This Windows PC is enrolled as ${user.email} and will upload activity to ${base}/api/ingest'
+`;
+  const selectedScript = platform === 'windows' ? windowsScript : platform === 'macos' ? macosScript : platform === 'linux' ? script : script;
+  const extension = platform === 'windows' ? 'ps1' : 'sh';
+  const contentType = platform === 'windows' ? 'application/x-powershell; charset=utf-8' : 'text/x-shellscript; charset=utf-8';
+  return new NextResponse(selectedScript, {
     status: 200,
     headers: {
-      'content-type': 'text/x-shellscript; charset=utf-8',
-      'content-disposition': `attachment; filename="install-neodym-tracker-${user.email.split('@')[0]}.sh"`,
+      'content-type': contentType,
+      'content-disposition': `attachment; filename="install-neodym-tracker-${user.email.split('@')[0]}.${extension}"`,
     },
   });
 }
