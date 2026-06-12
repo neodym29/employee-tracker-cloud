@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 
 const collector = readFileSync(new URL('../agent/src/employee_tracker/collector.py', import.meta.url), 'utf8');
 const ingest = readFileSync(new URL('../app/api/ingest/route.ts', import.meta.url), 'utf8');
-const dashboard = readFileSync(new URL('../app/dashboard/page.tsx', import.meta.url), 'utf8');
+const dashboard = readFileSync(new URL('../app/dashboard/DashboardClient.tsx', import.meta.url), 'utf8');
 
 for (const expected of [
   "'rich_logs'",

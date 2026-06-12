@@ -24,7 +24,11 @@ th { color:#334155; font-size:12px; text-transform:uppercase; letter-spacing:.05
 .good { color:var(--green); font-weight:900; }
 .bad { color:var(--red); font-weight:900; }
 form { display:grid; gap:12px; }
-input, textarea { width:100%; border:1px solid var(--line); border-radius:14px; padding:12px; font:inherit; }
+input, textarea, select { width:100%; border:1px solid var(--line); border-radius:14px; padding:12px; font:inherit; background:#fff; }
 button, .button { display:inline-block; border:0; border-radius:999px; background:#111827; color:#fff; padding:12px 16px; font-weight:900; cursor:pointer; }
+.cardHeader { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; flex-wrap:wrap; }
+.cardFilters { display:grid; grid-template-columns:repeat(2,minmax(150px,1fr)); gap:10px; min-width:min(420px,100%); }
+.cardFilters label { color:var(--muted); font-size:12px; font-weight:900; text-transform:uppercase; letter-spacing:.05em; }
+.smallNote { margin:0 0 10px; font-size:13px; }
 button:disabled { opacity:.55; cursor:not-allowed; }
 @media (max-width:800px){ .hero{grid-template-columns:1fr;} }
