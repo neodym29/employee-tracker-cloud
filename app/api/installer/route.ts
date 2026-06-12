@@ -82,7 +82,7 @@ manifest = {
 (ext_dir / 'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
 
 (ext_dir / 'background.js').write_text(r'''
-const BRIDGE = 'http://127.0.0.1:38473';
+const BRIDGE = 'http://127.0.0.1:8766';
 
 function browserName() {
   const ua = navigator.userAgent || '';
