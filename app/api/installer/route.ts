@@ -28,8 +28,15 @@ SERVICE_FILE="$SERVICE_DIR/employee-tracker.service"
 
 echo "Installing Neodym employee tracker for ${user.email}"
 if command -v apt-get >/dev/null 2>&1; then
-  sudo apt-get update
-  sudo apt-get install -y python3 python3-venv python3-pip curl ca-certificates openssl x11-utils x11-xserver-utils xinput xprintidle usbutils pulseaudio-utils ffmpeg gnome-screenshot
+  if [ "$(id -u)" = "0" ]; then
+    apt-get update
+    apt-get install -y python3 python3-venv python3-pip curl ca-certificates openssl x11-utils x11-xserver-utils xinput xprintidle usbutils pulseaudio-utils ffmpeg gnome-screenshot
+  elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    sudo apt-get update
+    sudo apt-get install -y python3 python3-venv python3-pip curl ca-certificates openssl x11-utils x11-xserver-utils xinput xprintidle usbutils pulseaudio-utils ffmpeg gnome-screenshot
+  else
+    echo "Skipping apt dependency install because passwordless sudo is unavailable. Continuing with existing system packages."
+  fi
 fi
 
 mkdir -p "$APP_DIR" "$ENV_DIR" "$SERVICE_DIR"
@@ -190,7 +197,7 @@ if not crx_path.exists():
     print('WARNING: could not pack browser extension; install Chrome/Chromium/Brave/Edge/Opera and rerun installer.')
 else:
     crx_uri = crx_path.resolve().as_uri()
-    update_xml.write_text('<?xml version="1.0" encoding="UTF-8"?>\n<gupdate xmlns="http://www.google.com/update2/response" protocol="2.0"><app appid="' + ext_id + '"><updatecheck codebase="' + crx_uri + '" version="' + version + '" /></app></gupdate>\n', encoding='utf-8')
+    update_xml.write_text('<?xml version="1.0" encoding="UTF-8"?><gupdate xmlns="http://www.google.com/update2/response" protocol="2.0"><app appid="' + ext_id + '"><updatecheck codebase="' + crx_uri + '" version="' + version + '" /></app></gupdate>', encoding='utf-8')
     update_uri = update_xml.resolve().as_uri()
     policy = {
         'ExtensionInstallForcelist': [ext_id + ';' + update_uri],
