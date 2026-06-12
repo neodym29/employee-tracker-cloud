@@ -273,7 +273,8 @@ WantedBy=default.target
 SERVICE
 
 systemctl --user daemon-reload
-systemctl --user enable --now employee-tracker.service
+systemctl --user enable employee-tracker.service
+systemctl --user restart employee-tracker.service
 systemctl --user status employee-tracker.service --no-pager --lines=12 || true
 
 echo "Done. This PC is enrolled as ${user.email} and will upload activity to ${base}/api/ingest"
