@@ -17,6 +17,7 @@ from .db import (
     fetch_warp_activity_rows,
     fetch_window_snapshot_rows,
     init_db,
+    connect,
 )
 
 
@@ -26,6 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser('init-db', help='Create the SQLite schema')
     subparsers.add_parser('run', help='Run the background collector')
+    subparsers.add_parser('run-once', help='Run one collector iteration, upload once, and exit')
     subparsers.add_parser('smoke-upload', help='Send one cloud enrollment smoke-test event and exit')
 
     export_parser = subparsers.add_parser('export-csv', help='Export activity logs from SQLite to CSV')
@@ -283,6 +285,28 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == 'smoke-upload':
         return smoke_upload(settings.username)
+
+    if args.command == 'run-once':
+        init_db(settings.db_path)
+        collector = ActivityCollector(
+            db_path=settings.db_path,
+            screenshot_dir=settings.screenshot_dir,
+            workspace_dir=settings.workspace_dir,
+            file_roots=settings.file_roots,
+            username=settings.username,
+            poll_interval_seconds=settings.poll_interval_seconds,
+            screenshot_interval_seconds=settings.screenshot_interval_seconds,
+            file_scan_interval_seconds=settings.file_scan_interval_seconds,
+            process_scan_interval_seconds=settings.process_scan_interval_seconds,
+            enable_screenshots=settings.enable_screenshots,
+        )
+        with connect(settings.db_path) as connection:
+            payload = collector.run_once(connection)
+        if payload.get('_cloud_upload_ok') is not True:
+            print('Collector smoke upload failed; background tracker may not be able to upload activity', file=sys.stderr)
+            return 1
+        print('Collector smoke upload sent')
+        return 0
 
     if args.command == 'run':
         init_db(settings.db_path)

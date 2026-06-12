@@ -518,9 +518,12 @@ Get-Content $EnvFile | ForEach-Object {
 }
 & $Exe smoke-upload
 if ($LASTEXITCODE -ne 0) { throw 'Tracker installed, but the cloud smoke upload failed. Check network access and send tracker.err.log/tracker.log to admin.' }
+& $Exe run-once
+if ($LASTEXITCODE -ne 0) { throw 'Tracker installed, but the collector smoke upload failed. Send %LOCALAPPDATA%\\NeodymEmployeeTracker\\tracker.err.log and tracker.log to admin.' }
 $TaskAction = 'powershell -NoProfile -ExecutionPolicy Bypass -File "' + $Runner + '"'
 schtasks.exe /Create /TN 'Neodym Employee Tracker' /TR $TaskAction /SC ONLOGON /RL LIMITED /F | Out-Null
 schtasks.exe /Run /TN 'Neodym Employee Tracker' | Out-Null
+schtasks.exe /Query /TN 'Neodym Employee Tracker' /V /FO LIST | Out-File -FilePath $LogFile -Append -Encoding utf8
 Write-Host 'Done. This Windows PC is enrolled as ${user.email} and will upload activity to ${base}/api/ingest'
 `;
   const windowsCmd = `@echo off

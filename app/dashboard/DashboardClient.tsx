@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 
 const typeLabels: Record<string, string> = {
   activity_snapshot: 'Active window',
+  installer_smoke_test: 'Installer smoke test',
   app_open: 'Open app',
   app_subwindow: 'App activity',
   browser_tab: 'Web surfing',
@@ -133,7 +134,7 @@ function EventsTable({ events }: { events: any[] }) {
 export default function DashboardClient({ data, configured, error, initialFilters }: { data: DashboardData; configured: boolean; error: string; initialFilters: DashboardFilters }) {
   const router = useRouter();
   const pathname = usePathname();
-  const allUsers = useMemo(() => Array.from(new Set(data.events.map(rowUser).filter(Boolean))).sort(), [data.events]);
+  const allUsers = useMemo(() => Array.from(new Set([...data.users, ...data.devices, ...data.events].map(rowUser).filter(Boolean))).sort(), [data.users, data.devices, data.events]);
   const eventTypes = useMemo(() => Array.from(new Set(data.events.map((event) => event.event_type).filter(Boolean))).sort(), [data.events]);
   const now = useMemo(() => new Date(), []);
   const [mode, setMode] = useState<'latest' | 'range'>(initialFilters.mode || 'latest');

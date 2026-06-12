@@ -743,91 +743,97 @@ class ActivityCollector:
             )
         return rows
 
+    def run_once(self, connection, host: str | None = None) -> dict[str, object]:
+        host = host or host_name()
+        now = time.time()
+        captured_at = datetime.now(timezone.utc).isoformat()
+
+        if (now - self._last_file_scan_at) >= self.file_scan_interval_seconds:
+            self._record_workspace_snapshot(connection, captured_at, host)
+            self._last_file_scan_at = now
+
+        self._browser_bridge.ingest_gnome_state_file()
+        current_processes: list[object] = list(self._process_state.values())
+        if (now - self._last_process_scan_at) >= self.process_scan_interval_seconds:
+            current_processes = self._record_process_snapshot(connection, captured_at, host)
+            self._record_peripheral_snapshots(connection, captured_at, host)
+            self._last_process_scan_at = now
+
+        windows = self._record_window_snapshot(connection, captured_at, host)
+        self._record_warp_activity(connection, captured_at, host, current_processes, windows)
+        open_state = self._record_current_open_state(connection, captured_at, host, current_processes, windows)
+        focus_events = self._record_browser_focus_events(connection, captured_at, host)
+
+        window = current_window_info()
+        gnome_window = self._browser_bridge.active_gnome_window()
+        if gnome_window is not None:
+            window = SimpleNamespace(
+                window_id=gnome_window.window_id,
+                title=gnome_window.title,
+                app_name=gnome_window.app_name,
+                pid=gnome_window.pid,
+                wm_class=gnome_window.wm_class,
+            )
+        browser_tab = self._browser_bridge.active_tab()
+        if browser_tab is not None:
+            window = SimpleNamespace(
+                window_id=f'browser:{browser_tab.app_key}:window:{browser_tab.window_id}:tab:{browser_tab.tab_id}',
+                title=f'{browser_tab.title or "Untitled browser tab"} — {browser_tab.url or ""}',
+                app_name=browser_tab.browser,
+                pid=None,
+                wm_class=browser_tab.app_key,
+            )
+        self._record_window_focus_event(connection, captured_at, host, window)
+        click_events = self._record_click_events(connection, captured_at, host, window, windows)
+        terminal_command_events = self._record_terminal_command_events()
+        audio_outputs = self._record_audio_outputs(connection, captured_at, host)
+        screenshot_path = None
+        if self.enable_screenshots and (now - self._last_screenshot_at) >= self.screenshot_interval_seconds:
+            screenshot = capture_screenshot(self.screenshot_dir, self.username, window.window_id)
+            screenshot_path = str(screenshot) if screenshot else None
+            self._last_screenshot_at = now
+
+        rich_events = (
+            [{**row, 'event_type': 'app_open'} for row in open_state.get('open_apps', [])]
+            + [{**row, 'event_type': 'browser_tab' if row.get('subwindow_type') == 'tab' else 'app_subwindow'} for row in open_state.get('subwindows', [])]
+            + [{**row, 'event_type': 'window_focus'} for row in focus_events]
+            + [{**row, 'event_type': 'input_click'} for row in click_events]
+            + terminal_command_events
+            + [{**row, 'event_type': 'audio_output'} for row in audio_outputs]
+        )
+
+        activity_payload = {
+            'captured_at': captured_at,
+            'username': self.username,
+            'host': host,
+            'hostname': host,
+            'os_user': self.username,
+            'window_id': window.window_id,
+            'window_title': window.title,
+            'app_name': window.app_name,
+            'window_pid': window.pid,
+            'window_class': window.wm_class,
+            'idle_seconds': idle_seconds(),
+            'screenshot_path': screenshot_path,
+            'event_type': 'activity_snapshot',
+            'rich_logs': {
+                'open_apps': open_state.get('open_apps', [])[:80],
+                'subwindows': open_state.get('subwindows', [])[:120],
+                'focus_events': focus_events[:80],
+                'click_events': click_events[:120],
+                'terminal_commands': terminal_command_events[:120],
+                'audio_outputs': audio_outputs[:80],
+            },
+            'rich_events': rich_events[:250],
+        }
+        insert_activity(connection, activity_payload)
+        cloud_upload_ok = self._cloud_uploader.upload_activity(activity_payload)
+        activity_payload['_cloud_upload_ok'] = cloud_upload_ok
+        return activity_payload
+
     def run_forever(self) -> None:
         host = host_name()
         with connect(self.db_path) as connection:
             while True:
-                now = time.time()
-                captured_at = datetime.now(timezone.utc).isoformat()
-
-                if (now - self._last_file_scan_at) >= self.file_scan_interval_seconds:
-                    self._record_workspace_snapshot(connection, captured_at, host)
-                    self._last_file_scan_at = now
-
-                self._browser_bridge.ingest_gnome_state_file()
-                current_processes: list[object] = list(self._process_state.values())
-                if (now - self._last_process_scan_at) >= self.process_scan_interval_seconds:
-                    current_processes = self._record_process_snapshot(connection, captured_at, host)
-                    self._record_peripheral_snapshots(connection, captured_at, host)
-                    self._last_process_scan_at = now
-
-                windows = self._record_window_snapshot(connection, captured_at, host)
-                self._record_warp_activity(connection, captured_at, host, current_processes, windows)
-                open_state = self._record_current_open_state(connection, captured_at, host, current_processes, windows)
-                focus_events = self._record_browser_focus_events(connection, captured_at, host)
-
-                window = current_window_info()
-                gnome_window = self._browser_bridge.active_gnome_window()
-                if gnome_window is not None:
-                    window = SimpleNamespace(
-                        window_id=gnome_window.window_id,
-                        title=gnome_window.title,
-                        app_name=gnome_window.app_name,
-                        pid=gnome_window.pid,
-                        wm_class=gnome_window.wm_class,
-                    )
-                browser_tab = self._browser_bridge.active_tab()
-                if browser_tab is not None:
-                    window = SimpleNamespace(
-                        window_id=f'browser:{browser_tab.app_key}:window:{browser_tab.window_id}:tab:{browser_tab.tab_id}',
-                        title=f'{browser_tab.title or "Untitled browser tab"} — {browser_tab.url or ""}',
-                        app_name=browser_tab.browser,
-                        pid=None,
-                        wm_class=browser_tab.app_key,
-                    )
-                self._record_window_focus_event(connection, captured_at, host, window)
-                click_events = self._record_click_events(connection, captured_at, host, window, windows)
-                terminal_command_events = self._record_terminal_command_events()
-                audio_outputs = self._record_audio_outputs(connection, captured_at, host)
-                screenshot_path = None
-                if self.enable_screenshots and (now - self._last_screenshot_at) >= self.screenshot_interval_seconds:
-                    screenshot = capture_screenshot(self.screenshot_dir, self.username, window.window_id)
-                    screenshot_path = str(screenshot) if screenshot else None
-                    self._last_screenshot_at = now
-
-                rich_events = (
-                    [{**row, 'event_type': 'app_open'} for row in open_state.get('open_apps', [])]
-                    + [{**row, 'event_type': 'browser_tab' if row.get('subwindow_type') == 'tab' else 'app_subwindow'} for row in open_state.get('subwindows', [])]
-                    + [{**row, 'event_type': 'window_focus'} for row in focus_events]
-                    + [{**row, 'event_type': 'input_click'} for row in click_events]
-                    + terminal_command_events
-                    + [{**row, 'event_type': 'audio_output'} for row in audio_outputs]
-                )
-
-                activity_payload = {
-                    'captured_at': captured_at,
-                    'username': self.username,
-                    'host': host,
-                    'hostname': host,
-                    'os_user': self.username,
-                    'window_id': window.window_id,
-                    'window_title': window.title,
-                    'app_name': window.app_name,
-                    'window_pid': window.pid,
-                    'window_class': window.wm_class,
-                    'idle_seconds': idle_seconds(),
-                    'screenshot_path': screenshot_path,
-                    'event_type': 'activity_snapshot',
-                    'rich_logs': {
-                        'open_apps': open_state.get('open_apps', [])[:80],
-                        'subwindows': open_state.get('subwindows', [])[:120],
-                        'focus_events': focus_events[:80],
-                        'click_events': click_events[:120],
-                        'terminal_commands': terminal_command_events[:120],
-                        'audio_outputs': audio_outputs[:80],
-                    },
-                    'rich_events': rich_events[:250],
-                }
-                insert_activity(connection, activity_payload)
-                self._cloud_uploader.upload_activity(activity_payload)
+                self.run_once(connection, host)
                 time.sleep(self.poll_interval_seconds)
