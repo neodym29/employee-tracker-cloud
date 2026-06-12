@@ -542,10 +542,21 @@ if ($LASTEXITCODE -ne 0) { throw 'Tracker installed, but the cloud smoke upload 
 & $Exe run-once
 if ($LASTEXITCODE -ne 0) { throw 'Tracker installed, but the collector smoke upload failed. Send %LOCALAPPDATA%\\NeodymEmployeeTracker\\tracker.err.log and tracker.log to admin.' }
 $TaskAction = 'powershell -NoProfile -ExecutionPolicy Bypass -File "' + $Runner + '"'
-schtasks.exe /Create /TN 'Neodym Employee Tracker' /TR $TaskAction /SC ONLOGON /RL LIMITED /F | Out-Null
-schtasks.exe /Run /TN 'Neodym Employee Tracker' | Out-Null
-schtasks.exe /Query /TN 'Neodym Employee Tracker' /V /FO LIST | Out-File -FilePath $LogFile -Append -Encoding utf8
+$StartupDir = [Environment]::GetFolderPath('Startup')
+$StartupCmd = Join-Path $StartupDir 'Neodym Employee Tracker.cmd'
+('@echo off' + [Environment]::NewLine + 'powershell -NoProfile -ExecutionPolicy Bypass -File "' + $Runner + '"') | Set-Content -Encoding ASCII $StartupCmd
+Write-Host "Startup fallback created at $StartupCmd"
+$TaskCreated = $false
+schtasks.exe /Create /TN 'Neodym Employee Tracker' /TR $TaskAction /SC ONLOGON /RL LIMITED /F | Out-File -FilePath $LogFile -Append -Encoding utf8
+if ($LASTEXITCODE -eq 0) {
+  $TaskCreated = $true
+  schtasks.exe /Query /TN 'Neodym Employee Tracker' /V /FO LIST | Out-File -FilePath $LogFile -Append -Encoding utf8
+} else {
+  "Scheduled task registration failed with exit code $LASTEXITCODE; Startup folder fallback will launch the tracker at next login." | Out-File -FilePath $ErrFile -Append -Encoding utf8
+}
+Start-Process -FilePath 'powershell' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$Runner) -WindowStyle Hidden
 Write-Host 'Done. This Windows PC is enrolled as ${user.email} and will upload activity to ${base}/api/ingest'
+if (-not $TaskCreated) { Write-Host 'Note: Windows blocked scheduled task registration, so the Startup folder fallback was installed instead.' }
 `;
   const windowsCmd = `@echo off
 setlocal

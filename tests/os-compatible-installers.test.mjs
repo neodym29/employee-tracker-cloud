@@ -25,4 +25,6 @@ assert.match(installer, /\$LASTEXITCODE -ne 0/, 'Windows installer should stop o
 assert.match(installer, /Python 3\.10\+ is required/, 'Windows installer should give a clear Python missing error');
 assert.match(installer, /com\.neodym\.employee-tracker\.plist/, 'macOS installer should create a LaunchAgent plist');
 assert.match(installer, /schtasks\.exe/, 'Windows installer should register a scheduled task');
+assert.match(installer, /GetFolderPath\('Startup'\)/, 'Windows installer should create a Startup folder fallback');
+assert.match(installer, /Start-Process -FilePath 'powershell'/, 'Windows installer should start the collector immediately without requiring schtasks /Run');
 assert.match(system, /try:\n\s+import pwd/, 'agent should not hard-crash on Windows when pwd is unavailable');
