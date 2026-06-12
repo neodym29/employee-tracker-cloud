@@ -1,32 +1,32 @@
-'use client';
+import { health, readDashboard } from '@/lib/db';
+import ApprovalClient from './ApprovalClient';
 
-import { useState } from 'react';
+export const dynamic = 'force-dynamic';
 
-export default function AdminApprove() {
-  const [email, setEmail] = useState('ibrahim@neodym.ai');
-  const [key, setKey] = useState('');
-  const [result, setResult] = useState<any>(null);
-  async function approve(e: React.FormEvent) {
-    e.preventDefault();
-    setResult({ message: 'Approving…' });
-    const res = await fetch('/api/approve', { method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-setup-key': key }, body: JSON.stringify({ email }) });
-    const data = await res.json().catch(() => ({}));
-    setResult(data.ok ? data : { error: data.error || res.statusText });
+const demo = {
+  users: [
+    { email: 'ibrahim@neodym.ai', role: 'employee', approval_status: 'pending', employee_username: 'ibrahim', created_at: 'seed' },
+  ],
+};
+
+export default async function AdminApprove() {
+  const h = health();
+  let users = demo.users;
+  let error = '';
+  if (h.configured) {
+    try {
+      const data = await readDashboard();
+      users = data.users;
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
   }
+
   return (
-    <section className="card">
-      <span className="pill">Admin approval</span>
-      <h1>Approve employee device</h1>
-      <p className="muted">Enter the private ADMIN_SETUP_KEY from the server env. Approval generates a one-device installer URL for the employee.</p>
-      <form onSubmit={approve}>
-        <label>Employee email<input type="email" value={email} onChange={e => setEmail(e.target.value)} required /></label>
-        <label>Admin setup key<input type="password" value={key} onChange={e => setKey(e.target.value)} required /></label>
-        <button>Approve and generate installer</button>
-      </form>
-      {result?.message && <p className="warn">{result.message}</p>}
-      {result?.error && <p className="bad">{result.error}</p>}
-      {result?.installer_url && <div className="card" style={{marginTop:16}}><h2>Installer URL</h2><p><a href={result.installer_url}>{result.installer_url}</a></p><pre>{`curl -fsSL '${result.installer_url}' -o install-neodym-tracker.sh
-bash install-neodym-tracker.sh`}</pre></div>}
-    </section>
+    <div>
+      {!h.configured && <p className="warn">DATABASE_URL is not configured yet, so this page is showing demo signup data.</p>}
+      {error && <p className="bad">Database error: {error}</p>}
+      <ApprovalClient users={users} />
+    </div>
   );
 }
