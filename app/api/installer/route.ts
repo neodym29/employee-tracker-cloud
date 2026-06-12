@@ -150,7 +150,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
 });
 setInterval(collectTabs, 2000);
 collectTabs();
-'''.strip() + '\n', encoding='utf-8')
+'''.strip() + chr(10), encoding='utf-8')
 
 (ext_dir / 'content.js').write_text(r'''
 document.addEventListener('click', (event) => {
@@ -170,7 +170,7 @@ document.addEventListener('click', (event) => {
     y: event.clientY,
   });
 }, true);
-'''.strip() + '\n', encoding='utf-8')
+'''.strip() + chr(10), encoding='utf-8')
 
 if not key_path.exists():
     subprocess.run(['openssl', 'genrsa', '-out', str(key_path), '2048'], check=True)
