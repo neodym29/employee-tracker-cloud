@@ -351,13 +351,27 @@ def _tab_focus_title(tab: BrowserTabInfo | None) -> str | None:
 
 def _browser_name(value: Any) -> str:
     text = str(value or '').lower()
-    if 'chrome' in text and 'brave' not in text:
+    if 'brave' in text:
+        return 'Brave'
+    if 'edge' in text or 'edg/' in text or 'microsoft-edge' in text:
+        return 'Microsoft Edge'
+    if 'opera' in text or 'opr/' in text:
+        return 'Opera'
+    if 'chromium' in text:
+        return 'Chromium'
+    if 'chrome' in text:
         return 'Google Chrome'
-    return 'Brave'
+    return 'Google Chrome'
 
 
 def _app_key(browser: str) -> str:
-    return 'chrome' if browser == 'Google Chrome' else 'brave'
+    return {
+        'Google Chrome': 'chrome',
+        'Chromium': 'chromium',
+        'Brave': 'brave',
+        'Microsoft Edge': 'edge',
+        'Opera': 'opera',
+    }.get(browser, 'chrome')
 
 
 def _clean_text(value: Any, limit: int) -> str | None:
