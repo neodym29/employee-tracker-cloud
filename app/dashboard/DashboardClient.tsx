@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 const typeLabels: Record<string, string> = {
   activity_snapshot: 'Active window',
@@ -55,7 +56,9 @@ function rowUser(row: any): string {
 function audioDescription(event: any): string {
   const payload = event.payload || {};
   const app = payload.application_name || event.app_name || payload.process_binary || 'Unknown app';
-  const track = payload.mpris_title || payload.media_title || payload.media_name || event.window_title || 'unknown audio';
+  const contentTitle = payload.content_title || payload.mpris_title || payload.media_title;
+  const contentUrl = payload.content_url;
+  const track = contentTitle || payload.media_name || event.window_title || 'unknown audio';
   const artist = payload.mpris_artist || payload.media_artist;
   const status = payload.mpris_status || payload.state_hint;
   const source = payload.source;
@@ -67,7 +70,9 @@ function audioDescription(event: any): string {
   }
 
   return [
-    `Playing in ${app}: ${artist ? `${artist} — ${track}` : track}`,
+    `Playing: ${artist ? `${artist} — ${track}` : track}`,
+    contentUrl,
+    `app=${app}`,
     status,
     payload.process_binary && `process=${payload.process_binary}`,
     volume,
@@ -118,6 +123,7 @@ function EventsTable({ events }: { events: any[] }) {
 }
 
 export default function DashboardClient({ data, configured, error }: { data: DashboardData; configured: boolean; error: string }) {
+  const router = useRouter();
   const allUsers = useMemo(() => Array.from(new Set(data.events.map(rowUser).filter(Boolean))).sort(), [data.events]);
   const eventTypes = useMemo(() => Array.from(new Set(data.events.map((event) => event.event_type).filter(Boolean))).sort(), [data.events]);
   const now = useMemo(() => new Date(), []);
@@ -125,6 +131,15 @@ export default function DashboardClient({ data, configured, error }: { data: Das
   const [eventType, setEventType] = useState('all');
   const [startTime, setStartTime] = useState(() => toDateTimeLocalValue(new Date(now.getTime() - 60 * 60 * 1000)));
   const [endTime, setEndTime] = useState(() => toDateTimeLocalValue(now));
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setEndTime(toDateTimeLocalValue(new Date()));
+      router.refresh();
+    }, 5_000);
+    return () => window.clearInterval(interval);
+  }, [router]);
+
   const visibleEvents = useMemo(
     () => filteredEvents(data.events, user, eventType, startTime, endTime),
     [data.events, user, eventType, startTime, endTime],

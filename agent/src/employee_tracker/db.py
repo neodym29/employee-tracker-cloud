@@ -239,6 +239,13 @@ CREATE TABLE IF NOT EXISTS audio_output_snapshots (
     mute TEXT,
     volume TEXT,
     state_hint TEXT,
+    mpris_player TEXT,
+    mpris_title TEXT,
+    mpris_artist TEXT,
+    mpris_album TEXT,
+    mpris_status TEXT,
+    content_title TEXT,
+    content_url TEXT,
     source TEXT
 );
 
@@ -299,16 +306,47 @@ CREATE INDEX IF NOT EXISTS idx_keystroke_events_user_time
 """
 
 
+AUDIO_OUTPUT_SCHEMA_ALTERS = {
+    'mpris_player': 'ALTER TABLE audio_output_snapshots ADD COLUMN mpris_player TEXT',
+    'mpris_title': 'ALTER TABLE audio_output_snapshots ADD COLUMN mpris_title TEXT',
+    'mpris_artist': 'ALTER TABLE audio_output_snapshots ADD COLUMN mpris_artist TEXT',
+    'mpris_album': 'ALTER TABLE audio_output_snapshots ADD COLUMN mpris_album TEXT',
+    'mpris_status': 'ALTER TABLE audio_output_snapshots ADD COLUMN mpris_status TEXT',
+    'content_title': 'ALTER TABLE audio_output_snapshots ADD COLUMN content_title TEXT',
+    'content_url': 'ALTER TABLE audio_output_snapshots ADD COLUMN content_url TEXT',
+}
+
+
+AUDIO_OUTPUT_SCHEMA_COLUMNS = tuple(AUDIO_OUTPUT_SCHEMA_ALTERS)
+
+
 def connect(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(db_path)
+    connection = sqlite3.connect(db_path, timeout=30)
     connection.row_factory = sqlite3.Row
+    connection.executescript(
+        """
+        PRAGMA journal_mode=WAL;
+        PRAGMA synchronous=NORMAL;
+        PRAGMA busy_timeout=30000;
+        PRAGMA temp_store=MEMORY;
+        """
+    )
     return connection
 
 
 def init_db(db_path: Path) -> None:
     with connect(db_path) as connection:
         connection.executescript(SCHEMA)
+        _migrate_audio_output_schema(connection)
+
+
+def _migrate_audio_output_schema(connection: sqlite3.Connection) -> None:
+    existing = {row['name'] for row in connection.execute('PRAGMA table_info(audio_output_snapshots)').fetchall()}
+    for column, statement in AUDIO_OUTPUT_SCHEMA_ALTERS.items():
+        if column not in existing:
+            connection.execute(statement)
+    connection.commit()
 
 
 def insert_activity(connection: sqlite3.Connection, row: dict[str, Any]) -> None:
@@ -563,14 +601,18 @@ def insert_audio_output_snapshot(connection: sqlite3.Connection, row: dict[str, 
         INSERT INTO audio_output_snapshots (
             captured_at, username, host, sink_input_id, application_name,
             process_id, process_binary, media_name, node_name, corked, mute,
-            volume, state_hint, source
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            volume, state_hint, mpris_player, mpris_title, mpris_artist,
+            mpris_album, mpris_status, content_title, content_url, source
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             row['captured_at'], row['username'], row['host'], row.get('sink_input_id'),
             row.get('application_name'), row.get('process_id'), row.get('process_binary'),
             row.get('media_name'), row.get('node_name'), row.get('corked'), row.get('mute'),
-            row.get('volume'), row.get('state_hint'), row.get('source'),
+            row.get('volume'), row.get('state_hint'), row.get('mpris_player'),
+            row.get('mpris_title'), row.get('mpris_artist'), row.get('mpris_album'),
+            row.get('mpris_status'), row.get('content_title'), row.get('content_url'),
+            row.get('source'),
         ),
     )
     connection.commit()

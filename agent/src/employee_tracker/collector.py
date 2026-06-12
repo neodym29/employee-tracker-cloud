@@ -52,10 +52,10 @@ class ActivityCollector:
         workspace_dir: Path,
         username: str,
         file_roots: tuple[Path, ...] | None = None,
-        poll_interval_seconds: int = 5,
+        poll_interval_seconds: int = 1,
         screenshot_interval_seconds: int = 60,
-        file_scan_interval_seconds: int = 5,
-        process_scan_interval_seconds: int = 5,
+        file_scan_interval_seconds: int = 30,
+        process_scan_interval_seconds: int = 30,
         enable_screenshots: bool = True,
     ) -> None:
         self.db_path = db_path
@@ -667,6 +667,30 @@ class ActivityCollector:
                 },
             )
 
+    def _enrich_audio_output(self, row: dict[str, object]) -> dict[str, object]:
+        if row.get('content_title') or row.get('mpris_title'):
+            return row
+        app = str(row.get('application_name') or row.get('process_binary') or '').lower()
+        browser_keys = {
+            'brave': ('brave', 'brave-browser', 'brave-browser-stable'),
+            'chrome': ('chrome', 'google chrome', 'google-chrome', 'google-chrome-stable'),
+            'chromium': ('chromium', 'chromium-browser'),
+            'firefox': ('firefox', 'librewolf'),
+            'edge': ('edge', 'microsoft edge'),
+        }
+        wanted_keys = [key for key, aliases in browser_keys.items() if any(alias in app for alias in aliases)]
+        if not wanted_keys:
+            return row
+        tabs = [tab for tab in self._browser_bridge.current_tabs(max_age_seconds=30) if tab.app_key in wanted_keys]
+        audible_tab = next((tab for tab in tabs if tab.audible and tab.title), None)
+        active_audible_tab = next((tab for tab in tabs if tab.audible and tab.active and tab.title), None)
+        active_tab = next((tab for tab in tabs if tab.active and tab.title), None)
+        tab = active_audible_tab or audible_tab or active_tab
+        if tab is not None:
+            row['content_title'] = tab.title
+            row['content_url'] = tab.url
+        return row
+
     def _record_audio_outputs(self, connection, captured_at: str, host: str) -> list[dict[str, object]]:
         rows: list[dict[str, object]] = []
         for audio in list_audio_outputs():
@@ -691,6 +715,7 @@ class ActivityCollector:
                     'mpris_status': audio.mpris_status,
                     'source': audio.source,
                 }
+            row = self._enrich_audio_output(row)
             rows.append(row)
             insert_audio_output_snapshot(
                 connection,
