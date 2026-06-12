@@ -380,16 +380,29 @@ function Refresh-Path {
   $env:Path = $machinePath + ';' + $userPath
 }
 function Test-PythonLauncher {
-  & py -3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" *> $null
-  return $LASTEXITCODE -eq 0
+  try {
+    $cmd = Get-Command py -ErrorAction SilentlyContinue
+    if (!$cmd) { return $false }
+    & $cmd.Source -3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" *> $null
+    return $LASTEXITCODE -eq 0
+  } catch {
+    return $false
+  }
 }
 function Test-PythonExe {
-  & python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" *> $null
-  return $LASTEXITCODE -eq 0
+  try {
+    $cmd = Get-Command python -ErrorAction SilentlyContinue
+    if (!$cmd) { return $false }
+    if ($cmd.Source -like '*\\WindowsApps\\python.exe' -or $cmd.Source -like '*\\WindowsApps\\python3.exe') { return $false }
+    & $cmd.Source -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" *> $null
+    return $LASTEXITCODE -eq 0
+  } catch {
+    return $false
+  }
 }
 function Ensure-Python {
-  if ((Get-Command py -ErrorAction SilentlyContinue) -and (Test-PythonLauncher)) { return 'py' }
-  if ((Get-Command python -ErrorAction SilentlyContinue) -and (Test-PythonExe)) { return 'python' }
+  if (Test-PythonLauncher) { return 'py' }
+  if (Test-PythonExe) { return 'python' }
   if (Get-Command winget -ErrorAction SilentlyContinue) {
     Write-Host 'Python was not found. Installing Python 3 with winget...'
     & winget install --exact --id Python.Python.3.12 --scope user --accept-package-agreements --accept-source-agreements
