@@ -271,9 +271,56 @@ EMPLOYEE_TRACKER_PROCESS_SCAN_SECONDS=30
 EMPLOYEE_TRACKER_POLL_SECONDS=1
 EMPLOYEE_TRACKER_CLOUD_UPLOAD_SECONDS=1
 EMPLOYEE_TRACKER_ENABLE_SCREENSHOTS=1
+EMPLOYEE_TRACKER_TERMINAL_LOG=$HOME/.local/share/neodym-employee-tracker/terminal-commands.tsv
 ENV
 # systemd EnvironmentFile does not expand %h inside values, so write HOME-expanded copies too.
 sed -i "s|%h|$HOME|g" "$ENV_FILE"
+TERMINAL_HOOK="$APP_DIR/neodym-terminal-hook.sh"
+cat > "$TERMINAL_HOOK" <<'HOOK'
+# Neodym terminal command telemetry: records executed shell commands after Enter, not raw keystrokes.
+__neodym_tracker_log_command() {
+  local exit_code="$?"
+  local entry hist_no cmd
+  entry=$(history 1 2>/dev/null) || return "$exit_code"
+  hist_no=$(printf '%s' "$entry" | awk '{print $1}')
+  [ -n "$hist_no" ] && [ "$hist_no" = "$__NEODYM_LAST_HISTNO" ] && return "$exit_code"
+  __NEODYM_LAST_HISTNO="$hist_no"
+  cmd=$(printf '%s' "$entry" | sed 's/^ *[0-9]\+ *//')
+  [ -n "$cmd" ] || return "$exit_code"
+  local log="$HOME/.local/share/neodym-employee-tracker/terminal-commands.tsv"
+  mkdir -p "$(dirname "$log")" 2>/dev/null || return "$exit_code"
+  printf '%s\tbash\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PWD" "$exit_code" "$(printf '%s' "$cmd" | base64 -w0)" >> "$log" 2>/dev/null || true
+  return "$exit_code"
+}
+if [ -n "$BASH_VERSION" ] && [[ ";$PROMPT_COMMAND;" != *"__neodym_tracker_log_command"* ]]; then
+  PROMPT_COMMAND="__neodym_tracker_log_command; $PROMPT_COMMAND"
+fi
+if [ -n "$ZSH_VERSION" ]; then
+  __neodym_tracker_log_zsh_command() {
+    local exit_code="$?"
+    local cmd
+    cmd=$(fc -ln -1 2>/dev/null) || return "$exit_code"
+    [ -n "$cmd" ] || return "$exit_code"
+    local log="$HOME/.local/share/neodym-employee-tracker/terminal-commands.tsv"
+    mkdir -p "$(dirname "$log")" 2>/dev/null || return "$exit_code"
+    printf '%s\tzsh\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PWD" "$exit_code" "$(printf '%s' "$cmd" | base64 | tr -d '\n')" >> "$log" 2>/dev/null || true
+    return "$exit_code"
+  }
+  if [[ " $precmd_functions " != *" __neodym_tracker_log_zsh_command "* ]]; then
+    precmd_functions+=(__neodym_tracker_log_zsh_command)
+  fi
+fi
+HOOK
+for profile in "$HOME/.bashrc" "$HOME/.zshrc"; do
+  touch "$profile"
+  if ! grep -q 'neodym-terminal-hook.sh' "$profile" 2>/dev/null; then
+    printf '\n# Neodym terminal command telemetry\n[ -f "%s" ] && . "%s"\n' "$TERMINAL_HOOK" "$TERMINAL_HOOK" >> "$profile"
+  fi
+done
+set -a
+. "$ENV_FILE"
+set +a
+"$VENV_DIR/bin/employee-tracker" smoke-upload
 cat > "$SERVICE_FILE" <<SERVICE
 [Unit]
 Description=Neodym employee activity tracker
@@ -444,6 +491,7 @@ EMPLOYEE_TRACKER_PROCESS_SCAN_SECONDS=30
 EMPLOYEE_TRACKER_POLL_SECONDS=1
 EMPLOYEE_TRACKER_CLOUD_UPLOAD_SECONDS=1
 EMPLOYEE_TRACKER_ENABLE_SCREENSHOTS=1
+EMPLOYEE_TRACKER_TERMINAL_LOG=%LOCALAPPDATA%\\NeodymEmployeeTracker\\terminal-commands.tsv
 '@ | Set-Content -Encoding UTF8 $EnvFile
 $Exe = Join-Path $VenvDir 'Scripts\\employee-tracker.exe'
 $LogFile = Join-Path $AppDir 'tracker.log'
@@ -463,6 +511,13 @@ Get-Content $EnvFile | ForEach-Object {
 & $Exe run >> $LogFile 2>> $ErrFile
 '@
 $RunnerTemplate.Replace('__ENV_FILE__', $EnvFile).Replace('__EXE__', $Exe).Replace('__LOG_FILE__', $LogFile).Replace('__ERR_FILE__', $ErrFile) | Set-Content -Encoding UTF8 $Runner
+Get-Content $EnvFile | ForEach-Object {
+  if ($_ -match '^([^=]+)=(.*)$') {
+    [Environment]::SetEnvironmentVariable($Matches[1], [Environment]::ExpandEnvironmentVariables($Matches[2]), 'Process')
+  }
+}
+& $Exe smoke-upload
+if ($LASTEXITCODE -ne 0) { throw 'Tracker installed, but the cloud smoke upload failed. Check network access and send tracker.err.log/tracker.log to admin.' }
 $TaskAction = 'powershell -NoProfile -ExecutionPolicy Bypass -File "' + $Runner + '"'
 schtasks.exe /Create /TN 'Neodym Employee Tracker' /TR $TaskAction /SC ONLOGON /RL LIMITED /F | Out-Null
 schtasks.exe /Run /TN 'Neodym Employee Tracker' | Out-Null

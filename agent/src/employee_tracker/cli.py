@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+from datetime import datetime, timezone
 from pathlib import Path
 import sys
 
 from .collector import ActivityCollector
+from .cloud import CloudUploader, load_cloud_settings
 from .config import load_settings
 from .db import (
     fetch_activity_rows,
@@ -24,6 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser('init-db', help='Create the SQLite schema')
     subparsers.add_parser('run', help='Run the background collector')
+    subparsers.add_parser('smoke-upload', help='Send one cloud enrollment smoke-test event and exit')
 
     export_parser = subparsers.add_parser('export-csv', help='Export activity logs from SQLite to CSV')
     export_parser.add_argument('--output', type=Path, required=True, help='Destination CSV file path')
@@ -246,6 +249,29 @@ def export_csv(db_path: Path, output: Path, dataset: str = 'all', username: str 
     return len(rows)
 
 
+def smoke_upload(username: str) -> int:
+    uploader = CloudUploader(load_cloud_settings())
+    if not uploader.enabled:
+        print('Cloud upload is not configured: missing EMPLOYEE_TRACKER_CLOUD_API, EMPLOYEE_TRACKER_ENROLLMENT_TOKEN, or EMPLOYEE_TRACKER_EMPLOYEE_EMAIL', file=sys.stderr)
+        return 2
+    ok = uploader.upload_activity(
+        {
+            'captured_at': datetime.now(timezone.utc).isoformat(),
+            'username': username,
+            'event_type': 'installer_smoke_test',
+            'app_name': 'Neodym Employee Tracker',
+            'window_title': 'installer smoke test',
+            'idle_seconds': 0,
+            'rich_events': [],
+        }
+    )
+    if not ok:
+        print('Cloud smoke upload failed; check network, enrollment token, and ingest API settings', file=sys.stderr)
+        return 1
+    print('Cloud smoke upload sent')
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     settings = load_settings()
@@ -254,6 +280,9 @@ def main(argv: list[str] | None = None) -> int:
         init_db(settings.db_path)
         print(f'Initialized database at {settings.db_path}')
         return 0
+
+    if args.command == 'smoke-upload':
+        return smoke_upload(settings.username)
 
     if args.command == 'run':
         init_db(settings.db_path)

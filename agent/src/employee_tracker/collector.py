@@ -27,6 +27,7 @@ from .db import (
     upsert_file_state,
 )
 from .screenshots import capture_screenshot
+from .terminal_commands import TerminalCommandReader
 from .system import (
     XInputClickReader,
     current_window_info,
@@ -78,6 +79,7 @@ class ActivityCollector:
         self._process_state: dict[int, object] = {}
         self._last_window = None
         self._click_reader = XInputClickReader()
+        self._terminal_command_reader = TerminalCommandReader()
         self._browser_bridge = BrowserBridge()
         self._browser_bridge.start()
         self._cloud_uploader = CloudUploader(load_cloud_settings())
@@ -603,6 +605,24 @@ class ActivityCollector:
         target = window.title or window.app_name or window.window_id or 'unknown window'
         return f'{button_name} click on {target}; ' + ', '.join(coords)
 
+    def _record_terminal_command_events(self) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
+        for command in self._terminal_command_reader.read_commands():
+            rows.append(
+                {
+                    'captured_at': command.captured_at,
+                    'event_type': 'terminal_command',
+                    'app_name': command.shell,
+                    'window_title': command.command,
+                    'terminal_shell': command.shell,
+                    'terminal_cwd': command.cwd,
+                    'terminal_exit_code': command.exit_code,
+                    'terminal_command': command.command,
+                    'source': command.source,
+                }
+            )
+        return rows
+
     def _record_peripheral_snapshots(self, connection, captured_at: str, host: str) -> None:
         for device in list_peripherals():
             insert_peripheral_snapshot(
@@ -767,6 +787,7 @@ class ActivityCollector:
                     )
                 self._record_window_focus_event(connection, captured_at, host, window)
                 click_events = self._record_click_events(connection, captured_at, host, window, windows)
+                terminal_command_events = self._record_terminal_command_events()
                 audio_outputs = self._record_audio_outputs(connection, captured_at, host)
                 screenshot_path = None
                 if self.enable_screenshots and (now - self._last_screenshot_at) >= self.screenshot_interval_seconds:
@@ -779,6 +800,7 @@ class ActivityCollector:
                     + [{**row, 'event_type': 'browser_tab' if row.get('subwindow_type') == 'tab' else 'app_subwindow'} for row in open_state.get('subwindows', [])]
                     + [{**row, 'event_type': 'window_focus'} for row in focus_events]
                     + [{**row, 'event_type': 'input_click'} for row in click_events]
+                    + terminal_command_events
                     + [{**row, 'event_type': 'audio_output'} for row in audio_outputs]
                 )
 
@@ -801,6 +823,7 @@ class ActivityCollector:
                         'subwindows': open_state.get('subwindows', [])[:120],
                         'focus_events': focus_events[:80],
                         'click_events': click_events[:120],
+                        'terminal_commands': terminal_command_events[:120],
                         'audio_outputs': audio_outputs[:80],
                     },
                     'rich_events': rich_events[:250],

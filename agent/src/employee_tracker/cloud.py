@@ -54,18 +54,18 @@ class CloudUploader:
     def enabled(self) -> bool:
         return self.settings is not None
 
-    def maybe_upload_activity(self, payload: dict[str, Any]) -> None:
+    def maybe_upload_activity(self, payload: dict[str, Any]) -> bool:
         if self.settings is None:
-            return
+            return False
         now = time.time()
         if (now - self._last_upload_at) < self.settings.upload_interval_seconds:
-            return
+            return False
         self._last_upload_at = now
-        self.upload_activity(payload)
+        return self.upload_activity(payload)
 
-    def upload_activity(self, payload: dict[str, Any]) -> None:
+    def upload_activity(self, payload: dict[str, Any]) -> bool:
         if self.settings is None:
-            return
+            return False
         body = dict(payload)
         body.setdefault('employee_email', self.settings.employee_email)
         body.setdefault('company_domain', self.settings.company_domain)
@@ -88,9 +88,11 @@ class CloudUploader:
         try:
             with request.urlopen(req, timeout=10) as response:
                 response.read(4096)
+                return 200 <= getattr(response, 'status', 200) < 300
         except (OSError, error.HTTPError, error.URLError) as exc:
             now = time.time()
             # Avoid log spam on employee machines.
             if now - self._last_error_at > 60:
                 print(f'employee-tracker cloud upload failed: {exc}', flush=True)
                 self._last_error_at = now
+            return False
