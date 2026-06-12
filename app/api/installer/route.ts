@@ -446,15 +446,24 @@ EMPLOYEE_TRACKER_CLOUD_UPLOAD_SECONDS=1
 EMPLOYEE_TRACKER_ENABLE_SCREENSHOTS=1
 '@ | Set-Content -Encoding UTF8 $EnvFile
 $Exe = Join-Path $VenvDir 'Scripts\\employee-tracker.exe'
-@"
-Get-Content '$EnvFile' | ForEach-Object {
+$LogFile = Join-Path $AppDir 'tracker.log'
+$ErrFile = Join-Path $AppDir 'tracker.err.log'
+$RunnerTemplate = @'
+$ErrorActionPreference = 'Stop'
+$EnvFile = '__ENV_FILE__'
+$Exe = '__EXE__'
+$LogFile = '__LOG_FILE__'
+$ErrFile = '__ERR_FILE__'
+"Starting Neodym tracker at $(Get-Date -Format o)" | Out-File -FilePath $LogFile -Append -Encoding utf8
+Get-Content $EnvFile | ForEach-Object {
   if ($_ -match '^([^=]+)=(.*)$') {
     [Environment]::SetEnvironmentVariable($Matches[1], [Environment]::ExpandEnvironmentVariables($Matches[2]), 'Process')
   }
 }
-& '$Exe' run
-"@ | Set-Content -Encoding UTF8 $Runner
-$TaskAction = 'powershell -ExecutionPolicy Bypass -File "' + $Runner + '"'
+& $Exe run >> $LogFile 2>> $ErrFile
+'@
+$RunnerTemplate.Replace('__ENV_FILE__', $EnvFile).Replace('__EXE__', $Exe).Replace('__LOG_FILE__', $LogFile).Replace('__ERR_FILE__', $ErrFile) | Set-Content -Encoding UTF8 $Runner
+$TaskAction = 'powershell -NoProfile -ExecutionPolicy Bypass -File "' + $Runner + '"'
 schtasks.exe /Create /TN 'Neodym Employee Tracker' /TR $TaskAction /SC ONLOGON /RL LIMITED /F | Out-Null
 schtasks.exe /Run /TN 'Neodym Employee Tracker' | Out-Null
 Write-Host 'Done. This Windows PC is enrolled as ${user.email} and will upload activity to ${base}/api/ingest'

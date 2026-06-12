@@ -19,6 +19,10 @@ class CloudSettings:
     upload_interval_seconds: int
 
 
+def _os_user() -> str:
+    return os.environ.get('USER') or os.environ.get('USERNAME') or 'unknown'
+
+
 def load_cloud_settings() -> CloudSettings | None:
     api_url = os.environ.get('EMPLOYEE_TRACKER_CLOUD_API', '').strip()
     token = os.environ.get('EMPLOYEE_TRACKER_ENROLLMENT_TOKEN') or os.environ.get('EMPLOYEE_TRACKER_INGEST_KEY', '')
@@ -27,7 +31,7 @@ def load_cloud_settings() -> CloudSettings | None:
     if not api_url or not token or not employee_email:
         return None
     host = socket.gethostname()
-    os_user = os.environ.get('USER', 'unknown')
+    os_user = _os_user()
     device_key = os.environ.get('EMPLOYEE_TRACKER_DEVICE_KEY', f'{employee_email}:{host}:{os_user}').strip()
     upload_interval = int(os.environ.get('EMPLOYEE_TRACKER_CLOUD_UPLOAD_SECONDS', '1'))
     return CloudSettings(
@@ -67,7 +71,7 @@ class CloudUploader:
         body.setdefault('company_domain', self.settings.company_domain)
         body.setdefault('device_key', self.settings.device_key)
         body.setdefault('hostname', socket.gethostname())
-        body.setdefault('os_user', os.environ.get('USER', 'unknown'))
+        body.setdefault('os_user', _os_user())
         body.setdefault('event_type', 'activity_snapshot')
         data = json.dumps(body, default=str).encode('utf-8')
         req = request.Request(

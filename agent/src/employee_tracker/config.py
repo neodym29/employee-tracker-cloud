@@ -8,7 +8,12 @@ import os
 def _parse_path_list(value: str | None) -> tuple[Path, ...]:
     if not value:
         return ()
-    separators = ':' if ':' in value else ','
+    if ';' in value:
+        separators = ';'
+    elif os.name != 'nt' and ':' in value:
+        separators = ':'
+    else:
+        separators = ','
     roots = []
     seen = set()
     for part in value.split(separators):
@@ -40,7 +45,7 @@ class Settings:
 
 
 def load_settings() -> Settings:
-    home = Path(os.environ.get('HOME', '.')).expanduser()
+    home = Path(os.environ.get('HOME') or os.environ.get('USERPROFILE') or '.').expanduser()
     default_workspace = home / 'Desktop'
     base_dir = Path(os.environ.get('EMPLOYEE_TRACKER_DIR', home / '.local' / 'share' / 'employee-tracker'))
     db_path = Path(os.environ.get('EMPLOYEE_TRACKER_DB', base_dir / 'activity.sqlite3'))
