@@ -25,7 +25,7 @@ type ApprovalResult = {
 };
 
 function installerCommand(url: string, platform: InstallerPlatform | undefined) {
-  if (platform === 'windows') return `Invoke-WebRequest '${url}' -OutFile install-neodym-tracker.ps1\npowershell -ExecutionPolicy Bypass -File .\\install-neodym-tracker.ps1`;
+  if (platform === 'windows') return `Download the .cmd file, then double-click it. If Windows SmartScreen appears, choose More info → Run anyway.`;
   return `curl -fsSL '${url}' -o install-neodym-tracker.sh\nbash install-neodym-tracker.sh`;
 }
 

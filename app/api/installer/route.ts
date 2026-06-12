@@ -17,6 +17,7 @@ export async function GET(req: NextRequest) {
   const archive = `${repo.replace(/\.git$/, '')}/archive/refs/heads/main.tar.gz`;
   const platformParam = req.nextUrl.searchParams.get('platform') || 'linux';
   const platform = platformParam === 'windows' || platformParam === 'macos' || platformParam === 'linux' ? platformParam : 'linux';
+  const installerUrl = `${base}/api/installer?token=${encodeURIComponent(token)}&platform=${platform}`;
   const script = `#!/usr/bin/env bash
 set -euo pipefail
 
@@ -409,9 +410,30 @@ schtasks.exe /Create /TN 'Neodym Employee Tracker' /TR $TaskAction /SC ONLOGON /
 schtasks.exe /Run /TN 'Neodym Employee Tracker' | Out-Null
 Write-Host 'Done. This Windows PC is enrolled as ${user.email} and will upload activity to ${base}/api/ingest'
 `;
-  const selectedScript = platform === 'windows' ? windowsScript : platform === 'macos' ? macosScript : platform === 'linux' ? script : script;
-  const extension = platform === 'windows' ? 'ps1' : 'sh';
-  const contentType = platform === 'windows' ? 'application/x-powershell; charset=utf-8' : 'text/x-shellscript; charset=utf-8';
+  const windowsCmd = `@echo off
+setlocal
+echo Installing Neodym employee tracker for ${user.email} on Windows
+set "INSTALLER_PS1=%TEMP%\\neodym-tracker-installer-%RANDOM%.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '${installerUrl}&format=ps1' -OutFile '%INSTALLER_PS1%'"
+if errorlevel 1 (
+  echo Failed to download the installer.
+  pause
+  exit /b 1
+)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%INSTALLER_PS1%"
+set "EXITCODE=%ERRORLEVEL%"
+del "%INSTALLER_PS1%" >nul 2>nul
+if not "%EXITCODE%"=="0" (
+  echo Installer failed with exit code %EXITCODE%.
+  pause
+  exit /b %EXITCODE%
+)
+echo Done. This Windows PC is enrolled as ${user.email}.
+pause
+`;
+  const selectedScript = platform === 'windows' ? (req.nextUrl.searchParams.get('format') === 'ps1' ? windowsScript : windowsCmd) : platform === 'macos' ? macosScript : platform === 'linux' ? script : script;
+  const extension = platform === 'windows' ? (req.nextUrl.searchParams.get('format') === 'ps1' ? 'ps1' : 'cmd') : 'sh';
+  const contentType = platform === 'windows' && req.nextUrl.searchParams.get('format') !== 'ps1' ? 'application/x-msdownload; charset=utf-8' : platform === 'windows' ? 'application/x-powershell; charset=utf-8' : 'text/x-shellscript; charset=utf-8';
   return new NextResponse(selectedScript, {
     status: 200,
     headers: {

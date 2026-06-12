@@ -2,7 +2,7 @@ import { requireEmployeeOrAdminSession } from '@/lib/auth';
 import { approvedEmployeeInstallerToken } from '@/lib/db';
 
 function commandFor(url: string, platform: 'linux' | 'macos' | 'windows') {
-  if (platform === 'windows') return `Invoke-WebRequest '${url}' -OutFile install-neodym-tracker.ps1\npowershell -ExecutionPolicy Bypass -File .\\install-neodym-tracker.ps1`;
+  if (platform === 'windows') return `Download the .cmd file, then double-click it. If Windows SmartScreen appears, choose More info → Run anyway.`;
   return `curl -fsSL '${url}' -o install-neodym-tracker.sh\nbash install-neodym-tracker.sh`;
 }
 
@@ -13,7 +13,7 @@ export default async function Employee() {
     : undefined;
   const base = process.env.NEXT_PUBLIC_APP_URL || '';
   const platforms = [
-    { key: 'windows', label: 'Windows', ext: 'ps1' },
+    { key: 'windows', label: 'Windows', ext: 'cmd' },
     { key: 'macos', label: 'macOS', ext: 'sh' },
     { key: 'linux', label: 'Linux', ext: 'sh' },
   ] as const;
