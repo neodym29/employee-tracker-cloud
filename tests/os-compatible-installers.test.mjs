@@ -17,7 +17,9 @@ assert.match(approve, /platform = normalizeInstallerPlatform/, 'approval API sho
 assert.match(approve, /installer\?token=\$\{result\.enrollment_token\}&platform=\$\{platform\}/, 'approval API should include selected platform in installer URL');
 assert.match(installer, /application\/x-msdownload/, 'Windows installer should download as a double-clickable command file');
 assert.match(installer, /extension = platform === 'windows' \? \(req\.nextUrl\.searchParams\.get\('format'\) === 'ps1' \? 'ps1' : 'cmd'\) : 'sh'/, 'Windows installer should download as .cmd by default');
-assert.match(installer, /format=ps1/, 'Windows .cmd wrapper should fetch the PowerShell payload internally');
+assert.doesNotMatch(installer, /\?\./, 'Windows PowerShell installer should avoid PowerShell 7-only optional chaining');
+assert.match(installer, /\$PyLauncher = Get-Command py -ErrorAction SilentlyContinue/, 'Windows installer should support legacy Windows PowerShell while detecting py launcher');
+assert.match(installer, /Python is required/, 'Windows installer should give a clear Python missing error');
 assert.match(installer, /com\.neodym\.employee-tracker\.plist/, 'macOS installer should create a LaunchAgent plist');
 assert.match(installer, /schtasks\.exe/, 'Windows installer should register a scheduled task');
 assert.match(system, /try:\n\s+import pwd/, 'agent should not hard-crash on Windows when pwd is unavailable');

@@ -374,8 +374,15 @@ New-Item -ItemType Directory -Force -Path $SrcDir | Out-Null
 $Archive = Join-Path $env:TEMP 'neodym-tracker.tar.gz'
 Invoke-WebRequest -Uri '${archive}' -OutFile $Archive
 & tar.exe -xzf $Archive --strip-components=1 -C $SrcDir
-$Python = (Get-Command py -ErrorAction SilentlyContinue)?.Source
-if ($Python) { & py -3 -m venv $VenvDir } else { & python -m venv $VenvDir }
+$PyLauncher = Get-Command py -ErrorAction SilentlyContinue
+$PythonExe = Get-Command python -ErrorAction SilentlyContinue
+if ($PyLauncher) {
+  & py -3 -m venv $VenvDir
+} elseif ($PythonExe) {
+  & python -m venv $VenvDir
+} else {
+  throw 'Python is required. Install Python 3 from https://www.python.org/downloads/windows/ and tick "Add python.exe to PATH", then run this installer again.'
+}
 $VenvPython = Join-Path $VenvDir 'Scripts\\python.exe'
 & $VenvPython -m pip install --upgrade pip
 & $VenvPython -m pip install (Join-Path $SrcDir 'agent')
