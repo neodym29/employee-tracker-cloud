@@ -69,7 +69,8 @@ class ActivityCollector:
         self.process_scan_interval_seconds = process_scan_interval_seconds
         self.enable_screenshots = enable_screenshots
         self._last_screenshot_at: float = 0.0
-        self._last_file_scan_at: float = 0.0
+        # Do not block first cloud connection on a potentially large home-directory scan.
+        self._last_file_scan_at: float = time.time()
         self._last_process_scan_at: float = 0.0
         self._workspace_root = str(self.workspace_dir)
         self._file_roots = tuple(str(root) for root in self.file_roots)
