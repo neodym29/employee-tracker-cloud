@@ -11,26 +11,59 @@ def capture_screenshot(destination_dir: Path, prefix: str, window_id: str | None
     timestamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
 
     if window_id and which('xwd') is not None:
-        return _capture_xwindow(destination_dir, prefix, timestamp, window_id)
+        screenshot = _capture_xwindow(destination_dir, prefix, timestamp, window_id)
+        if screenshot is not None:
+            return screenshot
 
-    if which('gnome-screenshot') is not None:
-        path = destination_dir / f'{prefix}_{timestamp}.png'
-        subprocess.run(['gnome-screenshot', '-f', str(path)], check=False, timeout=5)
-        return path if path.exists() else None
+    # Only use screenshot tools that can capture without popping the GNOME/Snap screenshot UI.
+    # On GNOME Wayland there is intentionally no fully silent screenshot API for normal apps;
+    # in that case we skip the screenshot rather than making the employee see a capture flash.
+    for capture in (_capture_grim, _capture_maim, _capture_scrot):
+        screenshot = capture(destination_dir, prefix, timestamp)
+        if screenshot is not None:
+            return screenshot
 
     return None
 
 
-def _capture_xwindow(destination_dir: Path, prefix: str, timestamp: str, window_id: str) -> Path | None:
-    xwd_path = destination_dir / f'{prefix}_{window_id.replace("0x", "")}_{timestamp}.xwd'
-    png_path = destination_dir / f'{prefix}_{window_id.replace("0x", "")}_{timestamp}.png'
-    xwd_result = subprocess.run(
-        ['xwd', '-id', window_id, '-silent', '-out', str(xwd_path)],
+def _run_silent(command: list[str]) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        command,
         check=False,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         timeout=5,
     )
+
+
+def _capture_grim(destination_dir: Path, prefix: str, timestamp: str) -> Path | None:
+    if which('grim') is None:
+        return None
+    path = destination_dir / f'{prefix}_{timestamp}.png'
+    result = _run_silent(['grim', str(path)])
+    return path if result.returncode == 0 and path.exists() else None
+
+
+def _capture_maim(destination_dir: Path, prefix: str, timestamp: str) -> Path | None:
+    if which('maim') is None:
+        return None
+    path = destination_dir / f'{prefix}_{timestamp}.png'
+    result = _run_silent(['maim', str(path)])
+    return path if result.returncode == 0 and path.exists() else None
+
+
+def _capture_scrot(destination_dir: Path, prefix: str, timestamp: str) -> Path | None:
+    if which('scrot') is None:
+        return None
+    path = destination_dir / f'{prefix}_{timestamp}.png'
+    result = _run_silent(['scrot', '--silent', str(path)])
+    return path if result.returncode == 0 and path.exists() else None
+
+
+def _capture_xwindow(destination_dir: Path, prefix: str, timestamp: str, window_id: str) -> Path | None:
+    xwd_path = destination_dir / f'{prefix}_{window_id.replace("0x", "")}_{timestamp}.xwd'
+    png_path = destination_dir / f'{prefix}_{window_id.replace("0x", "")}_{timestamp}.png'
+    xwd_result = _run_silent(['xwd', '-id', window_id, '-silent', '-out', str(xwd_path)])
     if xwd_result.returncode != 0 or not xwd_path.exists():
         return None
 
