@@ -47,7 +47,7 @@ def load_settings() -> Settings:
     screenshot_dir = Path(os.environ.get('EMPLOYEE_TRACKER_SCREENSHOT_DIR', base_dir / 'screenshots'))
     workspace_dir = Path(os.environ.get('EMPLOYEE_TRACKER_WORKSPACE', default_workspace)).expanduser()
     file_roots = _parse_path_list(os.environ.get('EMPLOYEE_TRACKER_FILE_ROOTS')) or (workspace_dir,)
-    poll_interval_seconds = int(os.environ.get('EMPLOYEE_TRACKER_POLL_SECONDS', '5'))
+    poll_interval_seconds = int(os.environ.get('EMPLOYEE_TRACKER_POLL_SECONDS', '1'))
     file_scan_interval_seconds = int(
         os.environ.get('EMPLOYEE_TRACKER_FILE_SCAN_SECONDS', str(poll_interval_seconds))
     )

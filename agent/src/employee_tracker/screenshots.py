@@ -15,7 +15,7 @@ def capture_screenshot(destination_dir: Path, prefix: str, window_id: str | None
 
     if which('gnome-screenshot') is not None:
         path = destination_dir / f'{prefix}_{timestamp}.png'
-        subprocess.run(['gnome-screenshot', '-f', str(path)], check=False)
+        subprocess.run(['gnome-screenshot', '-f', str(path)], check=False, timeout=5)
         return path if path.exists() else None
 
     return None
@@ -29,6 +29,7 @@ def _capture_xwindow(destination_dir: Path, prefix: str, timestamp: str, window_
         check=False,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        timeout=5,
     )
     if xwd_result.returncode != 0 or not xwd_path.exists():
         return None
@@ -39,6 +40,7 @@ def _capture_xwindow(destination_dir: Path, prefix: str, timestamp: str, window_
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            timeout=5,
         )
         try:
             xwd_path.unlink(missing_ok=True)

@@ -264,7 +264,9 @@ EMPLOYEE_TRACKER_DB=%h/.local/share/neodym-employee-tracker/data/activity.sqlite
 EMPLOYEE_TRACKER_SCREENSHOT_DIR=%h/.local/share/neodym-employee-tracker/data/screenshots
 EMPLOYEE_TRACKER_FILE_ROOTS=%h/Downloads:%h/Documents:%h/Desktop:%h/Pictures:%h/Music:%h/Videos
 EMPLOYEE_TRACKER_FILE_SCAN_SECONDS=30
-EMPLOYEE_TRACKER_CLOUD_UPLOAD_SECONDS=5
+EMPLOYEE_TRACKER_PROCESS_SCAN_SECONDS=30
+EMPLOYEE_TRACKER_POLL_SECONDS=1
+EMPLOYEE_TRACKER_CLOUD_UPLOAD_SECONDS=1
 EMPLOYEE_TRACKER_ENABLE_SCREENSHOTS=1
 ENV
 # systemd EnvironmentFile does not expand %h inside values, so write HOME-expanded copies too.

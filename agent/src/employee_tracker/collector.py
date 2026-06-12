@@ -781,5 +781,5 @@ class ActivityCollector:
                     'rich_events': rich_events[:250],
                 }
                 insert_activity(connection, activity_payload)
-                self._cloud_uploader.maybe_upload_activity(activity_payload)
+                self._cloud_uploader.upload_activity(activity_payload)
                 time.sleep(self.poll_interval_seconds)

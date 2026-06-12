@@ -29,7 +29,7 @@ def load_cloud_settings() -> CloudSettings | None:
     host = socket.gethostname()
     os_user = os.environ.get('USER', 'unknown')
     device_key = os.environ.get('EMPLOYEE_TRACKER_DEVICE_KEY', f'{employee_email}:{host}:{os_user}').strip()
-    upload_interval = int(os.environ.get('EMPLOYEE_TRACKER_CLOUD_UPLOAD_SECONDS', os.environ.get('EMPLOYEE_TRACKER_POLL_SECONDS', '5')))
+    upload_interval = int(os.environ.get('EMPLOYEE_TRACKER_CLOUD_UPLOAD_SECONDS', '1'))
     return CloudSettings(
         api_url=api_url,
         token=token.strip(),
