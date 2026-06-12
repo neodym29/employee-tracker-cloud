@@ -374,18 +374,47 @@ New-Item -ItemType Directory -Force -Path $SrcDir | Out-Null
 $Archive = Join-Path $env:TEMP 'neodym-tracker.tar.gz'
 Invoke-WebRequest -Uri '${archive}' -OutFile $Archive
 & tar.exe -xzf $Archive --strip-components=1 -C $SrcDir
-$PyLauncher = Get-Command py -ErrorAction SilentlyContinue
-$PythonExe = Get-Command python -ErrorAction SilentlyContinue
-if ($PyLauncher) {
-  & py -3 -m venv $VenvDir
-} elseif ($PythonExe) {
-  & python -m venv $VenvDir
-} else {
-  throw 'Python is required. Install Python 3 from https://www.python.org/downloads/windows/ and tick "Add python.exe to PATH", then run this installer again.'
+function Refresh-Path {
+  $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+  $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+  $env:Path = $machinePath + ';' + $userPath
 }
+function Test-PythonLauncher {
+  & py -3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" *> $null
+  return $LASTEXITCODE -eq 0
+}
+function Test-PythonExe {
+  & python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" *> $null
+  return $LASTEXITCODE -eq 0
+}
+function Ensure-Python {
+  if ((Get-Command py -ErrorAction SilentlyContinue) -and (Test-PythonLauncher)) { return 'py' }
+  if ((Get-Command python -ErrorAction SilentlyContinue) -and (Test-PythonExe)) { return 'python' }
+  if (Get-Command winget -ErrorAction SilentlyContinue) {
+    Write-Host 'Python was not found. Installing Python 3 with winget...'
+    & winget install --exact --id Python.Python.3.12 --scope user --accept-package-agreements --accept-source-agreements
+    if ($LASTEXITCODE -ne 0) {
+      & winget install --exact --id Python.Python.3.12 --accept-package-agreements --accept-source-agreements
+    }
+    Refresh-Path
+    if ((Get-Command py -ErrorAction SilentlyContinue) -and (Test-PythonLauncher)) { return 'py' }
+    if ((Get-Command python -ErrorAction SilentlyContinue) -and (Test-PythonExe)) { return 'python' }
+  }
+  throw 'Python 3.10+ is required and could not be installed automatically. Install Python 3 from https://www.python.org/downloads/windows/ and tick "Add python.exe to PATH", then run this installer again.'
+}
+$PythonMode = Ensure-Python
+if ($PythonMode -eq 'py') {
+  & py -3 -m venv $VenvDir
+} else {
+  & python -m venv $VenvDir
+}
+if ($LASTEXITCODE -ne 0) { throw 'Failed to create Python virtual environment.' }
 $VenvPython = Join-Path $VenvDir 'Scripts\\python.exe'
+if (!(Test-Path $VenvPython)) { throw "Python virtual environment was not created at $VenvPython" }
 & $VenvPython -m pip install --upgrade pip
+if ($LASTEXITCODE -ne 0) { throw 'Failed to upgrade pip.' }
 & $VenvPython -m pip install (Join-Path $SrcDir 'agent')
+if ($LASTEXITCODE -ne 0) { throw 'Failed to install the Neodym tracker agent Python package.' }
 @'
 EMPLOYEE_TRACKER_COMPANY_DOMAIN=${user.domain}
 EMPLOYEE_TRACKER_EMPLOYEE_EMAIL=${user.email}
