@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 type UserRow = {
   email: string;
@@ -22,18 +22,9 @@ type ApprovalResult = {
 };
 
 export default function ApprovalClient({ users }: { users: UserRow[] }) {
-  const [key, setKey] = useState('');
   const [rows, setRows] = useState(users);
   const [busyEmail, setBusyEmail] = useState('');
   const [result, setResult] = useState<ApprovalResult | null>(null);
-
-  useEffect(() => {
-    setKey(window.localStorage.getItem('neodym_admin_setup_key') || '');
-  }, []);
-
-  useEffect(() => {
-    if (key) window.localStorage.setItem('neodym_admin_setup_key', key);
-  }, [key]);
 
   const employees = useMemo(
     () => rows.filter((user) => user.role === 'employee'),
@@ -42,16 +33,12 @@ export default function ApprovalClient({ users }: { users: UserRow[] }) {
   const pendingCount = employees.filter((user) => user.approval_status === 'pending').length;
 
   async function approve(email: string) {
-    if (!key.trim()) {
-      setResult({ error: 'Paste the admin setup key once at the top, then click Approve.' });
-      return;
-    }
     setBusyEmail(email);
     setResult({ message: `Approving ${email}…` });
     try {
       const res = await fetch('/api/approve', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-admin-setup-key': key.trim() },
+        headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ email }),
       });
       const data = await res.json().catch(() => ({}));
@@ -75,17 +62,7 @@ export default function ApprovalClient({ users }: { users: UserRow[] }) {
       <section className="card">
         <span className="pill">Admin approval</span>
         <h1>Approve employees</h1>
-        <p className="muted">Paste the admin key once. Then approve people directly from the signup list.</p>
-        <label>
-          Admin setup key
-          <input
-            type="password"
-            value={key}
-            onChange={(event) => setKey(event.target.value)}
-            placeholder="Paste admin key once"
-            autoComplete="off"
-          />
-        </label>
+        <p className="muted">You are signed in as an admin. Approve employees directly from the signup list.</p>
         <p className={pendingCount ? 'warn' : 'good'}>
           {pendingCount ? `${pendingCount} employee${pendingCount === 1 ? '' : 's'} waiting for approval` : 'No pending approvals'}
         </p>

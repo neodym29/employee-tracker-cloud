@@ -5,6 +5,7 @@ import { useState } from 'react';
 export default function RegisterCompany() {
   const [companyName, setCompanyName] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
   const [message, setMessage] = useState('');
   const [ok, setOk] = useState(false);
 
@@ -15,7 +16,7 @@ export default function RegisterCompany() {
     const res = await fetch('/api/register', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ company_name: companyName, admin_email: adminEmail }),
+      body: JSON.stringify({ company_name: companyName, admin_email: adminEmail, admin_password: adminPassword }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.ok) {
@@ -34,6 +35,7 @@ export default function RegisterCompany() {
       <form onSubmit={submit}>
         <label>Company name<input value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="Neodym" required /></label>
         <label>First admin work email<input type="email" value={adminEmail} onChange={e => setAdminEmail(e.target.value)} placeholder="founder@company.com" required /></label>
+        <label>Admin dashboard password<input type="password" value={adminPassword} onChange={e => setAdminPassword(e.target.value)} placeholder="At least 8 characters" minLength={8} required /></label>
         <button>Register company + first admin</button>
       </form>
       {message && <p className={ok ? 'good' : 'warn'}>{message}</p>}

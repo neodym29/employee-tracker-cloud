@@ -1,23 +1,14 @@
-export default function Employee() {
-  const base = process.env.NEXT_PUBLIC_APP_URL || 'https://<your-vercel-domain>';
-  const script = `#!/usr/bin/env bash
-set -euo pipefail
-mkdir -p ~/.config/employee-tracker
-cat > ~/.config/employee-tracker/cloud.env <<'ENV'
-EMPLOYEE_TRACKER_COMPANY_DOMAIN=neodym.ai
-EMPLOYEE_TRACKER_EMPLOYEE_EMAIL=ibrahim@neodym.ai
-EMPLOYEE_TRACKER_CLOUD_API=${base}/api/ingest
-EMPLOYEE_TRACKER_INGEST_KEY=<set-by-admin>
-ENV
-# After the local tracker has cloud upload support enabled:
-# python3 -m employee_tracker.cli run --cloud-env ~/.config/employee-tracker/cloud.env`;
+import { requireEmployeeOrAdminSession } from '@/lib/auth';
+
+export default async function Employee() {
+  const session = await requireEmployeeOrAdminSession();
   return (
     <section className="card">
       <span className="pill">Employee setup</span>
-      <h1>Ibrahim PC enrollment</h1>
-      <p className="muted">This is the device-connection piece: the installer writes the employee identity + cloud ingest endpoint, so events uploaded from Ibrahim’s PC are tied to ibrahim@neodym.ai.</p>
-      <pre>{script}</pre>
-      <p className="warn">Do not expose the real INGEST_API_KEY publicly. Put it into a private installer or one-time enrollment token.</p>
+      <h1>Welcome, {session.email}</h1>
+      <p className="muted">Your employee account is signed in. After an admin approves you, the admin dashboard can generate your device installer from the approval screen.</p>
+      <p className="muted">Company: {session.company_domain}</p>
+      {session.role === 'admin' ? <p><a className="button" href="/dashboard">Open admin dashboard</a></p> : <p className="good">Employee portal access only — admin pages require an admin account.</p>}
     </section>
   );
 }

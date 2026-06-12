@@ -1,4 +1,5 @@
 import { health, readDashboard } from '@/lib/db';
+import { requireAdminSession } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,6 +45,7 @@ function EventsTable({ events, empty }: { events: any[]; empty: string }) {
 }
 
 export default async function Dashboard() {
+  await requireAdminSession();
   const h = health();
   let data = demo;
   let error = '';

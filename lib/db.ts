@@ -75,6 +75,28 @@ export async function assertLegitCompanyDomain(domain: string): Promise<string> 
   return normalized;
 }
 
+function assertPassword(password: string): string {
+  if (password.length < 8) throw new Error('Password must be at least 8 characters');
+  return password;
+}
+
+export function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derived = crypto.pbkdf2Sync(assertPassword(password), salt, 210_000, 32, 'sha256').toString('hex');
+  return `pbkdf2_sha256$210000$${salt}$${derived}`;
+}
+
+export function verifyPassword(password: string, storedHash: string | null | undefined): boolean {
+  if (!storedHash) return false;
+  const [scheme, iterationsRaw, salt, expected] = storedHash.split('$');
+  if (scheme !== 'pbkdf2_sha256' || !iterationsRaw || !salt || !expected) return false;
+  const iterations = Number(iterationsRaw);
+  if (!Number.isFinite(iterations) || iterations < 100_000) return false;
+  const actual = crypto.pbkdf2Sync(password, salt, iterations, 32, 'sha256');
+  const expectedBuffer = Buffer.from(expected, 'hex');
+  return expectedBuffer.length === actual.length && crypto.timingSafeEqual(expectedBuffer, actual);
+}
+
 export async function ensureSchema() {
   const db = getPool();
   await db.query(`
@@ -88,6 +110,7 @@ export async function ensureSchema() {
       id bigserial primary key,
       company_id bigint not null references companies(id),
       email text not null unique,
+      password_hash text,
       role text not null check(role in ('admin','employee')),
       approval_status text not null default 'pending' check(approval_status in ('pending','approved','rejected')),
       employee_username text,
@@ -126,10 +149,12 @@ export async function ensureSchema() {
   `);
   await db.query(`alter table app_users add column if not exists enrollment_token text unique`);
   await db.query(`alter table app_users add column if not exists approved_at timestamptz`);
+  await db.query(`alter table app_users add column if not exists password_hash text`);
 }
 
-export async function registerCompanyWithAdmin(companyName: string, adminEmail: string) {
+export async function registerCompanyWithAdmin(companyName: string, adminEmail: string, adminPassword: string) {
   const email = normalizeEmail(adminEmail);
+  const passwordHash = hashPassword(adminPassword);
   const emailDomain = domainFromEmail(email);
   const domain = await assertLegitCompanyDomain(emailDomain);
   const name = companyName.trim() || domain.split('.')[0];
@@ -142,16 +167,17 @@ export async function registerCompanyWithAdmin(companyName: string, adminEmail: 
     [name, domain],
   );
   const user = await db.query(
-    `insert into app_users(company_id,email,role,approval_status,employee_username,approved_at)
-     values($1,$2,'admin','approved',$3,now())
-     returning email, role, approval_status`,
-    [company.rows[0].id, email, email.split('@')[0]],
+    `insert into app_users(company_id,email,password_hash,role,approval_status,employee_username,approved_at)
+     values($1,$2,$3,'admin','approved',$4,now())
+     returning id, email, role, approval_status`,
+    [company.rows[0].id, email, passwordHash, email.split('@')[0]],
   );
   return { ok: true, company: company.rows[0], admin: user.rows[0] };
 }
 
-export async function signupEmployee(email: string) {
+export async function signupEmployee(email: string, password: string) {
   const normalized = normalizeEmail(email);
+  const passwordHash = hashPassword(password);
   const domain = domainFromEmail(normalized);
   const db = getPool();
   await ensureSchema();
@@ -159,10 +185,10 @@ export async function signupEmployee(email: string) {
   const companyId = company.rows[0]?.id;
   if (!companyId) throw new Error(`${domain} is not registered yet. Register the company and first admin before employee signups.`);
   await db.query(
-    `insert into app_users(company_id,email,role,approval_status,employee_username)
-     values($1,$2,'employee','pending',$3)
-     on conflict(email) do update set role='employee', company_id=excluded.company_id, approval_status='pending', employee_username=excluded.employee_username`,
-    [companyId, normalized, normalized.split('@')[0]],
+    `insert into app_users(company_id,email,password_hash,role,approval_status,employee_username)
+     values($1,$2,$3,'employee','pending',$4)
+     on conflict(email) do update set role='employee', company_id=excluded.company_id, password_hash=excluded.password_hash, approval_status='pending', employee_username=excluded.employee_username`,
+    [companyId, normalized, passwordHash, normalized.split('@')[0]],
   );
   return { ok: true, email: normalized, company_domain: domain, status: 'pending' };
 }
@@ -201,6 +227,29 @@ export async function companyByDomain(domain: string) {
   const normalized = normalizeDomain(domain);
   const result = await db.query(`select id, name, domain from companies where domain=$1`, [normalized]);
   return result.rows[0] || null;
+}
+
+export async function loginUser(email: string, password: string) {
+  const normalized = normalizeEmail(email);
+  const db = getPool();
+  await ensureSchema();
+  const result = await db.query(
+    `select app_users.id, app_users.company_id, app_users.email, app_users.password_hash, app_users.role, app_users.approval_status, companies.domain as company_domain
+     from app_users join companies on companies.id=app_users.company_id
+     where app_users.email=$1`,
+    [normalized],
+  );
+  const user = result.rows[0];
+  if (!user || !verifyPassword(password, user.password_hash)) throw new Error('Invalid email or password');
+  if (user.role === 'employee' && user.approval_status !== 'approved') throw new Error('Employee account is pending admin approval');
+  return {
+    id: String(user.id),
+    company_id: String(user.company_id),
+    email: user.email as string,
+    role: user.role as 'admin' | 'employee',
+    approval_status: user.approval_status as string,
+    company_domain: user.company_domain as string,
+  };
 }
 
 export async function readDashboard() {

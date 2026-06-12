@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { approveEmployee, health } from '@/lib/db';
+import { currentSession } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
-  const key = req.headers.get('x-admin-setup-key') || '';
-  if (!process.env.ADMIN_SETUP_KEY || key !== process.env.ADMIN_SETUP_KEY) {
-    return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
+  const session = await currentSession();
+  if (!session || session.role !== 'admin') {
+    return NextResponse.json({ ok: false, error: 'admin login required' }, { status: 403 });
   }
   if (!health().configured) return NextResponse.json({ ok: false, error: 'DATABASE_URL or POSTGRES_URL is not configured' }, { status: 503 });
   const body = await req.json().catch(() => ({}));

@@ -1,4 +1,5 @@
 import { health, readDashboard } from '@/lib/db';
+import { requireAdminSession } from '@/lib/auth';
 import ApprovalClient from './ApprovalClient';
 
 export const dynamic = 'force-dynamic';
@@ -8,6 +9,7 @@ const demo = {
 };
 
 export default async function AdminApprove() {
+  await requireAdminSession();
   const h = health();
   let users = demo.users;
   let error = '';
