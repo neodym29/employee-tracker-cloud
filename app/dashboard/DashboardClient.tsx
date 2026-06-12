@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 const typeLabels: Record<string, string> = {
   activity_snapshot: 'Active window',
   installer_smoke_test: 'Installer smoke test',
+  terminal_command: 'Terminal command',
   app_open: 'Open app',
   app_subwindow: 'App activity',
   browser_tab: 'Web surfing',
@@ -92,6 +93,7 @@ function audioDescription(event: any): string {
 function eventSummary(event: any): string {
   const payload = event.payload || {};
   if (event.event_type === 'audio_output') return audioDescription(event);
+  if (event.event_type === 'terminal_command') return [payload.terminal_command || event.window_title, payload.terminal_cwd && `cwd=${payload.terminal_cwd}`, payload.terminal_exit_code != null && `exit=${payload.terminal_exit_code}`].filter(Boolean).join(' · ');
   if (event.event_type === 'input_click') return payload.target_hint || [event.app_name, event.window_title].filter(Boolean).join(' · ');
   if (event.event_type === 'browser_tab') return [payload.title || event.window_title, payload.url || event.url].filter(Boolean).join(' · ');
   if (event.event_type === 'window_focus') return `${payload.from_app_name || '—'} → ${payload.to_app_name || event.app_name || '—'} · ${payload.to_window_title || event.window_title || ''}`;

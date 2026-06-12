@@ -277,23 +277,44 @@ ENV
 sed -i "s|%h|$HOME|g" "$ENV_FILE"
 TERMINAL_HOOK="$APP_DIR/neodym-terminal-hook.sh"
 cat > "$TERMINAL_HOOK" <<'HOOK'
-# Neodym terminal command telemetry: records executed shell commands after Enter, not raw keystrokes.
-__neodym_tracker_log_command() {
+# Neodym terminal command telemetry: records submitted shell commands after Enter, not raw keystrokes.
+__neodym_tracker_write_command() {
+  local shell_name="$1"
+  local exit_code="$2"
+  local cmd="$3"
+  [ -n "$cmd" ] || return 0
+  case "$cmd" in
+    __neodym_tracker_*|history\ *|fc\ *) return 0 ;;
+  esac
+  [ "$cmd" = "$__NEODYM_LAST_COMMAND" ] && return 0
+  __NEODYM_LAST_COMMAND="$cmd"
+  local log="$HOME/.local/share/neodym-employee-tracker/terminal-commands.tsv"
+  mkdir -p "$(dirname "$log")" 2>/dev/null || return 0
+  printf '%s\t%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$shell_name" "$PWD" "$exit_code" "$(printf '%s' "$cmd" | base64 -w0 2>/dev/null || printf '%s' "$cmd" | base64 | tr -d '\n')" >> "$log" 2>/dev/null || true
+}
+__neodym_tracker_log_bash_prompt() {
   local exit_code="$?"
   local entry hist_no cmd
-  entry=$(history 1 2>/dev/null) || return "$exit_code"
+  entry=$(HISTTIMEFORMAT= history 1 2>/dev/null) || return "$exit_code"
   hist_no=$(printf '%s' "$entry" | awk '{print $1}')
   [ -n "$hist_no" ] && [ "$hist_no" = "$__NEODYM_LAST_HISTNO" ] && return "$exit_code"
   __NEODYM_LAST_HISTNO="$hist_no"
   cmd=$(printf '%s' "$entry" | sed 's/^ *[0-9]\+ *//')
-  [ -n "$cmd" ] || return "$exit_code"
-  local log="$HOME/.local/share/neodym-employee-tracker/terminal-commands.tsv"
-  mkdir -p "$(dirname "$log")" 2>/dev/null || return "$exit_code"
-  printf '%s\tbash\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PWD" "$exit_code" "$(printf '%s' "$cmd" | base64 -w0)" >> "$log" 2>/dev/null || true
+  __neodym_tracker_write_command bash "$exit_code" "$cmd"
   return "$exit_code"
 }
-if [ -n "$BASH_VERSION" ] && [[ ";$PROMPT_COMMAND;" != *"__neodym_tracker_log_command"* ]]; then
-  PROMPT_COMMAND="__neodym_tracker_log_command; $PROMPT_COMMAND"
+__neodym_tracker_log_bash_debug() {
+  local cmd="$BASH_COMMAND"
+  case "$cmd" in
+    __neodym_tracker_*|trap\ *|PROMPT_COMMAND=*|history\ *|fc\ *) return 0 ;;
+  esac
+  __neodym_tracker_write_command bash 0 "$cmd"
+}
+if [ -n "$BASH_VERSION" ] && [[ $- == *i* ]]; then
+  if [[ ";$PROMPT_COMMAND;" != *"__neodym_tracker_log_bash_prompt"* ]]; then
+    PROMPT_COMMAND="__neodym_tracker_log_bash_prompt; $PROMPT_COMMAND"
+  fi
+  trap '__neodym_tracker_log_bash_debug' DEBUG
 fi
 if [ -n "$ZSH_VERSION" ]; then
   __neodym_tracker_log_zsh_command() {

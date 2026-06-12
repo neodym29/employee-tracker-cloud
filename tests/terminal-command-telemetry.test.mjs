@@ -10,7 +10,8 @@ const terminalCommands = readFileSync(terminalCommandsPath, 'utf8');
 
 assert.match(installer, /neodym-terminal-hook\.sh/, 'Linux installer should install a transparent shell command telemetry hook');
 assert.match(installer, /terminal-commands\.tsv/, 'installer and agent should agree on terminal command log path');
-assert.match(installer, /records executed shell commands after Enter, not raw keystrokes/, 'installer should document command capture rather than raw keystrokes');
+assert.match(installer, /records submitted shell commands after Enter, not raw keystrokes/, 'installer should document command capture rather than raw keystrokes');
+assert.match(installer, /trap '__neodym_tracker_log_bash_debug' DEBUG/, 'Linux bash hook should use DEBUG trap so Ubuntu Terminal commands are captured immediately');
 assert.match(collector, /TerminalCommandReader/, 'collector should read terminal command telemetry');
 assert.match(collector, /terminal_command/, 'collector should upload terminal_command rich events');
 assert.match(terminalCommands, /redact_command/, 'terminal commands should be redacted before upload');
