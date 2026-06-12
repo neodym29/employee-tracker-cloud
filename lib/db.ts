@@ -259,7 +259,7 @@ export async function readDashboard() {
     db.query(`select name, domain, created_at from companies order by id desc limit 25`),
     db.query(`select app_users.email, app_users.role, app_users.approval_status, app_users.employee_username, app_users.approved_at, app_users.created_at, companies.domain as company_domain, case when enrollment_token is null then null else left(enrollment_token, 8) || '…' end as enrollment_token_hint from app_users join companies on companies.id=app_users.company_id order by app_users.id desc limit 50`),
     db.query(`select employee_email, hostname, os_user, first_seen_at, last_seen_at from devices order by last_seen_at desc limit 25`),
-    db.query(`select employee_email, hostname, os_user, captured_at, event_type, app_name, window_title, url, idle_seconds, payload from activity_events order by id desc limit 200`),
+    db.query(`select id, employee_email, hostname, os_user, captured_at, received_at, event_type, app_name, window_title, url, idle_seconds, payload from activity_events order by received_at desc, id desc limit 300`),
   ]);
   return { companies: companies.rows, users: users.rows, devices: devices.rows, events: events.rows };
 }

@@ -20,6 +20,9 @@ for (const expected of ['richEventRows', 'body.rich_events', 'event.event_type',
   assert.match(ingest, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `ingest should explode rich event uploads: ${expected}`);
 }
 
-for (const expected of ['Clicks', 'Web surfing / browser tabs', 'Open apps / app activity', 'Audio output', 'Raw keystroke/character capture is intentionally not enabled']) {
+for (const expected of ['Latest raw events', 'All event types', 'Raw keystroke/character capture is intentionally not enabled']) {
   assert.match(dashboard, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `dashboard should show ${expected}`);
+}
+for (const expected of ['input_click', 'browser_tab', 'audio_output', 'app_open']) {
+  assert.match(dashboard, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `dashboard raw event filter/table should support ${expected}`);
 }

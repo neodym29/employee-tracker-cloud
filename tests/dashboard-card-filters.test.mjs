@@ -2,21 +2,22 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 
 const clientPath = new URL('../app/dashboard/DashboardClient.tsx', import.meta.url);
-assert.ok(existsSync(clientPath), 'dashboard should use a client component for interactive per-card filters');
+assert.ok(existsSync(clientPath), 'dashboard should use a client component for interactive raw-event filters');
 
 const client = readFileSync(clientPath, 'utf8');
 const page = readFileSync(new URL('../app/dashboard/page.tsx', import.meta.url), 'utf8');
 
 assert.match(page, /<DashboardClient\s+data=\{(?:data|serializableData)\}/, 'server dashboard page should hand data to DashboardClient');
-assert.match(client, /function\s+FilteredCard|const\s+FilteredCard/, 'dashboard should define a reusable filtered card component');
-assert.match(client, /filter-card-user/, 'each filtered card should render a user filter control');
-assert.match(client, /filter-card-time/, 'each filtered card should render a time filter control');
+assert.match(client, /Latest raw events/, 'dashboard should render a raw events card');
+assert.match(client, /filter-user/, 'raw events card should render a user filter control');
+assert.match(client, /filter-event-type/, 'raw events card should render an event type filter control');
+assert.match(client, /filter-start-time/, 'raw events card should render a start time control');
+assert.match(client, /filter-end-time/, 'raw events card should render an end time control');
 assert.match(client, /All users/, 'user filter should include an All users option');
-assert.match(client, /Last 15 minutes/, 'time filter should include a short recent window');
-assert.match(client, /Last 24 hours/, 'time filter should include a daily window');
-assert.match(client, /All time/, 'time filter should include all-time option');
-assert.match(client, /employee_email|email/, 'filters should be based on row employee/user identity');
-assert.match(client, /captured_at|created_at|last_seen_at/, 'filters should be based on row timestamps');
+assert.match(client, /All event types/, 'event filter should include all event types option');
+assert.match(client, /datetime-local/, 'time filter should use selectable date/time windows, not vague relative dropdowns');
+assert.match(client, /captured_at/, 'filters should use event captured timestamps');
+assert.match(client, /received_at/, 'dashboard should expose upload/received freshness');
 
-const cardUses = [...client.matchAll(/<FilteredCard\b/g)].length;
-assert.ok(cardUses >= 6, `expected filters on the main dashboard cards, found ${cardUses}`);
+const filteredCardUses = [...client.matchAll(/<FilteredCard\b/g)].length;
+assert.equal(filteredCardUses, 0, 'dashboard should not split events into multiple per-category cards');

@@ -139,6 +139,11 @@ class AudioOutputInfo:
     volume: str | None
     state_hint: str | None
     source: str
+    mpris_player: str | None = None
+    mpris_title: str | None = None
+    mpris_artist: str | None = None
+    mpris_album: str | None = None
+    mpris_status: str | None = None
 
 
 class XInputClickReader:
@@ -687,9 +692,37 @@ def list_peripherals() -> list[PeripheralInfo]:
     return unique
 
 
+def _playerctl_metadata() -> dict[str, str]:
+    if which('playerctl') is None:
+        return {}
+    try:
+        output = subprocess.check_output(
+            ['playerctl', 'metadata', '--format', '{{playerName}}\t{{artist}}\t{{title}}\t{{album}}\t{{status}}'],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=1,
+        ).strip()
+    except Exception:
+        return {}
+    if not output:
+        return {}
+    parts = output.split('\t')
+    while len(parts) < 5:
+        parts.append('')
+    player, artist, title, album, status = parts[:5]
+    return {
+        'mpris_player': player,
+        'mpris_artist': artist,
+        'mpris_title': title,
+        'mpris_album': album,
+        'mpris_status': status,
+    }
+
+
 def list_audio_outputs() -> list[AudioOutputInfo]:
     if which('pactl') is None:
         return []
+    mpris = _playerctl_metadata()
     system_status = _default_sink_audio_status()
     try:
         output = subprocess.check_output(['pactl', 'list', 'sink-inputs'], text=True, stderr=subprocess.DEVNULL)
@@ -722,6 +755,11 @@ def list_audio_outputs() -> list[AudioOutputInfo]:
             volume=volume,
             state_hint=state_hint,
             source='pactl-sink-inputs',
+            mpris_player=mpris.get('mpris_player') or None,
+            mpris_title=mpris.get('mpris_title') or None,
+            mpris_artist=mpris.get('mpris_artist') or None,
+            mpris_album=mpris.get('mpris_album') or None,
+            mpris_status=mpris.get('mpris_status') or None,
         ))
     if system_status is not None:
         items.insert(0, system_status)

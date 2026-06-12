@@ -684,6 +684,11 @@ class ActivityCollector:
                     'mute': audio.mute,
                     'volume': audio.volume,
                     'state_hint': audio.state_hint,
+                    'mpris_player': audio.mpris_player,
+                    'mpris_title': audio.mpris_title,
+                    'mpris_artist': audio.mpris_artist,
+                    'mpris_album': audio.mpris_album,
+                    'mpris_status': audio.mpris_status,
                     'source': audio.source,
                 }
             rows.append(row)
