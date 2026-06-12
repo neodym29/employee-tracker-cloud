@@ -5,6 +5,26 @@ function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
 
+function asNumber(value: unknown): number | null {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function richEventRows(body: any, capturedAt: string) {
+  const events = Array.isArray(body.rich_events) ? body.rich_events.slice(0, 250) : [];
+  return events
+    .filter((event: any) => event && typeof event === 'object')
+    .map((event: any) => ({
+      captured_at: asString(event.captured_at, capturedAt),
+      event_type: asString(event.event_type, 'detail_event'),
+      app_name: asString(event.app_name || event.to_app_name || event.application_name || event.process_name),
+      window_title: asString(event.window_title || event.to_window_title || event.title || event.target_hint || event.media_name),
+      url: asString(event.url),
+      idle_seconds: asNumber(event.idle_seconds),
+      payload: event,
+    }));
+}
+
 export async function POST(req: NextRequest) {
   const expected = process.env.INGEST_API_KEY;
   if (!health().configured) return NextResponse.json({ ok: false, error: 'DATABASE_URL or POSTGRES_URL is not configured' }, { status: 503 });
@@ -37,7 +57,14 @@ export async function POST(req: NextRequest) {
   await db.query(`
     insert into activity_events(company_id,device_id,employee_email,hostname,os_user,captured_at,event_type,app_name,window_title,url,idle_seconds,payload)
     values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
-  `, [companyId, device.rows[0].id, employeeEmail, hostname, osUser, capturedAt, asString(body.event_type, 'activity_snapshot'), asString(body.app_name), asString(body.window_title), asString(body.url), Number.isFinite(Number(body.idle_seconds)) ? Number(body.idle_seconds) : null, JSON.stringify(body)]);
+  `, [companyId, device.rows[0].id, employeeEmail, hostname, osUser, capturedAt, asString(body.event_type, 'activity_snapshot'), asString(body.app_name), asString(body.window_title), asString(body.url), asNumber(body.idle_seconds), JSON.stringify(body)]);
 
-  return NextResponse.json({ ok: true, employee_email: employeeEmail, hostname });
+  for (const event of richEventRows(body, capturedAt)) {
+    await db.query(`
+      insert into activity_events(company_id,device_id,employee_email,hostname,os_user,captured_at,event_type,app_name,window_title,url,idle_seconds,payload)
+      values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
+    `, [companyId, device.rows[0].id, employeeEmail, hostname, osUser, event.captured_at, event.event_type, event.app_name, event.window_title, event.url, event.idle_seconds, JSON.stringify(event.payload)]);
+  }
+
+  return NextResponse.json({ ok: true, employee_email: employeeEmail, hostname, rich_events: richEventRows(body, capturedAt).length });
 }

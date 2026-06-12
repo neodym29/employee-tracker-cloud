@@ -347,7 +347,7 @@ class ActivityCollector:
                 },
             )
 
-    def _record_current_open_state(self, connection, captured_at: str, host: str, processes: list[object], windows: list[object]) -> None:
+    def _record_current_open_state(self, connection, captured_at: str, host: str, processes: list[object], windows: list[object]) -> dict[str, list[dict[str, object]]]:
         apps, subwindows = summarize_current_open_state(processes, windows)
         browser_tabs = self._browser_bridge.current_tabs()
         app_rows = {
@@ -457,13 +457,13 @@ class ActivityCollector:
                 connection,
                 subwindow,
             )
+        return {'open_apps': list(app_rows.values()), 'subwindows': subwindow_rows}
 
 
-    def _record_browser_focus_events(self, connection, captured_at: str, host: str) -> None:
+    def _record_browser_focus_events(self, connection, captured_at: str, host: str) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
         for event in self._browser_bridge.read_focus_events():
-            insert_window_focus_event(
-                connection,
-                {
+            row = {
                     'captured_at': captured_at,
                     'username': self.username,
                     'host': host,
@@ -476,8 +476,13 @@ class ActivityCollector:
                     'to_window_pid': None,
                     'to_window_class': event.to_window_class,
                     'reason': event.reason,
-                },
+                }
+            rows.append(row)
+            insert_window_focus_event(
+                connection,
+                row,
             )
+        return rows
 
     def _record_window_focus_event(self, connection, captured_at: str, host: str, window) -> None:
         previous = self._last_window
@@ -508,55 +513,62 @@ class ActivityCollector:
         )
         self._last_window = window
 
-    def _record_click_events(self, connection, captured_at: str, host: str, window, windows: list[object]) -> None:
+    def _record_click_events(self, connection, captured_at: str, host: str, window, windows: list[object]) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
         for click in self._browser_bridge.read_clicks():
             target = click.target_text or click.href or click.title or click.url or 'browser content'
             page = click.title or click.url or click.browser
             muted = ' muted' if click.muted else ''
             audible = ' audible' if click.audible and not click.muted else muted
+            row = {
+                'captured_at': captured_at,
+                'username': self.username,
+                'host': host,
+                'button': click.button,
+                'x': click.x,
+                'y': click.y,
+                'screen_x': click.screen_x,
+                'screen_y': click.screen_y,
+                'window_id': f'browser:{click.app_key}:window:{click.window_id}:tab:{click.tab_id}',
+                'window_title': page,
+                'app_name': click.browser,
+                'window_pid': None,
+                'window_class': click.app_key,
+                'target_hint': f'click on {target} in {page} ({click.url or "no url"}){audible}',
+                'url': click.url,
+                'source': click.source,
+            }
+            rows.append(row)
             insert_input_click_event(
                 connection,
-                {
-                    'captured_at': captured_at,
-                    'username': self.username,
-                    'host': host,
-                    'button': click.button,
-                    'x': click.x,
-                    'y': click.y,
-                    'screen_x': click.screen_x,
-                    'screen_y': click.screen_y,
-                    'window_id': f'browser:{click.app_key}:window:{click.window_id}:tab:{click.tab_id}',
-                    'window_title': page,
-                    'app_name': click.browser,
-                    'window_pid': None,
-                    'window_class': click.app_key,
-                    'target_hint': f'click on {target} in {page} ({click.url or "no url"}){audible}',
-                    'source': click.source,
-                },
+                row,
             )
         for click in self._click_reader.read_clicks():
             clicked_window = self._window_at_click(click, windows) or window
             target_hint = self._click_target_hint(click, clicked_window)
+            row = {
+                'captured_at': captured_at,
+                'username': self.username,
+                'host': host,
+                'button': click.button,
+                'x': click.x,
+                'y': click.y,
+                'screen_x': click.screen_x,
+                'screen_y': click.screen_y,
+                'window_id': clicked_window.window_id,
+                'window_title': clicked_window.title,
+                'app_name': clicked_window.app_name,
+                'window_pid': clicked_window.pid,
+                'window_class': clicked_window.wm_class,
+                'target_hint': target_hint,
+                'source': click.source,
+            }
+            rows.append(row)
             insert_input_click_event(
                 connection,
-                {
-                    'captured_at': captured_at,
-                    'username': self.username,
-                    'host': host,
-                    'button': click.button,
-                    'x': click.x,
-                    'y': click.y,
-                    'screen_x': click.screen_x,
-                    'screen_y': click.screen_y,
-                    'window_id': clicked_window.window_id,
-                    'window_title': clicked_window.title,
-                    'app_name': clicked_window.app_name,
-                    'window_pid': clicked_window.pid,
-                    'window_class': clicked_window.wm_class,
-                    'target_hint': target_hint,
-                    'source': click.source,
-                },
+                row,
             )
+        return rows
 
     def _window_at_click(self, click, windows: list[object]):
         screen_x = click.screen_x if click.screen_x is not None else click.x
@@ -654,11 +666,10 @@ class ActivityCollector:
                 },
             )
 
-    def _record_audio_outputs(self, connection, captured_at: str, host: str) -> None:
+    def _record_audio_outputs(self, connection, captured_at: str, host: str) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
         for audio in list_audio_outputs():
-            insert_audio_output_snapshot(
-                connection,
-                {
+            row = {
                     'captured_at': captured_at,
                     'username': self.username,
                     'host': host,
@@ -673,8 +684,13 @@ class ActivityCollector:
                     'volume': audio.volume,
                     'state_hint': audio.state_hint,
                     'source': audio.source,
-                },
+                }
+            rows.append(row)
+            insert_audio_output_snapshot(
+                connection,
+                row,
             )
+        return rows
 
     def run_forever(self) -> None:
         host = host_name()
@@ -696,8 +712,8 @@ class ActivityCollector:
 
                 windows = self._record_window_snapshot(connection, captured_at, host)
                 self._record_warp_activity(connection, captured_at, host, current_processes, windows)
-                self._record_current_open_state(connection, captured_at, host, current_processes, windows)
-                self._record_browser_focus_events(connection, captured_at, host)
+                open_state = self._record_current_open_state(connection, captured_at, host, current_processes, windows)
+                focus_events = self._record_browser_focus_events(connection, captured_at, host)
 
                 window = current_window_info()
                 gnome_window = self._browser_bridge.active_gnome_window()
@@ -719,13 +735,21 @@ class ActivityCollector:
                         wm_class=browser_tab.app_key,
                     )
                 self._record_window_focus_event(connection, captured_at, host, window)
-                self._record_click_events(connection, captured_at, host, window, windows)
-                self._record_audio_outputs(connection, captured_at, host)
+                click_events = self._record_click_events(connection, captured_at, host, window, windows)
+                audio_outputs = self._record_audio_outputs(connection, captured_at, host)
                 screenshot_path = None
                 if self.enable_screenshots and (now - self._last_screenshot_at) >= self.screenshot_interval_seconds:
                     screenshot = capture_screenshot(self.screenshot_dir, self.username, window.window_id)
                     screenshot_path = str(screenshot) if screenshot else None
                     self._last_screenshot_at = now
+
+                rich_events = (
+                    [{**row, 'event_type': 'app_open'} for row in open_state.get('open_apps', [])]
+                    + [{**row, 'event_type': 'browser_tab' if row.get('subwindow_type') == 'tab' else 'app_subwindow'} for row in open_state.get('subwindows', [])]
+                    + [{**row, 'event_type': 'window_focus'} for row in focus_events]
+                    + [{**row, 'event_type': 'input_click'} for row in click_events]
+                    + [{**row, 'event_type': 'audio_output'} for row in audio_outputs]
+                )
 
                 activity_payload = {
                     'captured_at': captured_at,
@@ -741,6 +765,14 @@ class ActivityCollector:
                     'idle_seconds': idle_seconds(),
                     'screenshot_path': screenshot_path,
                     'event_type': 'activity_snapshot',
+                    'rich_logs': {
+                        'open_apps': open_state.get('open_apps', [])[:80],
+                        'subwindows': open_state.get('subwindows', [])[:120],
+                        'focus_events': focus_events[:80],
+                        'click_events': click_events[:120],
+                        'audio_outputs': audio_outputs[:80],
+                    },
+                    'rich_events': rich_events[:250],
                 }
                 insert_activity(connection, activity_payload)
                 self._cloud_uploader.maybe_upload_activity(activity_payload)

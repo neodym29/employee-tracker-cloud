@@ -137,7 +137,7 @@ export async function readDashboard() {
   const [users, devices, events] = await Promise.all([
     db.query(`select email, role, approval_status, employee_username, approved_at, created_at, case when enrollment_token is null then null else left(enrollment_token, 8) || '…' end as enrollment_token_hint from app_users order by id desc limit 25`),
     db.query(`select employee_email, hostname, os_user, first_seen_at, last_seen_at from devices order by last_seen_at desc limit 25`),
-    db.query(`select employee_email, hostname, os_user, captured_at, event_type, app_name, window_title, url, idle_seconds from activity_events order by id desc limit 50`),
+    db.query(`select employee_email, hostname, os_user, captured_at, event_type, app_name, window_title, url, idle_seconds, payload from activity_events order by id desc limit 200`),
   ]);
   return { users: users.rows, devices: devices.rows, events: events.rows };
 }
