@@ -217,24 +217,40 @@ else:
         ('Microsoft Edge', ['microsoft-edge', 'microsoft-edge-stable'], ['/etc/opt/edge/policies/managed'], ['/usr/share/microsoft-edge/extensions']),
         ('Opera', ['opera', 'opera-stable'], ['/etc/opt/opera/policies/managed'], ['/usr/share/opera/extensions']),
     ]
+    if os.geteuid() == 0:
+        privileged: list[str] | None = []
+    elif shutil.which('sudo') and subprocess.run(['sudo', '-n', 'true'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode == 0:
+        privileged = ['sudo', '-n']
+    else:
+        privileged = None
+
     installed = []
-    for name, commands, policy_dirs, extension_dirs in targets:
-        if not any(shutil.which(cmd) for cmd in commands):
-            continue
-        for directory in policy_dirs:
-            subprocess.run(['sudo', 'mkdir', '-p', directory], check=False)
-            tmp = ext_root / ('policy-' + name.lower().replace(' ', '-') + '.json')
-            tmp.write_text(json.dumps(policy, indent=2), encoding='utf-8')
-            subprocess.run(['sudo', 'cp', str(tmp), str(Path(directory) / 'neodym-tracker-extension.json')], check=False)
-        for directory in extension_dirs:
-            subprocess.run(['sudo', 'mkdir', '-p', directory], check=False)
-            tmp = ext_root / ('external-' + name.lower().replace(' ', '-') + '.json')
-            tmp.write_text(json.dumps(external, indent=2), encoding='utf-8')
-            subprocess.run(['sudo', 'cp', str(tmp), str(Path(directory) / (ext_id + '.json'))], check=False)
-        installed.append(name)
-    print('Browser extension id:', ext_id)
-    print('Browsers configured:', ', '.join(installed) if installed else 'none detected')
-    print('Restart open browsers once so the managed extension is loaded.')
+    if privileged is None:
+        print('Browser extension id:', ext_id)
+        print('Browser extension packaged, but managed browser policy install was skipped because passwordless sudo is unavailable.')
+        print('Tracker service will still upload app/window/audio activity. Run installer in a terminal with sudo access to force-install the browser extension.')
+    else:
+        for name, commands, policy_dirs, extension_dirs in targets:
+            if not any(shutil.which(cmd) for cmd in commands):
+                continue
+            configured = False
+            for directory in policy_dirs:
+                subprocess.run(privileged + ['mkdir', '-p', directory], check=True)
+                tmp = ext_root / ('policy-' + name.lower().replace(' ', '-') + '.json')
+                tmp.write_text(json.dumps(policy, indent=2), encoding='utf-8')
+                subprocess.run(privileged + ['cp', str(tmp), str(Path(directory) / 'neodym-tracker-extension.json')], check=True)
+                configured = True
+            for directory in extension_dirs:
+                subprocess.run(privileged + ['mkdir', '-p', directory], check=True)
+                tmp = ext_root / ('external-' + name.lower().replace(' ', '-') + '.json')
+                tmp.write_text(json.dumps(external, indent=2), encoding='utf-8')
+                subprocess.run(privileged + ['cp', str(tmp), str(Path(directory) / (ext_id + '.json'))], check=True)
+                configured = True
+            if configured:
+                installed.append(name)
+        print('Browser extension id:', ext_id)
+        print('Browsers configured:', ', '.join(installed) if installed else 'none detected')
+        print('Restart open browsers once so the managed extension is loaded.')
 PY
 cat > "$ENV_FILE" <<'ENV'
 EMPLOYEE_TRACKER_COMPANY_DOMAIN=${user.domain}
