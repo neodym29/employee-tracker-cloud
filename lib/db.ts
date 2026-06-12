@@ -252,14 +252,49 @@ export async function loginUser(email: string, password: string) {
   };
 }
 
-export async function readDashboard() {
+type DashboardReadFilters = {
+  mode?: 'latest' | 'range';
+  user?: string;
+  eventType?: string;
+  startTime?: string;
+  endTime?: string;
+};
+
+export async function readDashboard(filters: DashboardReadFilters = {}) {
   const db = getPool();
   await ensureSchema();
+
+  const eventWhere: string[] = [];
+  const eventParams: unknown[] = [];
+  if (filters.user && filters.user !== 'all') {
+    eventParams.push(filters.user);
+    eventWhere.push(`employee_email = $${eventParams.length}`);
+  }
+  if (filters.eventType && filters.eventType !== 'all') {
+    eventParams.push(filters.eventType);
+    eventWhere.push(`event_type = $${eventParams.length}`);
+  }
+  if (filters.mode === 'range' && filters.startTime) {
+    eventParams.push(filters.startTime);
+    eventWhere.push(`captured_at >= $${eventParams.length}`);
+  }
+  if (filters.mode === 'range' && filters.endTime) {
+    eventParams.push(filters.endTime);
+    eventWhere.push(`captured_at <= $${eventParams.length}`);
+  }
+  eventParams.push(filters.mode === 'range' ? 1000 : 300);
+  const limitParam = eventParams.length;
+  const eventSql = `select id, employee_email, hostname, os_user, captured_at, received_at, event_type, app_name, window_title, url, idle_seconds, payload
+    from activity_events
+    ${eventWhere.length ? `where ${eventWhere.join(' and ')}` : ''}
+    order by received_at desc, id desc
+    limit $${limitParam}`;
+
   const [companies, users, devices, events] = await Promise.all([
     db.query(`select name, domain, created_at from companies order by id desc limit 25`),
     db.query(`select app_users.email, app_users.role, app_users.approval_status, app_users.employee_username, app_users.approved_at, app_users.created_at, companies.domain as company_domain, case when enrollment_token is null then null else left(enrollment_token, 8) || '…' end as enrollment_token_hint from app_users join companies on companies.id=app_users.company_id order by app_users.id desc limit 50`),
     db.query(`select employee_email, hostname, os_user, first_seen_at, last_seen_at from devices order by last_seen_at desc limit 25`),
-    db.query(`select id, employee_email, hostname, os_user, captured_at, received_at, event_type, app_name, window_title, url, idle_seconds, payload from activity_events order by received_at desc, id desc limit 300`),
+    db.query(eventSql, eventParams),
   ]);
   return { companies: companies.rows, users: users.rows, devices: devices.rows, events: events.rows };
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 
 const typeLabels: Record<string, string> = {
   activity_snapshot: 'Active window',
@@ -18,6 +18,14 @@ type DashboardData = {
   users: any[];
   devices: any[];
   events: any[];
+};
+
+type DashboardFilters = {
+  mode: 'latest' | 'range';
+  user: string;
+  eventType: string;
+  startTime: string;
+  endTime: string;
 };
 
 function eventTimestamp(event: any): string {
@@ -90,9 +98,9 @@ function eventSummary(event: any): string {
   return [event.app_name, event.window_title, event.url].filter(Boolean).join(' · ');
 }
 
-function filteredEvents(events: any[], user: string, eventType: string, startTime: string, endTime: string) {
-  const start = startTime ? new Date(startTime).getTime() : null;
-  const end = endTime ? new Date(endTime).getTime() : null;
+function filteredEvents(events: any[], mode: 'latest' | 'range', user: string, eventType: string, startTime: string, endTime: string) {
+  const start = mode === 'range' && startTime ? new Date(startTime).getTime() : null;
+  const end = mode === 'range' && endTime ? new Date(endTime).getTime() : null;
   return events.filter((event) => {
     const matchesUser = user === 'all' || rowUser(event) === user;
     const matchesType = eventType === 'all' || event.event_type === eventType;
@@ -122,30 +130,45 @@ function EventsTable({ events }: { events: any[] }) {
   );
 }
 
-export default function DashboardClient({ data, configured, error }: { data: DashboardData; configured: boolean; error: string }) {
+export default function DashboardClient({ data, configured, error, initialFilters }: { data: DashboardData; configured: boolean; error: string; initialFilters: DashboardFilters }) {
   const router = useRouter();
+  const pathname = usePathname();
   const allUsers = useMemo(() => Array.from(new Set(data.events.map(rowUser).filter(Boolean))).sort(), [data.events]);
   const eventTypes = useMemo(() => Array.from(new Set(data.events.map((event) => event.event_type).filter(Boolean))).sort(), [data.events]);
   const now = useMemo(() => new Date(), []);
-  const [user, setUser] = useState('all');
-  const [eventType, setEventType] = useState('all');
-  const [startTime, setStartTime] = useState(() => toDateTimeLocalValue(new Date(now.getTime() - 60 * 60 * 1000)));
-  const [endTime, setEndTime] = useState(() => toDateTimeLocalValue(now));
+  const [mode, setMode] = useState<'latest' | 'range'>(initialFilters.mode || 'latest');
+  const [user, setUser] = useState(initialFilters.user || 'all');
+  const [eventType, setEventType] = useState(initialFilters.eventType || 'all');
+  const [startTime, setStartTime] = useState(initialFilters.startTime || toDateTimeLocalValue(new Date(now.getTime() - 60 * 60 * 1000)));
+  const [endTime, setEndTime] = useState(initialFilters.endTime || toDateTimeLocalValue(now));
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (mode !== 'latest') params.set('mode', mode);
+    if (user !== 'all') params.set('user', user);
+    if (eventType !== 'all') params.set('eventType', eventType);
+    if (mode === 'range') {
+      if (startTime) params.set('start', startTime);
+      if (endTime) params.set('end', endTime);
+    }
+    const nextUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname;
+    router.replace(nextUrl, { scroll: false });
+  }, [mode, user, eventType, startTime, endTime, pathname, router]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
-      setEndTime(toDateTimeLocalValue(new Date()));
       router.refresh();
     }, 5_000);
     return () => window.clearInterval(interval);
   }, [router]);
 
   const visibleEvents = useMemo(
-    () => filteredEvents(data.events, user, eventType, startTime, endTime),
-    [data.events, user, eventType, startTime, endTime],
+    () => filteredEvents(data.events, mode, user, eventType, startTime, endTime),
+    [data.events, mode, user, eventType, startTime, endTime],
   );
   const latestReceived = data.events[0]?.received_at;
   const latestCaptured = data.events[0]?.captured_at;
+  const rangeDisabled = mode === 'latest';
 
   return (
     <div>
@@ -161,9 +184,21 @@ export default function DashboardClient({ data, configured, error }: { data: Das
         <div className="cardHeader">
           <div>
             <h2>Latest raw events</h2>
-            <p className="muted smallNote">Showing {visibleEvents.length} of {data.events.length}. Select an exact time window, user, and event type.</p>
+            <p className="muted smallNote">
+              Showing {visibleEvents.length} of {data.events.length}. Use Latest events for the live feed, or choose Selected time period for historical filters.
+            </p>
+          </div>
+          <div className="cardActions">
+            <button className="refresh-dashboard" type="button" onClick={() => router.refresh()}>Refresh latest data</button>
           </div>
           <div className="cardFilters rawEventFilters" data-card-filter="true">
+            <label>
+              View
+              <select className="filter-mode" value={mode} onChange={(event) => setMode(event.target.value as 'latest' | 'range')}>
+                <option value="latest">Latest events</option>
+                <option value="range">Selected time period</option>
+              </select>
+            </label>
             <label>
               User
               <select className="filter-user" value={user} onChange={(event) => setUser(event.target.value)}>
@@ -180,11 +215,11 @@ export default function DashboardClient({ data, configured, error }: { data: Das
             </label>
             <label>
               Start time
-              <input className="filter-start-time" type="datetime-local" value={startTime} onChange={(event) => setStartTime(event.target.value)} />
+              <input className="filter-start-time" type="datetime-local" value={startTime} disabled={rangeDisabled} onChange={(event) => setStartTime(event.target.value)} />
             </label>
             <label>
               End time
-              <input className="filter-end-time" type="datetime-local" value={endTime} onChange={(event) => setEndTime(event.target.value)} />
+              <input className="filter-end-time" type="datetime-local" value={endTime} disabled={rangeDisabled} onChange={(event) => setEndTime(event.target.value)} />
             </label>
           </div>
         </div>

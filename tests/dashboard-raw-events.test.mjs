@@ -19,6 +19,6 @@ assert.match(client, /audioDescription/, 'audio rows should use a dedicated clea
 assert.match(client, /Playing: |Output device:/, 'audio details should describe the media/device currently playing');
 assert.match(client, /content_title/, 'audio details should prefer the actual media/tab title over just the app name');
 assert.match(client, /router\.refresh\(\)/, 'dashboard should auto-refresh instead of leaving freshness text stale for minutes');
-assert.match(client, /setEndTime\(toDateTimeLocalValue\(new Date\(\)\)\)/, 'dashboard auto-refresh should keep the default end-time window at now');
+assert.doesNotMatch(client, /setEndTime\(toDateTimeLocalValue\(new Date\(\)\)\)/, 'dashboard refresh should not mutate selected time filters');
 assert.match(system, /playerctl|mpris/i, 'audio collector should try player/MPRIS metadata when available');
 assert.match(db, /order by received_at desc, id desc|order by id desc/, 'dashboard query should return latest received events first');
