@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ensureSchema, getPool, health, userByEnrollmentToken } from '@/lib/db';
+import { companyByDomain, ensureSchema, getPool, health, userByEnrollmentToken } from '@/lib/db';
 
 function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
@@ -34,8 +34,12 @@ export async function POST(req: NextRequest) {
   const tokenUser = enrollmentToken ? await userByEnrollmentToken(enrollmentToken) : null;
   const sharedKeyOk = Boolean(expected && req.headers.get('x-ingest-key') === expected);
   if (!sharedKeyOk && !tokenUser) return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
-  const employeeEmail = (tokenUser?.email || asString(body.employee_email, 'ibrahim@neodym.ai')).toLowerCase();
-  if (!employeeEmail.endsWith('@neodym.ai')) return NextResponse.json({ ok: false, error: 'Only neodym.ai employees are accepted in this prototype' }, { status: 400 });
+  const employeeEmail = (tokenUser?.email || asString(body.employee_email)).toLowerCase();
+  if (!employeeEmail || !employeeEmail.includes('@')) return NextResponse.json({ ok: false, error: 'employee_email is required' }, { status: 400 });
+  const requestedDomain = asString(body.company_domain, employeeEmail.split('@')[1]).toLowerCase();
+  const company = tokenUser ? { id: tokenUser.company_id, domain: tokenUser.domain } : await companyByDomain(requestedDomain);
+  if (!company) return NextResponse.json({ ok: false, error: `${requestedDomain} is not registered` }, { status: 400 });
+  if (!tokenUser && !employeeEmail.endsWith(`@${company.domain}`)) return NextResponse.json({ ok: false, error: 'employee_email must match the registered company domain' }, { status: 400 });
   const hostname = asString(body.hostname, 'unknown-host');
   const osUser = asString(body.os_user, 'unknown-user');
   const deviceKey = asString(body.device_key, `${employeeEmail}:${hostname}:${osUser}`);
@@ -43,9 +47,8 @@ export async function POST(req: NextRequest) {
 
   await ensureSchema();
   const db = getPool();
-  const company = await db.query(`select id from companies where domain=$1`, ['neodym.ai']);
-  const companyId = company.rows[0].id;
-  const user = await db.query(`select id from app_users where email=$1`, [employeeEmail]);
+  const companyId = company.id;
+  const user = await db.query(`select id from app_users where email=$1 and company_id=$2`, [employeeEmail, companyId]);
   const userId = user.rows[0]?.id || null;
   const device = await db.query(`
     insert into devices(company_id,user_id,device_key,employee_email,hostname,os_user,last_seen_at)

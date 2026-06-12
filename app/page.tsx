@@ -5,23 +5,22 @@ export default function Home() {
   return (
     <div className="hero">
       <section className="card">
-        <span className="pill">Cloud prototype · neodym.ai</span>
-        <h1>Employee tracker, wired for real device enrollment.</h1>
-        <p className="muted">This Vercel-safe version separates the admin UI from local SQLite. Employees sign up, admins approve them, and the generated installer downloads the tracker code plus dependencies and enrolls the PC against the cloud ingest API backed by Postgres/Supabase.</p>
+        <span className="pill">Cloud prototype · fresh company onboarding</span>
+        <h1>Start with company registration, then enroll employees.</h1>
+        <p className="muted">The tracker code is working, so the cloud flow now starts clean: register a company using a real work-email domain, create the first approved admin, then let employees request access and receive installers after approval.</p>
         <div className="grid">
-          <div className="card"><div className="metricLabel">Admin</div><div className="metric">hello@neodym.ai</div></div>
-          <div className="card"><div className="metricLabel">Employee test</div><div className="metric">ibrahim@neodym.ai</div></div>
+          <div className="card"><div className="metricLabel">Step 1</div><div className="metric">Company</div><p className="muted">Validate the admin email domain with DNS and create the company.</p></div>
+          <div className="card"><div className="metricLabel">Step 2</div><div className="metric">Admin</div><p className="muted">The first admin is approved automatically during company registration.</p></div>
+          <div className="card"><div className="metricLabel">Step 3</div><div className="metric">Employees</div><p className="muted">Employees sign up with the registered company domain and wait for approval.</p></div>
           <div className="card"><div className="metricLabel">Database</div><div className={h.configured ? 'good' : 'warn'}>{h.configured ? 'Configured' : 'Needs DATABASE_URL'}</div></div>
-          <div className="card"><div className="metricLabel">Ingest auth</div><div className={h.hasIngestKey ? 'good' : 'warn'}>{h.hasIngestKey ? 'Configured' : 'Needs INGEST_API_KEY'}</div></div>
         </div>
+        <p><a className="button" href="/register">Register company + first admin</a></p>
       </section>
       <aside className="card">
-        <h2>Deployment readiness</h2>
-        <p className="muted">The app can deploy to Vercel now. Cross-PC reporting becomes real when these env vars are attached:</p>
-        <pre>{`DATABASE_URL=postgres://...
-INGEST_API_KEY=<shared install token>
-ADMIN_SETUP_KEY=<schema bootstrap token>`}</pre>
+        <h2>Operations</h2>
+        <p className="muted">Use the dashboard for accounts, approvals, installers, and uploaded activity.</p>
         <p><a className="button" href="/dashboard">Open admin dashboard</a></p>
+        <p><a className="button" href="/signup">Employee signup</a></p>
       </aside>
     </div>
   );

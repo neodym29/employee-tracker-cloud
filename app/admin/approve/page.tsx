@@ -4,9 +4,7 @@ import ApprovalClient from './ApprovalClient';
 export const dynamic = 'force-dynamic';
 
 const demo = {
-  users: [
-    { email: 'ibrahim@neodym.ai', role: 'employee', approval_status: 'pending', employee_username: 'ibrahim', created_at: 'seed' },
-  ],
+  users: [] as any[],
 };
 
 export default async function AdminApprove() {

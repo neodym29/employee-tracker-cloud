@@ -3,10 +3,8 @@ import { health, readDashboard } from '@/lib/db';
 export const dynamic = 'force-dynamic';
 
 const demo = {
-  users: [
-    { email: 'hello@neodym.ai', role: 'admin', approval_status: 'approved', employee_username: null, created_at: 'seed' },
-    { email: 'ibrahim@neodym.ai', role: 'employee', approval_status: 'pending', employee_username: 'ibrahim', created_at: 'seed' },
-  ],
+  companies: [] as any[],
+  users: [] as any[],
   devices: [] as any[],
   events: [] as any[],
 };
@@ -65,9 +63,14 @@ export default async function Dashboard() {
         {error && <p className="bad">Database error: {error}</p>}
       </section>
       <section className="card" style={{marginTop:16}}>
+        <h2>Companies</h2>
+        {data.companies.length === 0 ? <p className="muted">No companies registered yet. Start with company registration.</p> : <table className="table"><thead><tr><th>Name</th><th>Domain</th><th>Created</th></tr></thead><tbody>{data.companies.map((c:any)=><tr key={c.domain}><td>{c.name}</td><td>{c.domain}</td><td>{String(c.created_at)}</td></tr>)}</tbody></table>}
+        <p><a className="button" href="/register">Register company + first admin</a></p>
+      </section>
+      <section className="card" style={{marginTop:16}}>
         <h2>Accounts</h2>
         <p><a className="button" href="/admin/approve">Approve employee / generate installer</a></p>
-        <table className="table"><thead><tr><th>Email</th><th>Role</th><th>Status</th><th>OS user</th><th>Token</th></tr></thead><tbody>{data.users.map((u:any)=><tr key={u.email}><td>{u.email}</td><td>{u.role}</td><td>{u.approval_status}</td><td>{u.employee_username || '—'}</td><td>{u.enrollment_token_hint || '—'}</td></tr>)}</tbody></table>
+        <table className="table"><thead><tr><th>Email</th><th>Company</th><th>Role</th><th>Status</th><th>OS user</th><th>Token</th></tr></thead><tbody>{data.users.map((u:any)=><tr key={u.email}><td>{u.email}</td><td>{u.company_domain || '—'}</td><td>{u.role}</td><td>{u.approval_status}</td><td>{u.employee_username || '—'}</td><td>{u.enrollment_token_hint || '—'}</td></tr>)}</tbody></table>
       </section>
       <section className="card" style={{marginTop:16}}>
         <h2>Devices</h2>

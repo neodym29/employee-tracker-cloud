@@ -8,5 +8,5 @@ export async function POST(req: NextRequest) {
   }
   if (!health().configured) return NextResponse.json({ ok: false, error: 'DATABASE_URL or POSTGRES_URL is not configured' }, { status: 503 });
   await ensureSchema();
-  return NextResponse.json({ ok: true, schema: 'ready', seeded: ['hello@neodym.ai', 'ibrahim@neodym.ai'] });
+  return NextResponse.json({ ok: true, schema: 'ready', seeded: [] });
 }

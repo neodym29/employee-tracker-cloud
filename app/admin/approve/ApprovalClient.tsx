@@ -9,6 +9,7 @@ type UserRow = {
   employee_username?: string | null;
   created_at?: string;
   approved_at?: string | null;
+  company_domain?: string | null;
   enrollment_token_hint?: string | null;
 };
 
@@ -99,6 +100,7 @@ export default function ApprovalClient({ users }: { users: UserRow[] }) {
             <thead>
               <tr>
                 <th>Employee</th>
+                <th>Company</th>
                 <th>Status</th>
                 <th>Username</th>
                 <th>Token</th>
@@ -111,6 +113,7 @@ export default function ApprovalClient({ users }: { users: UserRow[] }) {
                 return (
                   <tr key={user.email}>
                     <td>{user.email}</td>
+                    <td>{user.company_domain || '—'}</td>
                     <td className={approved ? 'good' : 'warn'}>{user.approval_status}</td>
                     <td>{user.employee_username || '—'}</td>
                     <td>{user.enrollment_token_hint || '—'}</td>
