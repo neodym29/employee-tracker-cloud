@@ -249,6 +249,22 @@ export async function restoreAdminAccess(email: string, password: string) {
   return result.rows[0] as { email: string; role: 'admin'; approval_status: 'approved'; company_id: string };
 }
 
+export async function resetExistingUserPassword(email: string, password: string) {
+  const normalized = normalizeEmail(email);
+  const passwordHash = hashPassword(password);
+  const db = getPool();
+  await ensureSchema();
+  const result = await db.query(
+    `update app_users
+     set password_hash=$2, approval_status=case when role='employee' then 'approved' else approval_status end, approved_at=case when role='employee' then coalesce(approved_at, now()) else approved_at end
+     where email=$1
+     returning email, role, approval_status, company_id, password_hash is not null as has_password`,
+    [normalized, passwordHash],
+  );
+  if (!result.rows[0]) throw new Error(`${normalized} was not found`);
+  return result.rows[0] as { email: string; role: 'admin' | 'employee'; approval_status: string; company_id: string; has_password: boolean };
+}
+
 export async function approveEmployee(email: string) {
   const normalized = normalizeEmail(email);
   const token = crypto.randomBytes(24).toString('hex');

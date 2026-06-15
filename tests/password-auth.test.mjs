@@ -6,6 +6,7 @@ const registerPage = readFileSync(new URL('../app/register/page.tsx', import.met
 const signupPage = readFileSync(new URL('../app/signup/page.tsx', import.meta.url), 'utf8');
 const dashboardPage = readFileSync(new URL('../app/dashboard/page.tsx', import.meta.url), 'utf8');
 const approvePage = readFileSync(new URL('../app/admin/approve/page.tsx', import.meta.url), 'utf8');
+const bootstrapApi = readFileSync(new URL('../app/api/bootstrap/route.ts', import.meta.url), 'utf8');
 
 assert.match(db, /password_hash text/, 'users table must store password hashes, not plaintext passwords');
 assert.match(db, /pbkdf2Sync|scryptSync|argon2/, 'passwords must be hashed with a password KDF');
@@ -22,3 +23,6 @@ assert.ok(existsSync(new URL('../app/api/logout/route.ts', import.meta.url)), 'l
 
 assert.match(dashboardPage, /requireAdminSession|redirect\('\/login/, 'admin dashboard must require an admin session');
 assert.match(approvePage, /requireAdminSession|redirect\('\/login/, 'approval page must require an admin session');
+assert.match(db, /resetExistingUserPassword/, 'setup recovery should be able to reset existing employee/admin passwords without raw storage');
+assert.match(bootstrapApi, /reset_user_password/, 'setup bootstrap should expose guarded password reset for approved existing users');
+assert.match(bootstrapApi, /x-admin-setup-key/, 'setup bootstrap password reset must require the setup key');
