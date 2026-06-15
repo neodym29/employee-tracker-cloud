@@ -146,6 +146,16 @@ export async function ensureSchema() {
       payload jsonb not null default '{}'::jsonb,
       received_at timestamptz not null default now()
     );
+    create table if not exists activity_screenshots (
+      id bigserial primary key,
+      activity_event_id bigint not null unique references activity_events(id) on delete cascade,
+      company_id bigint not null references companies(id),
+      employee_email text not null,
+      captured_at timestamptz not null,
+      mime_type text not null default 'image/png',
+      image_base64 text not null,
+      created_at timestamptz not null default now()
+    );
   `);
   await db.query(`alter table app_users add column if not exists enrollment_token text unique`);
   await db.query(`alter table app_users add column if not exists approved_at timestamptz`);
@@ -296,7 +306,8 @@ export async function readDashboard(filters: DashboardReadFilters = {}) {
   }
   eventParams.push(filters.mode === 'range' ? 1000 : 300);
   const limitParam = eventParams.length;
-  const eventSql = `select id, employee_email, hostname, os_user, captured_at, received_at, event_type, app_name, window_title, url, idle_seconds, payload
+  const eventSql = `select id, employee_email, hostname, os_user, captured_at, received_at, event_type, app_name, window_title, url, idle_seconds, payload,
+      exists(select 1 from activity_screenshots s where s.activity_event_id = activity_events.id) as has_screenshot
     from activity_events
     ${eventWhere.length ? `where ${eventWhere.join(' and ')}` : ''}
     order by received_at desc, id desc

@@ -13,6 +13,7 @@ const typeLabels: Record<string, string> = {
   input_click: 'Click',
   window_focus: 'Focus change',
   audio_output: 'Audio',
+  typing_activity: 'Typing activity',
 };
 
 type DashboardData = {
@@ -93,6 +94,7 @@ function audioDescription(event: any): string {
 function eventSummary(event: any): string {
   const payload = event.payload || {};
   if (event.event_type === 'audio_output') return audioDescription(event);
+  if (event.event_type === 'typing_activity') return [payload.note || 'typing activity', payload.field_hint && `field=${payload.field_hint}`, payload.key_count != null && `${payload.key_count} input events`, payload.text_length != null && `${payload.text_length} chars`, payload.word_count != null && `${payload.word_count} words`, payload.typed_text, payload.url || event.url].filter(Boolean).join(' · ');
   if (event.event_type === 'terminal_command') return [payload.terminal_command || event.window_title, payload.terminal_cwd && `cwd=${payload.terminal_cwd}`, payload.terminal_exit_code != null && `exit=${payload.terminal_exit_code}`].filter(Boolean).join(' · ');
   if (event.event_type === 'input_click') return payload.target_hint || [event.app_name, event.window_title].filter(Boolean).join(' · ');
   if (event.event_type === 'browser_tab') return [payload.title || event.window_title, payload.url || event.url].filter(Boolean).join(' · ');
@@ -115,20 +117,43 @@ function filteredEvents(events: any[], mode: 'latest' | 'range', user: string, e
 }
 
 function EventsTable({ events }: { events: any[] }) {
+  const [screenshots, setScreenshots] = useState<Record<string, { loading?: boolean; image?: string; error?: string }>>({});
+  async function showScreenshot(eventId: string | number) {
+    const key = String(eventId);
+    setScreenshots((current) => ({ ...current, [key]: { loading: true } }));
+    try {
+      const response = await fetch(`/api/screenshot?id=${encodeURIComponent(key)}`);
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.error || 'Could not load screenshot');
+      setScreenshots((current) => ({ ...current, [key]: { image: payload.image } }));
+    } catch (error) {
+      setScreenshots((current) => ({ ...current, [key]: { error: error instanceof Error ? error.message : String(error) } }));
+    }
+  }
+
   if (events.length === 0) return <p className="muted">No events in this filter.</p>;
   return (
     <table className="table">
       <thead><tr><th>Captured</th><th>Received</th><th>Employee</th><th>Host</th><th>Type</th><th>Details</th></tr></thead>
-      <tbody>{events.map((event:any, index:number)=>(
+      <tbody>{events.map((event:any, index:number)=>{
+        const screenshot = screenshots[String(event.id)];
+        return (
         <tr key={`${event.id || index}-${event.event_type}-${event.captured_at}`}>
           <td>{formatLocalTime(event.captured_at)}<br /><span className="muted">{relativeAge(event.captured_at)}</span></td>
           <td>{formatLocalTime(event.received_at)}<br /><span className="muted">uploaded {relativeAge(event.received_at)}</span></td>
           <td>{event.employee_email}</td>
           <td>{event.hostname}</td>
           <td>{typeLabels[event.event_type] || event.event_type}</td>
-          <td>{eventSummary(event) || '—'}</td>
+          <td>
+            {eventSummary(event) || '—'}
+            {event.has_screenshot && <div style={{marginTop: 8}}>
+              <button type="button" onClick={() => showScreenshot(event.id)} disabled={Boolean(screenshot?.loading)}>{screenshot?.loading ? 'Loading…' : 'Show'}</button>
+              {screenshot?.error && <span className="bad" style={{marginLeft: 8}}>{screenshot.error}</span>}
+              {screenshot?.image && <div style={{marginTop: 8}}><img src={screenshot.image} alt={`Screenshot for ${event.employee_email} at ${formatLocalTime(event.captured_at)}`} style={{maxWidth: '520px', width: '100%', border: '1px solid #d7dfef', borderRadius: 8}} /></div>}
+            </div>}
+          </td>
         </tr>
-      ))}</tbody>
+      );})}</tbody>
     </table>
   );
 }

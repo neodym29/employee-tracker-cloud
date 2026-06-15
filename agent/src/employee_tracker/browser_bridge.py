@@ -81,6 +81,25 @@ class BrowserClickInfo:
     source: str = 'browser-extension'
 
 
+@dataclass(frozen=True)
+class BrowserTypingInfo:
+    browser: str
+    app_key: str
+    tab_id: int | None
+    window_id: int | None
+    title: str | None
+    url: str | None
+    tag_name: str | None
+    input_type: str | None
+    field_hint: str | None
+    key_count: int
+    text_length: int
+    word_count: int
+    typed_sample_redacted: str | None
+    sensitive: bool
+    source: str = 'browser-extension'
+
+
 class BrowserBridge:
     def __init__(self, host: str = '127.0.0.1', port: int = 8766) -> None:
         self.host = host
@@ -88,6 +107,7 @@ class BrowserBridge:
         self._lock = threading.Lock()
         self._tabs: list[BrowserTabInfo] = []
         self._clicks: list[BrowserClickInfo] = []
+        self._typing_events: list[BrowserTypingInfo] = []
         self._focus_events: list[BrowserFocusEventInfo] = []
         self._last_active_tab_by_app: dict[str, BrowserTabInfo] = {}
         self._gnome_windows: list[GnomeWindowInfo] = []
@@ -115,6 +135,10 @@ class BrowserBridge:
                         return
                     if self.path == '/browser-click':
                         bridge.add_click(payload)
+                        self._send_json({'ok': True})
+                        return
+                    if self.path == '/browser-typing':
+                        bridge.add_typing_event(payload)
                         self._send_json({'ok': True})
                         return
                     if self.path == '/browser-focus':
@@ -210,6 +234,30 @@ class BrowserBridge:
             self._clicks = self._clicks[-500:]
             self._last_seen = time.time()
 
+    def add_typing_event(self, payload: dict[str, Any]) -> None:
+        browser = _browser_name(payload.get('browser'))
+        app_key = _app_key(browser)
+        event = BrowserTypingInfo(
+            browser=browser,
+            app_key=app_key,
+            tab_id=_safe_int(payload.get('tabId')),
+            window_id=_safe_int(payload.get('windowId')),
+            title=_clean_text(payload.get('title'), 300),
+            url=_clean_text(payload.get('url'), 1000),
+            tag_name=_clean_text(payload.get('tagName'), 80),
+            input_type=_clean_text(payload.get('inputType'), 80),
+            field_hint=_clean_text(payload.get('fieldHint'), 180),
+            key_count=max(0, _safe_int(payload.get('keyCount')) or 0),
+            text_length=max(0, _safe_int(payload.get('textLength')) or 0),
+            word_count=max(0, _safe_int(payload.get('wordCount')) or 0),
+            typed_sample_redacted=_clean_text(payload.get('typed_sample_redacted'), 220),
+            sensitive=bool(payload.get('sensitive')),
+        )
+        with self._lock:
+            self._typing_events.append(event)
+            self._typing_events = self._typing_events[-500:]
+            self._last_seen = time.time()
+
     def add_focus_event(self, payload: dict[str, Any]) -> None:
         browser = _browser_name(payload.get('browser'))
         app_key = _app_key(browser)
@@ -276,6 +324,12 @@ class BrowserBridge:
             clicks = list(self._clicks)
             self._clicks.clear()
             return clicks
+
+    def read_typing_events(self) -> list[BrowserTypingInfo]:
+        with self._lock:
+            events = list(self._typing_events)
+            self._typing_events.clear()
+            return events
 
     def update_gnome_state(self, payload: dict[str, Any]) -> None:
         windows: list[GnomeWindowInfo] = []

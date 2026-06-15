@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+import base64
 import time
 
 from .browser_bridge import BrowserBridge
@@ -15,6 +16,7 @@ from .db import (
     insert_current_subwindow_snapshot,
     insert_file_event,
     insert_input_click_event,
+    insert_typing_activity_event,
     insert_window_focus_event,
     insert_audio_output_snapshot,
     insert_browser_compliance_event,
@@ -623,6 +625,38 @@ class ActivityCollector:
             )
         return rows
 
+    def _record_typing_activity_events(self, connection, captured_at: str, host: str) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
+        for event in self._browser_bridge.read_typing_events():
+            window_id = None
+            if event.window_id is not None and event.tab_id is not None:
+                window_id = f'browser:{event.app_key}:window:{event.window_id}:tab:{event.tab_id}'
+            typed_text = event.typed_sample_redacted or f'[redacted browser text: {event.text_length} chars, {event.word_count} words]'
+            note = 'sensitive field; content redacted' if event.sensitive else 'browser typing activity; text content redacted'
+            row = {
+                'captured_at': captured_at,
+                'username': self.username,
+                'host': host,
+                'event_type': 'typing_activity',
+                'app_name': event.browser,
+                'window_title': event.title,
+                'window_id': window_id,
+                'url': event.url,
+                'typed_text': typed_text,
+                'key_count': event.key_count,
+                'text_length': event.text_length,
+                'word_count': event.word_count,
+                'tag_name': event.tag_name,
+                'input_type': event.input_type,
+                'field_hint': event.field_hint,
+                'sensitive': event.sensitive,
+                'source': event.source,
+                'note': note,
+            }
+            rows.append(row)
+            insert_typing_activity_event(connection, row)
+        return rows
+
     def _record_peripheral_snapshots(self, connection, captured_at: str, host: str) -> None:
         for device in list_peripherals():
             insert_peripheral_snapshot(
@@ -786,11 +820,18 @@ class ActivityCollector:
         self._record_window_focus_event(connection, captured_at, host, window)
         click_events = self._record_click_events(connection, captured_at, host, window, windows)
         terminal_command_events = self._record_terminal_command_events()
+        typing_activity_events = self._record_typing_activity_events(connection, captured_at, host)
         audio_outputs = self._record_audio_outputs(connection, captured_at, host)
         screenshot_path = None
+        screenshot_png_base64 = None
         if self.enable_screenshots and (now - self._last_screenshot_at) >= self.screenshot_interval_seconds:
             screenshot = capture_screenshot(self.screenshot_dir, self.username, window.window_id)
             screenshot_path = str(screenshot) if screenshot else None
+            if screenshot and screenshot.suffix.lower() == '.png':
+                try:
+                    screenshot_png_base64 = base64.b64encode(screenshot.read_bytes()).decode('ascii')
+                except OSError:
+                    screenshot_png_base64 = None
             self._last_screenshot_at = now
 
         rich_events = (
@@ -799,6 +840,7 @@ class ActivityCollector:
             + [{**row, 'event_type': 'window_focus'} for row in focus_events]
             + [{**row, 'event_type': 'input_click'} for row in click_events]
             + terminal_command_events
+            + [{**row, 'event_type': 'typing_activity'} for row in typing_activity_events]
             + [{**row, 'event_type': 'audio_output'} for row in audio_outputs]
         )
 
@@ -822,10 +864,14 @@ class ActivityCollector:
                 'focus_events': focus_events[:80],
                 'click_events': click_events[:120],
                 'terminal_commands': terminal_command_events[:120],
+                'typing_activity': typing_activity_events[:120],
                 'audio_outputs': audio_outputs[:80],
             },
             'rich_events': rich_events[:250],
         }
+        if screenshot_png_base64:
+            activity_payload['screenshot_png_base64'] = screenshot_png_base64
+            activity_payload['screenshot_mime_type'] = 'image/png'
         insert_activity(connection, activity_payload)
         cloud_upload_ok = self._cloud_uploader.upload_activity(activity_payload)
         activity_payload['_cloud_upload_ok'] = cloud_upload_ok

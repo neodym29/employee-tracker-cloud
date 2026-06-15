@@ -825,7 +825,7 @@ def insert_browser_compliance_event(connection: sqlite3.Connection, row: dict[st
     connection.commit()
 
 
-def insert_keystroke_event(connection: sqlite3.Connection, row: dict[str, Any]) -> None:
+def insert_typing_activity_event(connection: sqlite3.Connection, row: dict[str, Any]) -> None:
     connection.execute(
         """
         INSERT INTO keystroke_events (

@@ -57,10 +57,25 @@ export async function POST(req: NextRequest) {
     returning id
   `, [companyId, userId, deviceKey, employeeEmail, hostname, osUser]);
 
-  await db.query(`
+  const screenshotBase64 = asString(body.screenshot_png_base64);
+  const screenshotMimeType = asString(body.screenshot_mime_type, 'image/png');
+  const sanitizedBody = { ...body };
+  delete sanitizedBody.screenshot_png_base64;
+  delete sanitizedBody.screenshot_mime_type;
+
+  const eventResult = await db.query(`
     insert into activity_events(company_id,device_id,employee_email,hostname,os_user,captured_at,event_type,app_name,window_title,url,idle_seconds,payload)
     values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
-  `, [companyId, device.rows[0].id, employeeEmail, hostname, osUser, capturedAt, asString(body.event_type, 'activity_snapshot'), asString(body.app_name), asString(body.window_title), asString(body.url), asNumber(body.idle_seconds), JSON.stringify(body)]);
+    returning id
+  `, [companyId, device.rows[0].id, employeeEmail, hostname, osUser, capturedAt, asString(body.event_type, 'activity_snapshot'), asString(body.app_name), asString(body.window_title), asString(body.url), asNumber(body.idle_seconds), JSON.stringify(sanitizedBody)]);
+
+  if (screenshotBase64 && /^image\/(png|jpeg|webp)$/.test(screenshotMimeType) && screenshotBase64.length < 6_000_000) {
+    await db.query(`
+      insert into activity_screenshots(activity_event_id,company_id,employee_email,captured_at,mime_type,image_base64)
+      values($1,$2,$3,$4,$5,$6)
+      on conflict(activity_event_id) do update set mime_type=excluded.mime_type, image_base64=excluded.image_base64
+    `, [eventResult.rows[0].id, companyId, employeeEmail, capturedAt, screenshotMimeType, screenshotBase64]);
+  }
 
   for (const event of richEventRows(body, capturedAt)) {
     await db.query(`
