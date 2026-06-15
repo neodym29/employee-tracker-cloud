@@ -242,9 +242,7 @@ export async function wipeTelemetryForSetup() {
   `);
   await db.query('begin');
   try {
-    await db.query(`delete from activity_screenshots`);
-    await db.query(`delete from activity_events`);
-    await db.query(`delete from devices`);
+    await db.query(`truncate table activity_screenshots, activity_events, devices restart identity`);
     await db.query('commit');
   } catch (error) {
     await db.query('rollback');
