@@ -13,6 +13,8 @@ const typeLabels: Record<string, string> = {
   browser_tab: 'Web surfing',
   input_click: 'Click',
   activity_session: 'Activity session',
+  typed_chunk: 'Typed chunk',
+  shortcut: 'Shortcut',
   window_focus: 'Focus change',
   audio_output: 'Audio',
   typing_activity: 'Typing activity',
@@ -116,6 +118,8 @@ function eventSummary(event: any): string {
   const payload = event.payload || {};
   if (event.event_type === 'audio_output') return audioDescription(event);
   if (event.event_type === 'typing_activity') return [payload.note || 'typing activity', payload.field_hint && `field=${payload.field_hint}`, payload.key_count != null && `${payload.key_count} input events`, payload.text_length != null && `${payload.text_length} chars`, payload.word_count != null && `${payload.word_count} words`, payload.typed_text, payload.url || event.url].filter(Boolean).join(' · ');
+  if (event.event_type === 'typed_chunk') return [payload.note || 'typed chunk', payload.reason && `reason=${payload.reason}`, payload.key_count != null && `${payload.key_count} keys`, payload.duration_seconds != null && `${payload.duration_seconds}s`, payload.typed_text].filter(Boolean).join(' · ');
+  if (event.event_type === 'shortcut') return [payload.note || 'shortcut', payload.shortcut, payload.keys_json].filter(Boolean).join(' · ');
   if (event.event_type === 'activity_session') return [payload.summary || 'activity session', payload.field_hints?.length && `fields=${payload.field_hints.join(', ')}`, payload.typed_text, payload.url || event.url].filter(Boolean).join(' · ');
   if (event.event_type === 'terminal_command') return [payload.terminal_command || event.window_title, payload.terminal_cwd && `cwd=${payload.terminal_cwd}`, payload.terminal_exit_code != null && `exit=${payload.terminal_exit_code}`].filter(Boolean).join(' · ');
   if (event.event_type === 'input_click') return payload.target_hint || [event.app_name, event.window_title].filter(Boolean).join(' · ');

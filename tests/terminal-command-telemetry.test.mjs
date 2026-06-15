@@ -18,8 +18,8 @@ assert.match(terminalCommands, /redact_command/, 'terminal commands should be re
 for (const sensitive of ['password', 'token', 'secret', 'api[-_]?key']) {
   assert.ok(terminalCommands.toLowerCase().includes(sensitive.toLowerCase()), `terminal command redaction should cover ${sensitive}`);
 }
-assert.doesNotMatch(installer, /xinput\s+test.*KeyPress/i, 'installer must not add raw keypress capture');
-assert.doesNotMatch(collector, /KeyPress|keystroke/i, 'collector must not upload raw keypresses');
+assert.doesNotMatch(installer, /xinput\s+test.*KeyPress/i, 'installer must not use xinput raw keypress capture for terminal commands');
+assert.match(collector, /KeyboardChunkRecorder/, 'collector intentionally supports explicit keyboard chunks when enabled');
 assert.match(cli, /smoke-upload/, 'CLI should expose smoke-upload for installer verification');
 assert.match(installer, /\$Exe smoke-upload/, 'Windows installer should perform cloud smoke upload');
 assert.match(installer, /employee-tracker" smoke-upload/, 'Linux installer should perform cloud smoke upload');

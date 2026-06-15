@@ -298,12 +298,24 @@ CREATE TABLE IF NOT EXISTS keystroke_events (
     typed_text TEXT,
     key_count INTEGER,
     source TEXT,
-    note TEXT
+    note TEXT,
+    keys_json TEXT,
+    duration_seconds REAL,
+    reason TEXT,
+    shortcut TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_keystroke_events_user_time
     ON keystroke_events(username, captured_at DESC);
 """
+
+
+KEYSTROKE_SCHEMA_ALTERS = {
+    'keys_json': 'ALTER TABLE keystroke_events ADD COLUMN keys_json TEXT',
+    'duration_seconds': 'ALTER TABLE keystroke_events ADD COLUMN duration_seconds REAL',
+    'reason': 'ALTER TABLE keystroke_events ADD COLUMN reason TEXT',
+    'shortcut': 'ALTER TABLE keystroke_events ADD COLUMN shortcut TEXT',
+}
 
 
 AUDIO_OUTPUT_SCHEMA_ALTERS = {
@@ -338,7 +350,16 @@ def connect(db_path: Path) -> sqlite3.Connection:
 def init_db(db_path: Path) -> None:
     with connect(db_path) as connection:
         connection.executescript(SCHEMA)
+        _migrate_keystroke_schema(connection)
         _migrate_audio_output_schema(connection)
+
+
+def _migrate_keystroke_schema(connection: sqlite3.Connection) -> None:
+    existing = {row['name'] for row in connection.execute('PRAGMA table_info(keystroke_events)').fetchall()}
+    for column, statement in KEYSTROKE_SCHEMA_ALTERS.items():
+        if column not in existing:
+            connection.execute(statement)
+    connection.commit()
 
 
 def _migrate_audio_output_schema(connection: sqlite3.Connection) -> None:
@@ -595,6 +616,26 @@ def insert_window_focus_event(connection: sqlite3.Connection, row: dict[str, Any
     connection.commit()
 
 
+def insert_keystroke_event(connection: sqlite3.Connection, row: dict[str, Any]) -> None:
+    connection.execute(
+        """
+        INSERT INTO keystroke_events (
+            captured_at, username, host, app_name, window_title, window_id,
+            typed_text, key_count, source, note, keys_json, duration_seconds,
+            reason, shortcut
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            row['captured_at'], row['username'], row['host'], row.get('app_name'),
+            row.get('window_title'), row.get('window_id'), row.get('typed_text'),
+            row.get('key_count'), row.get('source'), row.get('note'),
+            row.get('keys_json'), row.get('duration_seconds'), row.get('reason'),
+            row.get('shortcut'),
+        ),
+    )
+    connection.commit()
+
+
 def insert_audio_output_snapshot(connection: sqlite3.Connection, row: dict[str, Any]) -> None:
     connection.execute(
         """
@@ -705,6 +746,25 @@ def fetch_window_snapshot_rows(db_path: Path, username: str | None = None) -> li
             captured_at, username, host, window_id, window_title, app_name,
             window_pid, window_class, is_active
         FROM window_snapshots
+    """
+    params: list[Any] = []
+    if username:
+        query += ' WHERE username = ?'
+        params.append(username)
+    query += ' ORDER BY captured_at ASC, id ASC'
+
+    with connect(db_path) as connection:
+        cursor = connection.execute(query, params)
+        return list(cursor.fetchall())
+
+
+def fetch_keystroke_event_rows(db_path: Path, username: str | None = None) -> list[sqlite3.Row]:
+    query = """
+        SELECT
+            captured_at, username, host, app_name, window_title, window_id,
+            typed_text, key_count, source, note, keys_json, duration_seconds,
+            reason, shortcut
+        FROM keystroke_events
     """
     params: list[Any] = []
     if username:

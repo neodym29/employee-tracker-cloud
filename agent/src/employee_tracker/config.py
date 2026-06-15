@@ -40,6 +40,9 @@ class Settings:
     file_scan_interval_seconds: int
     process_scan_interval_seconds: int
     enable_screenshots: bool
+    enable_keyboard_chunks: bool
+    keyboard_idle_seconds: float
+    keyboard_max_chunk_seconds: float
     app_name: str
     username: str
 
@@ -70,6 +73,9 @@ def load_settings() -> Settings:
         file_scan_interval_seconds=file_scan_interval_seconds,
         process_scan_interval_seconds=process_scan_interval_seconds,
         enable_screenshots=os.environ.get('EMPLOYEE_TRACKER_ENABLE_SCREENSHOTS', '1') not in {'0', 'false', 'False'},
+        enable_keyboard_chunks=os.environ.get('EMPLOYEE_TRACKER_ENABLE_KEYBOARD_CHUNKS', '0') in {'1', 'true', 'True', 'yes', 'YES'},
+        keyboard_idle_seconds=float(os.environ.get('EMPLOYEE_TRACKER_KEYBOARD_IDLE_SECONDS', '2.5')),
+        keyboard_max_chunk_seconds=float(os.environ.get('EMPLOYEE_TRACKER_KEYBOARD_MAX_CHUNK_SECONDS', '30')),
         app_name=os.environ.get('EMPLOYEE_TRACKER_APP_NAME', 'employee-tracker'),
         username=os.environ.get('EMPLOYEE_TRACKER_USERNAME', os.environ.get('USER', 'unknown')),
     )

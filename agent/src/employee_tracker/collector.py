@@ -156,6 +156,7 @@ from .db import (
     insert_current_subwindow_snapshot,
     insert_file_event,
     insert_input_click_event,
+    insert_keystroke_event,
     insert_typing_activity_event,
     insert_window_focus_event,
     insert_audio_output_snapshot,
@@ -168,6 +169,7 @@ from .db import (
     mark_file_deleted,
     upsert_file_state,
 )
+from .keyboard_chunks import KeyboardChunkRecorder, serialize_keys
 from .screenshots import capture_screenshot
 from .terminal_commands import TerminalCommandReader
 from .system import (
@@ -200,6 +202,9 @@ class ActivityCollector:
         file_scan_interval_seconds: int = 30,
         process_scan_interval_seconds: int = 30,
         enable_screenshots: bool = True,
+        enable_keyboard_chunks: bool = False,
+        keyboard_idle_seconds: float = 2.5,
+        keyboard_max_chunk_seconds: float = 30.0,
     ) -> None:
         self.db_path = db_path
         self.screenshot_dir = screenshot_dir
@@ -211,6 +216,14 @@ class ActivityCollector:
         self.file_scan_interval_seconds = file_scan_interval_seconds
         self.process_scan_interval_seconds = process_scan_interval_seconds
         self.enable_screenshots = enable_screenshots
+        self.enable_keyboard_chunks = enable_keyboard_chunks
+        self._keyboard_recorder = KeyboardChunkRecorder(
+            self.db_path.parent / 'keyboard-chunks',
+            idle_seconds=keyboard_idle_seconds,
+            max_chunk_seconds=keyboard_max_chunk_seconds,
+        ) if enable_keyboard_chunks else None
+        if self._keyboard_recorder is not None:
+            self._keyboard_recorder.start()
         self._last_screenshot_at: float = 0.0
         # Do not block first cloud connection on a potentially large home-directory scan.
         self._last_file_scan_at: float = time.time()
@@ -765,6 +778,55 @@ class ActivityCollector:
             )
         return rows
 
+    def _record_keystroke_events(self, connection, captured_at: str, host: str, window) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
+        recorder = self._keyboard_recorder
+        if recorder is None:
+            return rows
+        for event in recorder.drain_events(limit=120):
+            event_type = str(event.get('type') or 'typed_chunk')
+            if event_type == 'shortcut':
+                row = {
+                    'captured_at': event.get('ts') or captured_at,
+                    'username': self.username,
+                    'host': host,
+                    'event_type': 'shortcut',
+                    'app_name': getattr(window, 'app_name', None) or 'Keyboard',
+                    'window_title': getattr(window, 'title', None) or 'keyboard shortcut',
+                    'window_id': getattr(window, 'window_id', None),
+                    'typed_text': None,
+                    'key_count': len(event.get('keys') or []),
+                    'keys_json': serialize_keys(event.get('keys')),
+                    'duration_seconds': None,
+                    'reason': None,
+                    'shortcut': event.get('shortcut'),
+                    'source': 'evdev-keyboard-chunks',
+                    'note': 'keyboard shortcut captured from evdev',
+                }
+            else:
+                row = {
+                    'captured_at': event.get('end_ts') or captured_at,
+                    'username': self.username,
+                    'host': host,
+                    'event_type': 'typed_chunk',
+                    'app_name': getattr(window, 'app_name', None) or 'Keyboard',
+                    'window_title': getattr(window, 'title', None) or 'typed chunk',
+                    'window_id': getattr(window, 'window_id', None),
+                    'typed_text': event.get('text') or '',
+                    'key_count': event.get('key_count'),
+                    'keys_json': serialize_keys(event.get('keys')),
+                    'duration_seconds': event.get('duration_seconds'),
+                    'reason': event.get('reason'),
+                    'shortcut': None,
+                    'source': 'evdev-keyboard-chunks',
+                    'note': f"typed chunk flushed by {event.get('reason') or 'unknown'}",
+                    'start_ts': event.get('start_ts'),
+                    'end_ts': event.get('end_ts'),
+                }
+            rows.append(row)
+            insert_keystroke_event(connection, row)
+        return rows
+
     def _record_typing_activity_events(self, connection, captured_at: str, host: str) -> list[dict[str, object]]:
         rows: list[dict[str, object]] = []
         for event in self._browser_bridge.read_typing_events():
@@ -961,6 +1023,7 @@ class ActivityCollector:
         click_events = self._record_click_events(connection, captured_at, host, window, windows)
         terminal_command_events = self._record_terminal_command_events()
         typing_activity_events = self._record_typing_activity_events(connection, captured_at, host)
+        keystroke_events = self._record_keystroke_events(connection, captured_at, host, window)
         activity_session_events = build_activity_session_events(
             captured_at=captured_at,
             typing_rows=typing_activity_events,
@@ -989,6 +1052,7 @@ class ActivityCollector:
             + [{**row, 'event_type': 'input_click'} for row in click_events]
             + terminal_command_events
             + [{**row, 'event_type': 'typing_activity'} for row in typing_activity_events]
+            + keystroke_events
             + activity_session_events
             + [{**row, 'event_type': 'audio_output'} for row in audio_outputs]
         )
@@ -1014,6 +1078,7 @@ class ActivityCollector:
                 'click_events': click_events[:120],
                 'terminal_commands': terminal_command_events[:120],
                 'typing_activity': typing_activity_events[:120],
+                'keystrokes': keystroke_events[:120],
                 'activity_sessions': activity_session_events[:120],
                 'audio_outputs': audio_outputs[:80],
             },

@@ -30,13 +30,14 @@ SERVICE_DIR="$HOME/.config/systemd/user"
 SERVICE_FILE="$SERVICE_DIR/employee-tracker.service"
 
 echo "Installing Neodym employee tracker for ${user.email}"
+echo "Keyboard chunks: enabled"
 if command -v apt-get >/dev/null 2>&1; then
   if [ "$(id -u)" = "0" ]; then
     apt-get update
-    apt-get install -y python3 python3-venv python3-pip curl ca-certificates openssl x11-utils x11-xserver-utils xinput xprintidle usbutils pulseaudio-utils playerctl ffmpeg grim maim scrot
+    apt-get install -y python3 python3-venv python3-pip python3-evdev curl ca-certificates openssl x11-utils x11-xserver-utils xinput xprintidle usbutils pulseaudio-utils playerctl ffmpeg grim maim scrot
   elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
     sudo apt-get update
-    sudo apt-get install -y python3 python3-venv python3-pip curl ca-certificates openssl x11-utils x11-xserver-utils xinput xprintidle usbutils pulseaudio-utils playerctl ffmpeg grim maim scrot
+    sudo apt-get install -y python3 python3-venv python3-pip python3-evdev curl ca-certificates openssl x11-utils x11-xserver-utils xinput xprintidle usbutils pulseaudio-utils playerctl ffmpeg grim maim scrot
   else
     echo "Skipping apt dependency install because passwordless sudo is unavailable. Continuing with existing system packages."
   fi
@@ -371,6 +372,9 @@ EMPLOYEE_TRACKER_POLL_SECONDS=1
 EMPLOYEE_TRACKER_CLOUD_UPLOAD_SECONDS=1
 EMPLOYEE_TRACKER_ENABLE_SCREENSHOTS=1
 EMPLOYEE_TRACKER_SCREENSHOT_SECONDS=15
+EMPLOYEE_TRACKER_ENABLE_KEYBOARD_CHUNKS=1
+EMPLOYEE_TRACKER_KEYBOARD_IDLE_SECONDS=2.5
+EMPLOYEE_TRACKER_KEYBOARD_MAX_CHUNK_SECONDS=30
 EMPLOYEE_TRACKER_TERMINAL_LOG=%h/.local/share/neodym-employee-tracker/terminal-commands.tsv
 ENV
 # systemd EnvironmentFile does not expand %h inside values, so write HOME-expanded copies too.
@@ -503,6 +507,9 @@ EMPLOYEE_TRACKER_POLL_SECONDS=1
 EMPLOYEE_TRACKER_CLOUD_UPLOAD_SECONDS=1
 EMPLOYEE_TRACKER_ENABLE_SCREENSHOTS=1
 EMPLOYEE_TRACKER_SCREENSHOT_SECONDS=15
+EMPLOYEE_TRACKER_ENABLE_KEYBOARD_CHUNKS=0
+EMPLOYEE_TRACKER_KEYBOARD_IDLE_SECONDS=2.5
+EMPLOYEE_TRACKER_KEYBOARD_MAX_CHUNK_SECONDS=30
 ENV
 cat > "$RUNNER" <<RUNNER
 #!/usr/bin/env bash
@@ -671,6 +678,9 @@ EMPLOYEE_TRACKER_POLL_SECONDS=1
 EMPLOYEE_TRACKER_CLOUD_UPLOAD_SECONDS=1
 EMPLOYEE_TRACKER_ENABLE_SCREENSHOTS=1
 EMPLOYEE_TRACKER_SCREENSHOT_SECONDS=15
+EMPLOYEE_TRACKER_ENABLE_KEYBOARD_CHUNKS=0
+EMPLOYEE_TRACKER_KEYBOARD_IDLE_SECONDS=2.5
+EMPLOYEE_TRACKER_KEYBOARD_MAX_CHUNK_SECONDS=30
 EMPLOYEE_TRACKER_TERMINAL_LOG=%LOCALAPPDATA%\\NeodymEmployeeTracker\\terminal-commands.tsv
 '@ | Set-Content -Encoding UTF8 $EnvFile
 $Exe = Join-Path $VenvDir 'Scripts\\employee-tracker.exe'

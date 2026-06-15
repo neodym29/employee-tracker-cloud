@@ -299,6 +299,9 @@ def main(argv: list[str] | None = None) -> int:
             file_scan_interval_seconds=settings.file_scan_interval_seconds,
             process_scan_interval_seconds=settings.process_scan_interval_seconds,
             enable_screenshots=settings.enable_screenshots,
+            enable_keyboard_chunks=settings.enable_keyboard_chunks,
+            keyboard_idle_seconds=settings.keyboard_idle_seconds,
+            keyboard_max_chunk_seconds=settings.keyboard_max_chunk_seconds,
         )
         with connect(settings.db_path) as connection:
             payload = collector.run_once(connection)
@@ -321,6 +324,9 @@ def main(argv: list[str] | None = None) -> int:
             file_scan_interval_seconds=settings.file_scan_interval_seconds,
             process_scan_interval_seconds=settings.process_scan_interval_seconds,
             enable_screenshots=settings.enable_screenshots,
+            enable_keyboard_chunks=settings.enable_keyboard_chunks,
+            keyboard_idle_seconds=settings.keyboard_idle_seconds,
+            keyboard_max_chunk_seconds=settings.keyboard_max_chunk_seconds,
         )
         collector.run_forever()
         return 0
