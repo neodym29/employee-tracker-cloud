@@ -28,4 +28,6 @@ assert.match(pyproject, /evdev/, 'agent package should depend on evdev for Linux
 assert.match(dashboard, /typed_chunk: 'Typed chunk'/, 'dashboard should label typed chunks');
 assert.match(dashboard, /shortcut: 'Shortcut'/, 'dashboard should label shortcuts');
 assert.match(dashboard, /event\.event_type === 'typed_chunk'/, 'dashboard should summarize typed chunks');
+assert.match(dashboard, /where typed/, 'typed chunk summary should explicitly include where the chunk was typed');
+assert.match(dashboard, /event\.app_name.*event\.window_title/s, 'typed chunk summary should include app and window title location');
 assert.match(dashboard, /event\.event_type === 'shortcut'/, 'dashboard should summarize shortcuts');
