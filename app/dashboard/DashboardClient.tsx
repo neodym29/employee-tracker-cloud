@@ -310,7 +310,7 @@ export default function DashboardClient({ data, configured, error, initialFilter
           </div>
         </div>
         <EventsTable events={visibleEvents} />
-        <p className="muted smallNote">Raw keystroke/character capture is intentionally not enabled because it can collect passwords, private messages, and secrets.</p>
+        <p className="muted smallNote">Browser search and normal text fields log exact typed text; password, OTP, token, card, CVV, and PIN-like fields stay redacted.</p>
       </section>
     </div>
   );

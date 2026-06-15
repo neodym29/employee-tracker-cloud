@@ -230,6 +230,12 @@ function fieldHint(el) {
   return hint.slice(0, 180) || null;
 }
 
+function typedTextSample(el, sensitive) {
+  if (sensitive) return '[sensitive field redacted]';
+  const value = String(el.value || el.innerText || el.textContent || '');
+  return value.slice(0, 500);
+}
+
 function emitTypingActivity() {
   const el = typingState.element;
   const keyCount = typingState.keyCount;
@@ -248,7 +254,7 @@ function emitTypingActivity() {
     keyCount,
     textLength,
     wordCount,
-    typed_sample_redacted: sensitive ? '[sensitive field redacted]' : '[redacted browser text: ' + textLength + ' chars, ' + wordCount + ' words]',
+    typed_sample_redacted: typedTextSample(el, sensitive),
     sensitive,
   });
 }
@@ -616,7 +622,8 @@ document.addEventListener('click',(event)=>{const el=event.target&&event.target.
 let typingTimer=null; let typingState={keyCount:0,element:null};
 function isSensitiveInput(el){const type=String(el.type||'').toLowerCase(); const autocomplete=String(el.autocomplete||'').toLowerCase(); const label=[el.name,el.id,el.placeholder,el.getAttribute&&el.getAttribute('aria-label')].filter(Boolean).join(' ').toLowerCase(); return type==='password'||['current-password','new-password','one-time-code','cc-number','cc-csc'].includes(autocomplete)||/password|passwd|secret|token|api[_ -]?key|otp|2fa|credit|card|cvv|pin/.test(label);}
 function fieldHint(el){return [el.getAttribute&&el.getAttribute('aria-label'),el.placeholder,el.name,el.id].filter(Boolean).join(' / ').trim().slice(0,180)||null;}
-function emitTypingActivity(){const el=typingState.element; const keyCount=typingState.keyCount; typingTimer=null; typingState={keyCount:0,element:null}; if(!el||keyCount<=0) return; const value=String(el.value||el.innerText||el.textContent||''); const textLength=value.length; const wordCount=(value.trim().match(/\S+/g)||[]).length; const sensitive=isSensitiveInput(el); chrome.runtime.sendMessage({type:'neodym-typing',tagName:el.tagName,inputType:el.type||(el.isContentEditable?'contenteditable':null),fieldHint:fieldHint(el),keyCount:keyCount,textLength:textLength,wordCount:wordCount,typed_sample_redacted:sensitive?'[sensitive field redacted]':'[redacted browser text: '+textLength+' chars, '+wordCount+' words]',sensitive:sensitive});}
+function typedTextSample(el,sensitive){if(sensitive)return '[sensitive field redacted]'; const value=String(el.value||el.innerText||el.textContent||''); return value.slice(0,500);}
+function emitTypingActivity(){const el=typingState.element; const keyCount=typingState.keyCount; typingTimer=null; typingState={keyCount:0,element:null}; if(!el||keyCount<=0) return; const value=String(el.value||el.innerText||el.textContent||''); const textLength=value.length; const wordCount=(value.trim().match(/\S+/g)||[]).length; const sensitive=isSensitiveInput(el); chrome.runtime.sendMessage({type:'neodym-typing',tagName:el.tagName,inputType:el.type||(el.isContentEditable?'contenteditable':null),fieldHint:fieldHint(el),keyCount:keyCount,textLength:textLength,wordCount:wordCount,typed_sample_redacted:typedTextSample(el,sensitive),sensitive:sensitive});}
 document.addEventListener('input',(event)=>{const raw=event.target; if(!raw) return; const el=raw.matches&&raw.matches('input,textarea')?raw:(raw.closest&&raw.closest('input,textarea,[contenteditable]'))||raw; if(!el||!(el.matches&&(el.matches('input,textarea')||el.isContentEditable))) return; typingState.element=el; typingState.keyCount+=1; if(typingTimer) clearTimeout(typingTimer); typingTimer=setTimeout(emitTypingActivity,1200);},true);
 '@ | Set-Content -Encoding UTF8 (Join-Path $ExtDir 'content.js')
   $Browser = @(

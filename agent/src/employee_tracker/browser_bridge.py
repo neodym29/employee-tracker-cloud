@@ -250,7 +250,7 @@ class BrowserBridge:
             key_count=max(0, _safe_int(payload.get('keyCount')) or 0),
             text_length=max(0, _safe_int(payload.get('textLength')) or 0),
             word_count=max(0, _safe_int(payload.get('wordCount')) or 0),
-            typed_sample_redacted=_clean_text(payload.get('typed_sample_redacted'), 220),
+            typed_sample_redacted=_clean_text(payload.get('typed_sample_redacted'), 500),
             sensitive=bool(payload.get('sensitive')),
         )
         with self._lock:

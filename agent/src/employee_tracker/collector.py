@@ -771,8 +771,8 @@ class ActivityCollector:
             window_id = None
             if event.window_id is not None and event.tab_id is not None:
                 window_id = f'browser:{event.app_key}:window:{event.window_id}:tab:{event.tab_id}'
-            typed_text = event.typed_sample_redacted or f'[redacted browser text: {event.text_length} chars, {event.word_count} words]'
-            note = 'sensitive field; content redacted' if event.sensitive else 'browser typing activity; text content redacted'
+            typed_text = event.typed_sample_redacted or f'[browser text: {event.text_length} chars, {event.word_count} words]'
+            note = 'sensitive field; content redacted' if event.sensitive else 'browser typing activity; exact text captured'
             row = {
                 'captured_at': captured_at,
                 'username': self.username,

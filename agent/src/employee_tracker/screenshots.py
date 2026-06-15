@@ -22,12 +22,42 @@ def capture_screenshot(destination_dir: Path, prefix: str, window_id: str | None
     # Only use screenshot tools that can capture without popping the GNOME/Snap screenshot UI.
     # On GNOME Wayland there is intentionally no fully silent screenshot API for normal apps;
     # in that case we skip the screenshot rather than making the employee see a capture flash.
-    for capture in (_capture_grim, _capture_maim, _capture_scrot):
+    for capture in (_capture_grim, _capture_maim, _capture_scrot, _capture_pyautogui):
         screenshot = capture(destination_dir, prefix, timestamp)
         if screenshot is not None:
             return screenshot
 
     return None
+
+
+def _validated_screenshot(path: Path) -> Path | None:
+    if not path.exists() or path.stat().st_size <= 0:
+        return None
+    if _is_probably_black(path):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return None
+    return path
+
+
+def _is_probably_black(path: Path) -> bool:
+    try:
+        from PIL import Image
+    except Exception:
+        return False
+    try:
+        with Image.open(path) as image:
+            sample = image.convert('RGB')
+            sample.thumbnail((64, 64))
+            pixels = list(sample.getdata())
+    except Exception:
+        return False
+    if not pixels:
+        return False
+    dark_pixels = sum(1 for red, green, blue in pixels if red < 8 and green < 8 and blue < 8)
+    return dark_pixels / len(pixels) >= 0.98
 
 
 def _run_silent(command: list[str]) -> subprocess.CompletedProcess[bytes]:
@@ -64,7 +94,7 @@ $graphics.Dispose()
 $bitmap.Dispose()
 """.strip()
     result = _run_silent([powershell, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script])
-    return path if result.returncode == 0 and path.exists() else None
+    return _validated_screenshot(path) if result.returncode == 0 else None
 
 
 def _capture_grim(destination_dir: Path, prefix: str, timestamp: str) -> Path | None:
@@ -72,7 +102,7 @@ def _capture_grim(destination_dir: Path, prefix: str, timestamp: str) -> Path | 
         return None
     path = destination_dir / f'{prefix}_{timestamp}.png'
     result = _run_silent(['grim', str(path)])
-    return path if result.returncode == 0 and path.exists() else None
+    return _validated_screenshot(path) if result.returncode == 0 else None
 
 
 def _capture_maim(destination_dir: Path, prefix: str, timestamp: str) -> Path | None:
@@ -80,7 +110,7 @@ def _capture_maim(destination_dir: Path, prefix: str, timestamp: str) -> Path | 
         return None
     path = destination_dir / f'{prefix}_{timestamp}.png'
     result = _run_silent(['maim', str(path)])
-    return path if result.returncode == 0 and path.exists() else None
+    return _validated_screenshot(path) if result.returncode == 0 else None
 
 
 def _capture_scrot(destination_dir: Path, prefix: str, timestamp: str) -> Path | None:
@@ -88,7 +118,18 @@ def _capture_scrot(destination_dir: Path, prefix: str, timestamp: str) -> Path |
         return None
     path = destination_dir / f'{prefix}_{timestamp}.png'
     result = _run_silent(['scrot', '--silent', str(path)])
-    return path if result.returncode == 0 and path.exists() else None
+    return _validated_screenshot(path) if result.returncode == 0 else None
+
+
+def _capture_pyautogui(destination_dir: Path, prefix: str, timestamp: str) -> Path | None:
+    path = destination_dir / f'{prefix}_{timestamp}.png'
+    try:
+        import pyautogui
+        image = pyautogui.screenshot()
+        image.save(path)
+    except Exception:
+        return None
+    return _validated_screenshot(path)
 
 
 def _capture_xwindow(destination_dir: Path, prefix: str, timestamp: str, window_id: str) -> Path | None:
@@ -110,8 +151,8 @@ def _capture_xwindow(destination_dir: Path, prefix: str, timestamp: str, window_
             xwd_path.unlink(missing_ok=True)
         except OSError:
             pass
-        if convert_result.returncode == 0 and png_path.exists():
-            return png_path
+        if convert_result.returncode == 0:
+            return _validated_screenshot(png_path)
         return None
 
-    return xwd_path
+    return _validated_screenshot(xwd_path)

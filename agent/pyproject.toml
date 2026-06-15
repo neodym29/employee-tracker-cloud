@@ -7,7 +7,10 @@ name = "employee-tracker"
 version = "0.1.0"
 description = "Transparent Ubuntu background activity logger with workspace file activity tracking"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "Pillow>=10",
+    "pyautogui>=0.9.54",
+]
 
 [project.scripts]
 employee-tracker = "employee_tracker.cli:main"

@@ -31,7 +31,7 @@ for (const expected of ['richEventRows', 'body.rich_events', 'event.event_type',
   assert.match(ingest, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `ingest should explode rich event uploads: ${expected}`);
 }
 
-for (const expected of ['Activity logs', 'Currently open tabs', 'All event types', 'Raw keystroke/character capture is intentionally not enabled']) {
+for (const expected of ['Activity logs', 'Currently open tabs', 'All event types', 'Browser search and normal text fields log exact typed text']) {
   assert.match(dashboard, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `dashboard should show ${expected}`);
 }
 for (const expected of ['input_click', 'activity_session', 'audio_output', 'app_open']) {

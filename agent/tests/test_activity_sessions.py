@@ -12,9 +12,9 @@ class ActivitySessionTests(unittest.TestCase):
                 'window_title': 'Dashboard — https://example.test',
                 'window_id': 'browser:brave:window:1:tab:9',
                 'url': 'https://example.test',
-                'typed_text': '[redacted browser text: 12 chars, 2 words]',
-                'key_count': 12,
-                'text_length': 12,
+                'typed_text': 'quarterly invoices',
+                'key_count': 18,
+                'text_length': 18,
                 'word_count': 2,
                 'field_hint': 'Search',
                 'sensitive': False,
@@ -49,14 +49,14 @@ class ActivitySessionTests(unittest.TestCase):
         self.assertEqual(session['event_type'], 'activity_session')
         self.assertEqual(session['app_name'], 'Brave')
         self.assertEqual(session['window_id'], 'browser:brave:window:1:tab:9')
-        self.assertEqual(session['key_count'], 12)
+        self.assertEqual(session['key_count'], 18)
         self.assertEqual(session['click_count'], 1)
-        self.assertEqual(session['text_length'], 12)
+        self.assertEqual(session['text_length'], 18)
         self.assertEqual(session['word_count'], 2)
-        self.assertIn('typed 12 chars', session['summary'])
+        self.assertIn('typed 18 chars', session['summary'])
         self.assertIn('1 click', session['summary'])
         self.assertEqual(session['clicks'][0]['target_hint'], 'click on Submit in Dashboard (https://example.test)')
-        self.assertEqual(session['typed_text'], '[redacted browser text: 12 chars, 2 words]')
+        self.assertEqual(session['typed_text'], 'quarterly invoices')
 
     def test_redacts_sensitive_session_text(self) -> None:
         sessions = build_activity_session_events(
