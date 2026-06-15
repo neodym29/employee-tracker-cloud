@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ensureSchema, health, listEventStatsForSetup, listUsersForSetup, resetExistingUserPassword, restoreAdminAccess, setTelemetryPauseForSetup, wipeTelemetryBatchForSetup, wipeTelemetryForSetup } from '@/lib/db';
+import { ensureSchema, health, listEventStatsForSetup, listUsersForSetup, optimizeTelemetryIndexesForSetup, repairTelemetrySequencesForSetup, resetExistingUserPassword, restoreAdminAccess, setTelemetryPauseForSetup, wipeTelemetryBatchForSetup, wipeTelemetryForSetup } from '@/lib/db';
 
 export async function POST(req: NextRequest) {
   const key = req.headers.get('x-admin-setup-key') || '';
@@ -27,6 +27,14 @@ export async function POST(req: NextRequest) {
   }
   if (body.action === 'wipe_telemetry_batch') {
     const result = await wipeTelemetryBatchForSetup(Number(body.limit || 10000));
+    return NextResponse.json({ ok: true, result });
+  }
+  if (body.action === 'repair_sequences') {
+    const result = await repairTelemetrySequencesForSetup();
+    return NextResponse.json({ ok: true, result });
+  }
+  if (body.action === 'optimize_indexes') {
+    const result = await optimizeTelemetryIndexesForSetup();
     return NextResponse.json({ ok: true, result });
   }
   if (body.action === 'restore_admin') {

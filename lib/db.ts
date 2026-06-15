@@ -165,11 +165,6 @@ export async function ensureSchema() {
   await db.query(`alter table app_users add column if not exists enrollment_token text unique`);
   await db.query(`alter table app_users add column if not exists approved_at timestamptz`);
   await db.query(`alter table app_users add column if not exists password_hash text`);
-  await db.query(`create index if not exists idx_activity_events_received_id on activity_events (received_at desc, id desc)`);
-  await db.query(`create index if not exists idx_activity_events_captured_id on activity_events (captured_at desc, id desc)`);
-  await db.query(`create index if not exists idx_activity_events_employee_received on activity_events (employee_email, received_at desc, id desc)`);
-  await db.query(`create index if not exists idx_activity_events_type_received on activity_events (event_type, received_at desc, id desc)`);
-  await db.query(`create index if not exists idx_devices_last_seen on devices (last_seen_at desc)`);
 }
 
 export async function registerCompanyWithAdmin(companyName: string, adminEmail: string, adminPassword: string) {
@@ -285,6 +280,26 @@ export async function wipeTelemetryBatchForSetup(limit = 10000) {
 export async function wipeTelemetryForSetup() {
   await setTelemetryPauseForSetup(true);
   return wipeTelemetryBatchForSetup(50000);
+}
+
+export async function repairTelemetrySequencesForSetup() {
+  const db = getPool();
+  await ensureSchema();
+  const tables = ['companies', 'app_users', 'devices', 'activity_events', 'activity_screenshots'] as const;
+  for (const table of tables) {
+    await db.query(`select setval(pg_get_serial_sequence($1, 'id'), coalesce((select max(id) from ${table}), 0) + 1, false)`, [table]);
+  }
+  return { repaired: tables };
+}
+
+export async function optimizeTelemetryIndexesForSetup() {
+  const db = getPool();
+  await ensureSchema();
+  await db.query(`create index if not exists idx_activity_events_received_id on activity_events (received_at desc, id desc)`);
+  await db.query(`create index if not exists idx_activity_events_employee_received on activity_events (employee_email, received_at desc, id desc)`);
+  await db.query(`create index if not exists idx_activity_events_type_received on activity_events (event_type, received_at desc, id desc)`);
+  await db.query(`create index if not exists idx_devices_last_seen on devices (last_seen_at desc)`);
+  return { optimized: true };
 }
 
 export async function restoreAdminAccess(email: string, password: string) {
