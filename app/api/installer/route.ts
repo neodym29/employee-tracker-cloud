@@ -238,8 +238,12 @@ function emitTypingActivity() {
 }
 
 document.addEventListener('input', (event) => {
-  const el = event.target;
-  if (!el || !(el.matches && el.matches('input,textarea,[contenteditable="true"]'))) return;
+  const raw = event.target;
+  if (!raw) return;
+  const el = raw.matches && raw.matches('input,textarea')
+    ? raw
+    : (raw.closest && raw.closest('input,textarea,[contenteditable]')) || raw;
+  if (!el || !(el.matches && (el.matches('input,textarea') || el.isContentEditable))) return;
   typingState.element = el;
   typingState.keyCount += 1;
   if (typingTimer) clearTimeout(typingTimer);
@@ -343,7 +347,8 @@ EMPLOYEE_TRACKER_PROCESS_SCAN_SECONDS=30
 EMPLOYEE_TRACKER_POLL_SECONDS=1
 EMPLOYEE_TRACKER_CLOUD_UPLOAD_SECONDS=1
 EMPLOYEE_TRACKER_ENABLE_SCREENSHOTS=1
-EMPLOYEE_TRACKER_TERMINAL_LOG=$HOME/.local/share/neodym-employee-tracker/terminal-commands.tsv
+EMPLOYEE_TRACKER_SCREENSHOT_SECONDS=15
+EMPLOYEE_TRACKER_TERMINAL_LOG=%h/.local/share/neodym-employee-tracker/terminal-commands.tsv
 ENV
 # systemd EnvironmentFile does not expand %h inside values, so write HOME-expanded copies too.
 sed -i "s|%h|$HOME|g" "$ENV_FILE"
@@ -474,6 +479,7 @@ EMPLOYEE_TRACKER_PROCESS_SCAN_SECONDS=30
 EMPLOYEE_TRACKER_POLL_SECONDS=1
 EMPLOYEE_TRACKER_CLOUD_UPLOAD_SECONDS=1
 EMPLOYEE_TRACKER_ENABLE_SCREENSHOTS=1
+EMPLOYEE_TRACKER_SCREENSHOT_SECONDS=15
 ENV
 cat > "$RUNNER" <<RUNNER
 #!/usr/bin/env bash
@@ -593,7 +599,7 @@ let typingTimer=null; let typingState={keyCount:0,element:null};
 function isSensitiveInput(el){const type=String(el.type||'').toLowerCase(); const autocomplete=String(el.autocomplete||'').toLowerCase(); const label=[el.name,el.id,el.placeholder,el.getAttribute&&el.getAttribute('aria-label')].filter(Boolean).join(' ').toLowerCase(); return type==='password'||['current-password','new-password','one-time-code','cc-number','cc-csc'].includes(autocomplete)||/password|passwd|secret|token|api[_ -]?key|otp|2fa|credit|card|cvv|pin/.test(label);}
 function fieldHint(el){return [el.getAttribute&&el.getAttribute('aria-label'),el.placeholder,el.name,el.id].filter(Boolean).join(' / ').trim().slice(0,180)||null;}
 function emitTypingActivity(){const el=typingState.element; const keyCount=typingState.keyCount; typingTimer=null; typingState={keyCount:0,element:null}; if(!el||keyCount<=0) return; const value=String(el.value||el.innerText||el.textContent||''); const textLength=value.length; const wordCount=(value.trim().match(/\S+/g)||[]).length; const sensitive=isSensitiveInput(el); chrome.runtime.sendMessage({type:'neodym-typing',tagName:el.tagName,inputType:el.type||(el.isContentEditable?'contenteditable':null),fieldHint:fieldHint(el),keyCount:keyCount,textLength:textLength,wordCount:wordCount,typed_sample_redacted:sensitive?'[sensitive field redacted]':'[redacted browser text: '+textLength+' chars, '+wordCount+' words]',sensitive:sensitive});}
-document.addEventListener('input',(event)=>{const el=event.target; if(!el||!(el.matches&&el.matches('input,textarea,[contenteditable="true"]'))) return; typingState.element=el; typingState.keyCount+=1; if(typingTimer) clearTimeout(typingTimer); typingTimer=setTimeout(emitTypingActivity,1200);},true);
+document.addEventListener('input',(event)=>{const raw=event.target; if(!raw) return; const el=raw.matches&&raw.matches('input,textarea')?raw:(raw.closest&&raw.closest('input,textarea,[contenteditable]'))||raw; if(!el||!(el.matches&&(el.matches('input,textarea')||el.isContentEditable))) return; typingState.element=el; typingState.keyCount+=1; if(typingTimer) clearTimeout(typingTimer); typingTimer=setTimeout(emitTypingActivity,1200);},true);
 '@ | Set-Content -Encoding UTF8 (Join-Path $ExtDir 'content.js')
   $Browser = @(
     "$env:ProgramFiles\Google\Chrome\Application\chrome.exe", "$env:ProgramFiles(x86)\Google\Chrome\Application\chrome.exe",
@@ -639,6 +645,7 @@ EMPLOYEE_TRACKER_PROCESS_SCAN_SECONDS=30
 EMPLOYEE_TRACKER_POLL_SECONDS=1
 EMPLOYEE_TRACKER_CLOUD_UPLOAD_SECONDS=1
 EMPLOYEE_TRACKER_ENABLE_SCREENSHOTS=1
+EMPLOYEE_TRACKER_SCREENSHOT_SECONDS=15
 EMPLOYEE_TRACKER_TERMINAL_LOG=%LOCALAPPDATA%\\NeodymEmployeeTracker\\terminal-commands.tsv
 '@ | Set-Content -Encoding UTF8 $EnvFile
 $Exe = Join-Path $VenvDir 'Scripts\\employee-tracker.exe'

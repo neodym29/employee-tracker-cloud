@@ -69,7 +69,8 @@ export async function POST(req: NextRequest) {
     returning id
   `, [companyId, device.rows[0].id, employeeEmail, hostname, osUser, capturedAt, asString(body.event_type, 'activity_snapshot'), asString(body.app_name), asString(body.window_title), asString(body.url), asNumber(body.idle_seconds), JSON.stringify(sanitizedBody)]);
 
-  if (screenshotBase64 && /^image\/(png|jpeg|webp)$/.test(screenshotMimeType) && screenshotBase64.length < 6_000_000) {
+  const screenshotOk = Boolean(screenshotBase64 && /^image\/(png|jpeg|webp)$/.test(screenshotMimeType) && screenshotBase64.length < 15_000_000);
+  if (screenshotOk) {
     await db.query(`
       insert into activity_screenshots(activity_event_id,company_id,employee_email,captured_at,mime_type,image_base64)
       values($1,$2,$3,$4,$5,$6)
@@ -77,12 +78,26 @@ export async function POST(req: NextRequest) {
     `, [eventResult.rows[0].id, companyId, employeeEmail, capturedAt, screenshotMimeType, screenshotBase64]);
   }
 
-  for (const event of richEventRows(body, capturedAt)) {
+  const richRows = richEventRows(body, capturedAt);
+  for (const event of richRows) {
     await db.query(`
       insert into activity_events(company_id,device_id,employee_email,hostname,os_user,captured_at,event_type,app_name,window_title,url,idle_seconds,payload)
       values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
     `, [companyId, device.rows[0].id, employeeEmail, hostname, osUser, event.captured_at, event.event_type, event.app_name, event.window_title, event.url, event.idle_seconds, JSON.stringify(event.payload)]);
   }
 
-  return NextResponse.json({ ok: true, employee_email: employeeEmail, hostname, rich_events: richEventRows(body, capturedAt).length });
+  if (screenshotOk) {
+    const screenshotEvent = await db.query(`
+      insert into activity_events(company_id,device_id,employee_email,hostname,os_user,captured_at,event_type,app_name,window_title,url,idle_seconds,payload)
+      values($1,$2,$3,$4,$5,$6,'screenshot_capture',$7,$8,$9,$10,$11::jsonb)
+      returning id
+    `, [companyId, device.rows[0].id, employeeEmail, hostname, osUser, capturedAt, asString(body.app_name), asString(body.window_title), asString(body.url), asNumber(body.idle_seconds), JSON.stringify({ screenshot_path: asString(body.screenshot_path), source_event_id: eventResult.rows[0].id })]);
+    await db.query(`
+      insert into activity_screenshots(activity_event_id,company_id,employee_email,captured_at,mime_type,image_base64)
+      values($1,$2,$3,$4,$5,$6)
+      on conflict(activity_event_id) do update set mime_type=excluded.mime_type, image_base64=excluded.image_base64
+    `, [screenshotEvent.rows[0].id, companyId, employeeEmail, capturedAt, screenshotMimeType, screenshotBase64]);
+  }
+
+  return NextResponse.json({ ok: true, employee_email: employeeEmail, hostname, rich_events: richRows.length, screenshot: screenshotOk, screenshot_rejected: Boolean(screenshotBase64 && !screenshotOk) });
 }

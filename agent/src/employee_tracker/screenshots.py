@@ -44,16 +44,22 @@ def _capture_windows(destination_dir: Path, prefix: str, timestamp: str) -> Path
     powershell = which('powershell') or which('pwsh')
     if powershell is None:
         return None
-    path = destination_dir / f'{prefix}_{timestamp}.png'
+    # Use JPEG on Windows so multi-monitor captures stay under the ingest body limit.
+    # SystemInformation.VirtualScreen captures the whole desktop, not just monitor #1.
+    path = destination_dir / f'{prefix}_{timestamp}.jpg'
     escaped_path = str(path).replace("'", "''")
     script = f"""
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-$bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
 $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-$graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
-$bitmap.Save('{escaped_path}', [System.Drawing.Imaging.ImageFormat]::Png)
+$graphics.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bounds.Size)
+$jpegCodec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object {{ $_.MimeType -eq 'image/jpeg' }} | Select-Object -First 1
+$encoder = [System.Drawing.Imaging.Encoder]::Quality
+$params = New-Object System.Drawing.Imaging.EncoderParameters(1)
+$params.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter($encoder, [int64]65)
+$bitmap.Save('{escaped_path}', $jpegCodec, $params)
 $graphics.Dispose()
 $bitmap.Dispose()
 """.strip()

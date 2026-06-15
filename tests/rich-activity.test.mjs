@@ -19,7 +19,7 @@ for (const expected of [
   assert.match(collector, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `collector should upload ${expected}`);
 }
 
-for (const expected of ['neodym-typing', '/browser-typing', 'isSensitiveInput', 'typing_activity', 'typed_sample_redacted']) {
+for (const expected of ['neodym-typing', '/browser-typing', 'isSensitiveInput', 'typing_activity', 'typed_sample_redacted', 'el.isContentEditable']) {
   assert.match(installer, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `installer browser extension should support safe typing telemetry: ${expected}`);
 }
 
@@ -34,7 +34,7 @@ for (const expected of ['input_click', 'browser_tab', 'audio_output', 'app_open'
   assert.match(dashboard, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `dashboard raw event filter/table should support ${expected}`);
 }
 
-for (const expected of ['_capture_windows', 'System.Windows.Forms', 'CopyFromScreen']) {
+for (const expected of ['_capture_windows', 'System.Windows.Forms', 'SystemInformation]::VirtualScreen', 'image/jpeg', 'CopyFromScreen']) {
   assert.match(screenshots, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `screenshot capture should support Windows silently: ${expected}`);
 }
 

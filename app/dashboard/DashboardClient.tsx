@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 
 const typeLabels: Record<string, string> = {
   activity_snapshot: 'Active window',
+  screenshot_capture: 'Screenshot',
   installer_smoke_test: 'Installer smoke test',
   terminal_command: 'Terminal command',
   app_open: 'Open app',

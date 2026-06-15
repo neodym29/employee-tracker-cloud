@@ -823,15 +823,18 @@ class ActivityCollector:
         typing_activity_events = self._record_typing_activity_events(connection, captured_at, host)
         audio_outputs = self._record_audio_outputs(connection, captured_at, host)
         screenshot_path = None
-        screenshot_png_base64 = None
+        screenshot_image_base64 = None
+        screenshot_mime_type = None
         if self.enable_screenshots and (now - self._last_screenshot_at) >= self.screenshot_interval_seconds:
             screenshot = capture_screenshot(self.screenshot_dir, self.username, window.window_id)
             screenshot_path = str(screenshot) if screenshot else None
-            if screenshot and screenshot.suffix.lower() == '.png':
+            if screenshot and screenshot.suffix.lower() in {'.png', '.jpg', '.jpeg', '.webp'}:
                 try:
-                    screenshot_png_base64 = base64.b64encode(screenshot.read_bytes()).decode('ascii')
+                    screenshot_image_base64 = base64.b64encode(screenshot.read_bytes()).decode('ascii')
+                    screenshot_mime_type = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp'}[screenshot.suffix.lower()]
                 except OSError:
-                    screenshot_png_base64 = None
+                    screenshot_image_base64 = None
+                    screenshot_mime_type = None
             self._last_screenshot_at = now
 
         rich_events = (
@@ -869,9 +872,10 @@ class ActivityCollector:
             },
             'rich_events': rich_events[:250],
         }
-        if screenshot_png_base64:
-            activity_payload['screenshot_png_base64'] = screenshot_png_base64
-            activity_payload['screenshot_mime_type'] = 'image/png'
+        if screenshot_image_base64 and screenshot_mime_type:
+            # Keep legacy key name for the server route, but send the actual MIME type.
+            activity_payload['screenshot_png_base64'] = screenshot_image_base64
+            activity_payload['screenshot_mime_type'] = screenshot_mime_type
         insert_activity(connection, activity_payload)
         cloud_upload_ok = self._cloud_uploader.upload_activity(activity_payload)
         activity_payload['_cloud_upload_ok'] = cloud_upload_ok
