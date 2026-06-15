@@ -156,6 +156,11 @@ export async function ensureSchema() {
       image_base64 text not null,
       created_at timestamptz not null default now()
     );
+    create table if not exists app_settings (
+      key text primary key,
+      value text not null,
+      updated_at timestamptz not null default now()
+    );
   `);
   await db.query(`alter table app_users add column if not exists enrollment_token text unique`);
   await db.query(`alter table app_users add column if not exists approved_at timestamptz`);
@@ -231,10 +236,32 @@ export async function listUsersForSetup() {
   return result.rows;
 }
 
+export async function telemetryPaused() {
+  const db = getPool();
+  await ensureSchema();
+  const result = await db.query(`select value from app_settings where key='telemetry_paused' limit 1`);
+  return result.rows[0]?.value === '1';
+}
+
+async function setTelemetryPaused(paused: boolean) {
+  const db = getPool();
+  await db.query(
+    `insert into app_settings(key,value,updated_at) values('telemetry_paused',$1,now())
+     on conflict(key) do update set value=excluded.value, updated_at=now()`,
+    [paused ? '1' : '0'],
+  );
+}
+
 export async function wipeTelemetryForSetup() {
   const db = getPool();
   await ensureSchema();
-  await db.query(`truncate table activity_screenshots, activity_events, devices restart identity cascade`);
+  await setTelemetryPaused(true);
+  try {
+    await db.query(`select pg_sleep(3)`);
+    await db.query(`truncate table activity_screenshots, activity_events, devices restart identity cascade`);
+  } finally {
+    await setTelemetryPaused(false);
+  }
   return { wiped: true, activity_events: 0, activity_screenshots: 0, devices: 0 };
 }
 

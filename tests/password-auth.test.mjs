@@ -27,5 +27,7 @@ assert.match(db, /resetExistingUserPassword/, 'setup recovery should be able to 
 assert.match(bootstrapApi, /reset_user_password/, 'setup bootstrap should expose guarded password reset for approved existing users');
 assert.match(bootstrapApi, /wipe_telemetry/, 'setup bootstrap should expose guarded telemetry wipe for deliberate resets');
 assert.match(db, /wipeTelemetryForSetup/, 'database helper should wipe telemetry data without removing users/companies');
+assert.match(db, /telemetryPaused/, 'database helper should expose a telemetry pause flag during destructive resets');
+assert.match(db, /pg_sleep\(3\)/, 'telemetry wipe should give in-flight ingest writes time to drain');
 assert.match(db, /truncate table activity_screenshots, activity_events, devices restart identity cascade/, 'telemetry wipe should clear cloud activity data efficiently');
 assert.match(bootstrapApi, /x-admin-setup-key/, 'setup bootstrap password reset must require the setup key');

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { companyByDomain, ensureSchema, getPool, health, userByEnrollmentToken } from '@/lib/db';
+import { companyByDomain, ensureSchema, getPool, health, telemetryPaused, userByEnrollmentToken } from '@/lib/db';
 
 function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
@@ -46,6 +46,7 @@ export async function POST(req: NextRequest) {
   const capturedAt = asString(body.captured_at, new Date().toISOString());
 
   await ensureSchema();
+  if (await telemetryPaused()) return NextResponse.json({ ok: false, error: 'telemetry temporarily paused for reset' }, { status: 503 });
   const db = getPool();
   const companyId = company.id;
   const user = await db.query(`select id from app_users where email=$1 and company_id=$2`, [employeeEmail, companyId]);
