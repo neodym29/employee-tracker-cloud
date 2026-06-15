@@ -28,6 +28,8 @@ assert.match(bootstrapApi, /reset_user_password/, 'setup bootstrap should expose
 assert.match(bootstrapApi, /wipe_telemetry/, 'setup bootstrap should expose guarded telemetry wipe for deliberate resets');
 assert.match(db, /wipeTelemetryForSetup/, 'database helper should wipe telemetry data without removing users/companies');
 assert.match(db, /telemetryPaused/, 'database helper should expose a telemetry pause flag during destructive resets');
-assert.match(db, /pg_sleep\(3\)/, 'telemetry wipe should give in-flight ingest writes time to drain');
-assert.match(db, /truncate table activity_screenshots, activity_events, devices restart identity cascade/, 'telemetry wipe should clear cloud activity data efficiently');
+assert.match(db, /wipeTelemetryBatchForSetup/, 'database helper should support repeated bounded wipe batches');
+assert.match(db, /delete from \$\{table\}/, 'telemetry wipe should use bounded deletes to avoid long production locks');
+assert.match(bootstrapApi, /set_telemetry_pause/, 'setup bootstrap should be able to pause ingestion while wiping');
+assert.match(bootstrapApi, /wipe_telemetry_batch/, 'setup bootstrap should expose bounded wipe batches');
 assert.match(bootstrapApi, /x-admin-setup-key/, 'setup bootstrap password reset must require the setup key');

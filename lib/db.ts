@@ -252,17 +252,34 @@ async function setTelemetryPaused(paused: boolean) {
   );
 }
 
-export async function wipeTelemetryForSetup() {
-  const db = getPool();
+export async function setTelemetryPauseForSetup(paused: boolean) {
   await ensureSchema();
-  await setTelemetryPaused(true);
-  try {
-    await db.query(`select pg_sleep(3)`);
-    await db.query(`truncate table activity_screenshots, activity_events, devices restart identity cascade`);
-  } finally {
-    await setTelemetryPaused(false);
-  }
-  return { wiped: true, activity_events: 0, activity_screenshots: 0, devices: 0 };
+  await setTelemetryPaused(paused);
+  return { telemetry_paused: paused };
+}
+
+async function deleteBatch(table: 'activity_screenshots' | 'activity_events' | 'devices', limit: number) {
+  const db = getPool();
+  const result = await db.query(
+    `with doomed as (select ctid from ${table} limit $1)
+     delete from ${table} using doomed where ${table}.ctid=doomed.ctid`,
+    [limit],
+  );
+  return result.rowCount || 0;
+}
+
+export async function wipeTelemetryBatchForSetup(limit = 10000) {
+  await ensureSchema();
+  const boundedLimit = Math.max(1, Math.min(Number(limit) || 10000, 50000));
+  const screenshots = await deleteBatch('activity_screenshots', boundedLimit);
+  const events = await deleteBatch('activity_events', boundedLimit);
+  const devices = events === 0 ? await deleteBatch('devices', boundedLimit) : 0;
+  return { screenshots, events, devices, done: screenshots === 0 && events === 0 && devices === 0 };
+}
+
+export async function wipeTelemetryForSetup() {
+  await setTelemetryPauseForSetup(true);
+  return wipeTelemetryBatchForSetup(50000);
 }
 
 export async function restoreAdminAccess(email: string, password: string) {
