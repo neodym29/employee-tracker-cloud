@@ -205,8 +205,11 @@ class KeyboardChunkRecorder:
     def list_keyboard_devices(self) -> list[Any]:
         if evdev is None or InputDevice is None or ecodes is None:
             return []
+        import glob
+
         devices = []
-        for path in evdev.list_devices():
+        paths = list(evdev.list_devices()) or sorted(glob.glob('/dev/input/event*'))
+        for path in paths:
             try:
                 dev = InputDevice(path)
                 caps = dev.capabilities()
