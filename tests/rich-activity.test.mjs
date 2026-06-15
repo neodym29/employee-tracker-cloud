@@ -11,6 +11,7 @@ for (const expected of [
   "'rich_logs'",
   "'rich_events'",
   "'input_click'",
+  "'activity_session'",
   "'typing_activity'",
   "'browser_tab'",
   "'audio_output'",
@@ -33,7 +34,7 @@ for (const expected of ['richEventRows', 'body.rich_events', 'event.event_type',
 for (const expected of ['Activity logs', 'Currently open tabs', 'All event types', 'Raw keystroke/character capture is intentionally not enabled']) {
   assert.match(dashboard, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `dashboard should show ${expected}`);
 }
-for (const expected of ['input_click', 'audio_output', 'app_open']) {
+for (const expected of ['input_click', 'activity_session', 'audio_output', 'app_open']) {
   assert.match(dashboard, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `dashboard activity log filter/table should support ${expected}`);
 }
 assert.match(dashboard, /currentOpenTabs/, 'dashboard should support browser_tab rows in the current open tabs section');

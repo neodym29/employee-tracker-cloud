@@ -6,6 +6,146 @@ from types import SimpleNamespace
 import base64
 import time
 
+SENSITIVE_TEXT_MARKERS = ('password', 'passcode', 'otp', '2fa', 'token', 'secret', 'private key', 'card', 'login', 'sign in', 'signin')
+
+
+def _session_key(row: dict[str, object]) -> tuple[str, str, str]:
+    return (
+        str(row.get('window_id') or ''),
+        str(row.get('app_name') or 'unknown'),
+        str(row.get('window_title') or 'unknown'),
+    )
+
+
+def _is_sensitive_session(rows: list[dict[str, object]]) -> bool:
+    for row in rows:
+        if row.get('sensitive'):
+            return True
+        haystack = ' '.join(
+            str(row.get(key) or '')
+            for key in ('window_title', 'field_hint', 'url', 'typed_text')
+        ).lower()
+        if any(marker in haystack for marker in SENSITIVE_TEXT_MARKERS):
+            return True
+    return False
+
+
+def _plural(count: int, singular: str) -> str:
+    return f'{count} {singular}' if count == 1 else f'{count} {singular}s'
+
+
+def _int_value(value: object, default: int = 0) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
+def build_activity_session_events(
+    *,
+    captured_at: str,
+    typing_rows: list[dict[str, object]],
+    click_rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Build v6-style activity_session blocks from the current upload tick.
+
+    This intentionally preserves the existing privacy posture: the browser bridge only
+    sends safe/redacted typing summaries, and sensitive fields stay redacted.
+    """
+    grouped: dict[tuple[str, str, str], dict[str, object]] = {}
+    source_rows: dict[tuple[str, str, str], list[dict[str, object]]] = {}
+
+    for row in typing_rows:
+        key = _session_key(row)
+        session = grouped.setdefault(
+            key,
+            {
+                'captured_at': captured_at,
+                'event_type': 'activity_session',
+                'app_name': key[1],
+                'window_title': key[2],
+                'window_id': key[0] or None,
+                'url': row.get('url'),
+                'source': row.get('source') or 'employee-tracker-sessionizer',
+                'started_by': 'typing',
+                'key_count': 0,
+                'click_count': 0,
+                'text_length': 0,
+                'word_count': 0,
+                'field_hints': [],
+                'typed_text': '',
+                'clicks': [],
+            },
+        )
+        source_rows.setdefault(key, []).append(row)
+        session['key_count'] = _int_value(session.get('key_count')) + _int_value(row.get('key_count'))
+        session['text_length'] = _int_value(session.get('text_length')) + _int_value(row.get('text_length'))
+        session['word_count'] = _int_value(session.get('word_count')) + _int_value(row.get('word_count'))
+        field_hint = row.get('field_hint')
+        if field_hint and field_hint not in session['field_hints']:
+            session['field_hints'].append(field_hint)
+        typed_text = row.get('typed_text')
+        if typed_text and not session.get('typed_text'):
+            session['typed_text'] = typed_text
+        if row.get('url') and not session.get('url'):
+            session['url'] = row.get('url')
+
+    for row in click_rows:
+        key = _session_key(row)
+        session = grouped.setdefault(
+            key,
+            {
+                'captured_at': captured_at,
+                'event_type': 'activity_session',
+                'app_name': key[1],
+                'window_title': key[2],
+                'window_id': key[0] or None,
+                'url': row.get('url'),
+                'source': row.get('source') or 'employee-tracker-sessionizer',
+                'started_by': 'click',
+                'key_count': 0,
+                'click_count': 0,
+                'text_length': 0,
+                'word_count': 0,
+                'field_hints': [],
+                'typed_text': '',
+                'clicks': [],
+            },
+        )
+        source_rows.setdefault(key, []).append(row)
+        click = {
+            'captured_at': row.get('captured_at'),
+            'button': row.get('button'),
+            'x': row.get('x'),
+            'y': row.get('y'),
+            'screen_x': row.get('screen_x'),
+            'screen_y': row.get('screen_y'),
+            'target_hint': row.get('target_hint'),
+            'url': row.get('url'),
+        }
+        session['clicks'].append(click)
+        session['click_count'] = _int_value(session.get('click_count')) + 1
+        if row.get('url') and not session.get('url'):
+            session['url'] = row.get('url')
+
+    sessions = []
+    for key, session in grouped.items():
+        sensitive = _is_sensitive_session(source_rows.get(key, []))
+        session['sensitive'] = sensitive
+        if sensitive and session.get('typed_text'):
+            session['typed_text'] = '[REDACTED_SENSITIVE_INPUT]'
+        parts = []
+        if session.get('key_count'):
+            parts.append(f"typed {session['text_length']} chars")
+            parts.append(_plural(int(session['key_count']), 'input event'))
+        if session.get('click_count'):
+            parts.append(_plural(int(session['click_count']), 'click'))
+        if session.get('field_hints'):
+            parts.append('fields=' + ', '.join(str(value) for value in session['field_hints'][:3]))
+        session['summary'] = ' · '.join(parts) or 'activity session'
+        sessions.append(session)
+    return sessions
+
 from .browser_bridge import BrowserBridge
 from .cloud import CloudUploader, load_cloud_settings
 from .db import (
@@ -821,6 +961,11 @@ class ActivityCollector:
         click_events = self._record_click_events(connection, captured_at, host, window, windows)
         terminal_command_events = self._record_terminal_command_events()
         typing_activity_events = self._record_typing_activity_events(connection, captured_at, host)
+        activity_session_events = build_activity_session_events(
+            captured_at=captured_at,
+            typing_rows=typing_activity_events,
+            click_rows=click_events,
+        )
         audio_outputs = self._record_audio_outputs(connection, captured_at, host)
         screenshot_path = None
         screenshot_image_base64 = None
@@ -844,6 +989,7 @@ class ActivityCollector:
             + [{**row, 'event_type': 'input_click'} for row in click_events]
             + terminal_command_events
             + [{**row, 'event_type': 'typing_activity'} for row in typing_activity_events]
+            + activity_session_events
             + [{**row, 'event_type': 'audio_output'} for row in audio_outputs]
         )
 
@@ -868,6 +1014,7 @@ class ActivityCollector:
                 'click_events': click_events[:120],
                 'terminal_commands': terminal_command_events[:120],
                 'typing_activity': typing_activity_events[:120],
+                'activity_sessions': activity_session_events[:120],
                 'audio_outputs': audio_outputs[:80],
             },
             'rich_events': rich_events[:250],
