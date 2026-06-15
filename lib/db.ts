@@ -206,6 +206,17 @@ export async function signupEmployee(email: string, password: string) {
   return { ok: true, email: normalized, company_domain: domain, status: 'pending' };
 }
 
+export async function listEventStatsForSetup() {
+  const db = getPool();
+  await ensureSchema();
+  const [totals, byType, recent] = await Promise.all([
+    db.query(`select count(*)::int as total_events, count(*) filter (where exists(select 1 from activity_screenshots s where s.activity_event_id=activity_events.id))::int as screenshot_events, max(received_at) as latest_received_at from activity_events`),
+    db.query(`select event_type, count(*)::int as count, max(received_at) as latest_received_at from activity_events group by event_type order by count desc, event_type asc`),
+    db.query(`select id, employee_email, event_type, received_at, captured_at, exists(select 1 from activity_screenshots s where s.activity_event_id=activity_events.id) as has_screenshot from activity_events order by received_at desc, id desc limit 20`),
+  ]);
+  return { totals: totals.rows[0], by_type: byType.rows, recent: recent.rows };
+}
+
 export async function listUsersForSetup() {
   const db = getPool();
   await ensureSchema();

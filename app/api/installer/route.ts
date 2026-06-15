@@ -568,6 +568,61 @@ if (!(Test-Path $VenvPython)) { throw "Python virtual environment was not create
 if ($LASTEXITCODE -ne 0) { throw 'Failed to upgrade pip.' }
 & $VenvPython -m pip install (Join-Path $SrcDir 'agent')
 if ($LASTEXITCODE -ne 0) { throw 'Failed to install the Neodym tracker agent Python package.' }
+function Install-BrowserExtension {
+  $ExtRoot = Join-Path $AppDir 'browser-extension'
+  $ExtDir = Join-Path $ExtRoot 'extension'
+  $KeyPath = Join-Path $ExtRoot 'neodym-tracker-extension.pem'
+  $CrxPath = Join-Path $ExtRoot 'extension.crx'
+  $UpdateXml = Join-Path $ExtRoot 'updates.xml'
+  New-Item -ItemType Directory -Force -Path $ExtDir | Out-Null
+  @'
+{"manifest_version":3,"name":"Neodym Activity Tracker Bridge","version":"1.0.0","description":"Reports active browser tabs, page URLs, clicks, and typing summaries to the local Neodym tracker agent.","permissions":["tabs","webNavigation","scripting","activeTab"],"host_permissions":["<all_urls>"],"background":{"service_worker":"background.js"},"content_scripts":[{"matches":["<all_urls>"],"js":["content.js"],"run_at":"document_idle","all_frames":false}]}
+'@ | Set-Content -Encoding UTF8 (Join-Path $ExtDir 'manifest.json')
+  @'
+const BRIDGE = 'http://127.0.0.1:8766';
+function browserName(){const ua=navigator.userAgent||''; if(ua.includes('Edg/')) return 'Microsoft Edge'; if(navigator.brave) return 'Brave'; if(ua.includes('Chrome/')) return 'Google Chrome'; return 'Chromium';}
+async function post(path,payload){try{await fetch(BRIDGE+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});}catch(error){}}
+async function collectTabs(){const tabs=await chrome.tabs.query({}); await post('/browser-state',{browser:browserName(),tabs:tabs,capturedAt:new Date().toISOString()});}
+chrome.tabs.onActivated.addListener(collectTabs); chrome.tabs.onUpdated.addListener(collectTabs); chrome.windows.onFocusChanged.addListener(collectTabs); chrome.runtime.onStartup.addListener(collectTabs); chrome.runtime.onInstalled.addListener(collectTabs);
+chrome.runtime.onMessage.addListener((message,sender)=>{if(!message||(message.type!=='neodym-click'&&message.type!=='neodym-typing')) return; const tab=sender.tab||{}; if(message.type==='neodym-typing'){post('/browser-typing',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,tagName:message.tagName,inputType:message.inputType,fieldHint:message.fieldHint,keyCount:message.keyCount,textLength:message.textLength,wordCount:message.wordCount,typed_sample_redacted:message.typed_sample_redacted,activityType:'typing_activity',sensitive:Boolean(message.sensitive),capturedAt:new Date().toISOString()}); return;} post('/browser-click',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,targetText:message.targetText,tagName:message.tagName,role:message.role,ariaLabel:message.ariaLabel,elementId:message.elementId,className:message.className,href:message.href,x:message.x,y:message.y,capturedAt:new Date().toISOString()});});
+setInterval(collectTabs,2000); collectTabs();
+'@ | Set-Content -Encoding UTF8 (Join-Path $ExtDir 'background.js')
+  @'
+document.addEventListener('click',(event)=>{const el=event.target&&event.target.closest?event.target.closest('a,button,input,textarea,select,[role],label,[onclick]'):event.target; if(!el) return; chrome.runtime.sendMessage({type:'neodym-click',targetText:(el.innerText||el.value||el.textContent||'').trim().slice(0,300),tagName:el.tagName,role:el.getAttribute&&el.getAttribute('role'),ariaLabel:el.getAttribute&&el.getAttribute('aria-label'),elementId:el.id||null,className:typeof el.className==='string'?el.className.slice(0,300):null,href:el.href||null,x:event.clientX,y:event.clientY});},true);
+let typingTimer=null; let typingState={keyCount:0,element:null};
+function isSensitiveInput(el){const type=String(el.type||'').toLowerCase(); const autocomplete=String(el.autocomplete||'').toLowerCase(); const label=[el.name,el.id,el.placeholder,el.getAttribute&&el.getAttribute('aria-label')].filter(Boolean).join(' ').toLowerCase(); return type==='password'||['current-password','new-password','one-time-code','cc-number','cc-csc'].includes(autocomplete)||/password|passwd|secret|token|api[_ -]?key|otp|2fa|credit|card|cvv|pin/.test(label);}
+function fieldHint(el){return [el.getAttribute&&el.getAttribute('aria-label'),el.placeholder,el.name,el.id].filter(Boolean).join(' / ').trim().slice(0,180)||null;}
+function emitTypingActivity(){const el=typingState.element; const keyCount=typingState.keyCount; typingTimer=null; typingState={keyCount:0,element:null}; if(!el||keyCount<=0) return; const value=String(el.value||el.innerText||el.textContent||''); const textLength=value.length; const wordCount=(value.trim().match(/\S+/g)||[]).length; const sensitive=isSensitiveInput(el); chrome.runtime.sendMessage({type:'neodym-typing',tagName:el.tagName,inputType:el.type||(el.isContentEditable?'contenteditable':null),fieldHint:fieldHint(el),keyCount:keyCount,textLength:textLength,wordCount:wordCount,typed_sample_redacted:sensitive?'[sensitive field redacted]':'[redacted browser text: '+textLength+' chars, '+wordCount+' words]',sensitive:sensitive});}
+document.addEventListener('input',(event)=>{const el=event.target; if(!el||!(el.matches&&el.matches('input,textarea,[contenteditable="true"]'))) return; typingState.element=el; typingState.keyCount+=1; if(typingTimer) clearTimeout(typingTimer); typingTimer=setTimeout(emitTypingActivity,1200);},true);
+'@ | Set-Content -Encoding UTF8 (Join-Path $ExtDir 'content.js')
+  $Browser = @(
+    "$env:ProgramFiles\Google\Chrome\Application\chrome.exe", "$env:ProgramFiles(x86)\Google\Chrome\Application\chrome.exe",
+    "$env:ProgramFiles\BraveSoftware\Brave-Browser\Application\brave.exe", "$env:ProgramFiles(x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
+    "$env:ProgramFiles(x86)\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+  ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+  if (!$Browser) { Write-Host 'Browser extension packaged files created, but Chrome/Brave/Edge was not found.'; return }
+  Remove-Item $CrxPath -Force -ErrorAction SilentlyContinue
+  if (Test-Path $KeyPath) { & $Browser --pack-extension=$ExtDir --pack-extension-key=$KeyPath | Out-Null } else { & $Browser --pack-extension=$ExtDir | Out-Null }
+  $GeneratedCrx = $ExtDir + '.crx'; $GeneratedPem = $ExtDir + '.pem'
+  if (Test-Path $GeneratedPem) { Move-Item -Force $GeneratedPem $KeyPath }
+  if (Test-Path $GeneratedCrx) { Move-Item -Force $GeneratedCrx $CrxPath }
+  if (!(Test-Path $CrxPath) -or !(Test-Path $KeyPath)) { Write-Host 'Browser extension pack failed; restart browser after refreshing and retry if typing telemetry is missing.'; return }
+  $pem = Get-Content $KeyPath -Raw
+  $rsa = [System.Security.Cryptography.RSA]::Create()
+  $rsa.ImportFromPem($pem)
+  $spki = $rsa.ExportSubjectPublicKeyInfo()
+  $hash = [System.Security.Cryptography.SHA256]::HashData($spki)
+  $hex = -join ($hash[0..15] | ForEach-Object { $_.ToString('x2') })
+  $ExtId = -join ($hex.ToCharArray() | ForEach-Object { [char]([int][char]'a' + [Convert]::ToInt32($_,16)) })
+  $CrxUri = (New-Object System.Uri($CrxPath)).AbsoluteUri
+  $UpdateXmlText = '<?xml version="1.0" encoding="UTF-8"?><gupdate xmlns="http://www.google.com/update2/response" protocol="2.0"><app appid="' + $ExtId + '"><updatecheck codebase="' + $CrxUri + '" version="1.0.0" /></app></gupdate>'
+  Set-Content -Encoding UTF8 -Path $UpdateXml -Value $UpdateXmlText
+  $UpdateUri = (New-Object System.Uri($UpdateXml)).AbsoluteUri
+  $PolicyRoots = @('HKCU:\Software\Policies\Google\Chrome\ExtensionInstallForcelist','HKCU:\Software\Policies\BraveSoftware\Brave\ExtensionInstallForcelist','HKCU:\Software\Policies\Microsoft\Edge\ExtensionInstallForcelist')
+  foreach ($Root in $PolicyRoots) { New-Item -Force -Path $Root | Out-Null; New-ItemProperty -Force -Path $Root -Name '1' -Value ($ExtId + ';' + $UpdateUri) -PropertyType String | Out-Null }
+  Write-Host ('Browser typing extension configured. Extension id: ' + $ExtId + '. Restart Chrome/Brave/Edge once if it is already open.')
+}
+Install-BrowserExtension
 @'
 EMPLOYEE_TRACKER_COMPANY_DOMAIN=${user.domain}
 EMPLOYEE_TRACKER_EMPLOYEE_EMAIL=${user.email}

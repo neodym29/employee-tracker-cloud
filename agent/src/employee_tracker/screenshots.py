@@ -3,12 +3,16 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 from shutil import which
+import os
 import subprocess
 
 
 def capture_screenshot(destination_dir: Path, prefix: str, window_id: str | None = None) -> Path | None:
     destination_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+
+    if os.name == 'nt':
+        return _capture_windows(destination_dir, prefix, timestamp)
 
     if window_id and which('xwd') is not None:
         screenshot = _capture_xwindow(destination_dir, prefix, timestamp, window_id)
@@ -34,6 +38,27 @@ def _run_silent(command: list[str]) -> subprocess.CompletedProcess[bytes]:
         stderr=subprocess.DEVNULL,
         timeout=5,
     )
+
+
+def _capture_windows(destination_dir: Path, prefix: str, timestamp: str) -> Path | None:
+    powershell = which('powershell') or which('pwsh')
+    if powershell is None:
+        return None
+    path = destination_dir / f'{prefix}_{timestamp}.png'
+    escaped_path = str(path).replace("'", "''")
+    script = f"""
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+$graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+$graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+$bitmap.Save('{escaped_path}', [System.Drawing.Imaging.ImageFormat]::Png)
+$graphics.Dispose()
+$bitmap.Dispose()
+""".strip()
+    result = _run_silent([powershell, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script])
+    return path if result.returncode == 0 and path.exists() else None
 
 
 def _capture_grim(destination_dir: Path, prefix: str, timestamp: str) -> Path | None:
