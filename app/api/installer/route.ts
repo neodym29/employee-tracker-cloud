@@ -126,8 +126,21 @@ chrome.tabs.onActivated.addListener(collectTabs);
 chrome.tabs.onUpdated.addListener(collectTabs);
 chrome.windows.onFocusChanged.addListener(collectTabs);
 chrome.tabs.onRemoved.addListener(collectTabs);
-chrome.runtime.onStartup.addListener(collectTabs);
-chrome.runtime.onInstalled.addListener(collectTabs);
+async function injectContentScriptIntoOpenTabs() {
+  if (!chrome.scripting || !chrome.scripting.executeScript) return;
+  try {
+    const tabs = await chrome.tabs.query({});
+    await Promise.allSettled((tabs || [])
+      .filter((tab) => tab.id && tab.url && /^(https?|file):/i.test(tab.url))
+      .map((tab) => chrome.scripting.executeScript({
+        target: {tabId: tab.id, allFrames: true},
+        files: ['content.js'],
+      })));
+    await collectTabs();
+  } catch (error) {}
+}
+chrome.runtime.onStartup.addListener(injectContentScriptIntoOpenTabs);
+chrome.runtime.onInstalled.addListener(injectContentScriptIntoOpenTabs);
 chrome.runtime.onMessage.addListener((message, sender) => {
   if (!message || (message.type !== 'neodym-click' && message.type !== 'neodym-typing')) return;
   const tab = sender.tab || {};
@@ -172,10 +185,13 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   });
 });
 setInterval(collectTabs, 2000);
-collectTabs();
+injectContentScriptIntoOpenTabs();
 '''.strip() + chr(10), encoding='utf-8')
 
 (ext_dir / 'content.js').write_text(r'''
+if (!window.__neodymTrackerBridgeContentInjected) {
+  window.__neodymTrackerBridgeContentInjected = true;
+
 document.addEventListener('click', (event) => {
   const el = event.target && event.target.closest ? event.target.closest('a,button,input,textarea,select,[role],label,[onclick]') : event.target;
   if (!el) return;
@@ -249,6 +265,7 @@ document.addEventListener('input', (event) => {
   if (typingTimer) clearTimeout(typingTimer);
   typingTimer = setTimeout(emitTypingActivity, 1200);
 }, true);
+}
 '''.strip() + chr(10), encoding='utf-8')
 
 if not key_path.exists():
@@ -589,11 +606,12 @@ const BRIDGE = 'http://127.0.0.1:8766';
 function browserName(){const ua=navigator.userAgent||''; if(ua.includes('Edg/')) return 'Microsoft Edge'; if(navigator.brave) return 'Brave'; if(ua.includes('Chrome/')) return 'Google Chrome'; return 'Chromium';}
 async function post(path,payload){try{await fetch(BRIDGE+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});}catch(error){}}
 async function collectTabs(){const tabs=await chrome.tabs.query({}); await post('/browser-state',{browser:browserName(),tabs:tabs,capturedAt:new Date().toISOString()});}
-chrome.tabs.onActivated.addListener(collectTabs); chrome.tabs.onUpdated.addListener(collectTabs); chrome.windows.onFocusChanged.addListener(collectTabs); chrome.runtime.onStartup.addListener(collectTabs); chrome.runtime.onInstalled.addListener(collectTabs);
+chrome.tabs.onActivated.addListener(collectTabs); chrome.tabs.onUpdated.addListener(collectTabs); chrome.windows.onFocusChanged.addListener(collectTabs); async function injectContentScriptIntoOpenTabs(){if(!chrome.scripting||!chrome.scripting.executeScript)return; try{const tabs=await chrome.tabs.query({}); await Promise.allSettled((tabs||[]).filter((tab)=>tab.id&&tab.url&&/^(https?|file):/i.test(tab.url)).map((tab)=>chrome.scripting.executeScript({target:{tabId:tab.id,allFrames:true},files:['content.js']}))); await collectTabs();}catch(error){}} chrome.runtime.onStartup.addListener(injectContentScriptIntoOpenTabs); chrome.runtime.onInstalled.addListener(injectContentScriptIntoOpenTabs);
 chrome.runtime.onMessage.addListener((message,sender)=>{if(!message||(message.type!=='neodym-click'&&message.type!=='neodym-typing')) return; const tab=sender.tab||{}; if(message.type==='neodym-typing'){post('/browser-typing',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,tagName:message.tagName,inputType:message.inputType,fieldHint:message.fieldHint,keyCount:message.keyCount,textLength:message.textLength,wordCount:message.wordCount,typed_sample_redacted:message.typed_sample_redacted,activityType:'typing_activity',sensitive:Boolean(message.sensitive),capturedAt:new Date().toISOString()}); return;} post('/browser-click',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,targetText:message.targetText,tagName:message.tagName,role:message.role,ariaLabel:message.ariaLabel,elementId:message.elementId,className:message.className,href:message.href,x:message.x,y:message.y,capturedAt:new Date().toISOString()});});
-setInterval(collectTabs,2000); collectTabs();
+setInterval(collectTabs,2000); injectContentScriptIntoOpenTabs();
 '@ | Set-Content -Encoding UTF8 (Join-Path $ExtDir 'background.js')
   @'
+if (!window.__neodymTrackerBridgeContentInjected) { window.__neodymTrackerBridgeContentInjected = true;
 document.addEventListener('click',(event)=>{const el=event.target&&event.target.closest?event.target.closest('a,button,input,textarea,select,[role],label,[onclick]'):event.target; if(!el) return; chrome.runtime.sendMessage({type:'neodym-click',targetText:(el.innerText||el.value||el.textContent||'').trim().slice(0,300),tagName:el.tagName,role:el.getAttribute&&el.getAttribute('role'),ariaLabel:el.getAttribute&&el.getAttribute('aria-label'),elementId:el.id||null,className:typeof el.className==='string'?el.className.slice(0,300):null,href:el.href||null,x:event.clientX,y:event.clientY});},true);
 let typingTimer=null; let typingState={keyCount:0,element:null};
 function isSensitiveInput(el){const type=String(el.type||'').toLowerCase(); const autocomplete=String(el.autocomplete||'').toLowerCase(); const label=[el.name,el.id,el.placeholder,el.getAttribute&&el.getAttribute('aria-label')].filter(Boolean).join(' ').toLowerCase(); return type==='password'||['current-password','new-password','one-time-code','cc-number','cc-csc'].includes(autocomplete)||/password|passwd|secret|token|api[_ -]?key|otp|2fa|credit|card|cvv|pin/.test(label);}
@@ -692,27 +710,7 @@ Start-Process -FilePath 'powershell' -ArgumentList @('-NoProfile','-ExecutionPol
 Write-Host 'Done. This Windows PC is enrolled as ${user.email} and will upload activity to ${base}/api/ingest'
 if (-not $TaskCreated) { Write-Host 'Note: Windows blocked scheduled task registration, so the Startup folder fallback was installed instead.' }
 `;
-  const windowsCmd = `@echo off
-setlocal
-echo Installing Neodym employee tracker for ${user.email} on Windows
-set "INSTALLER_PS1=%TEMP%\\neodym-tracker-installer-%RANDOM%.ps1"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '${installerUrl}&format=ps1' -OutFile '%INSTALLER_PS1%'"
-if errorlevel 1 (
-  echo Failed to download the installer.
-  pause
-  exit /b 1
-)
-powershell -NoProfile -ExecutionPolicy Bypass -File "%INSTALLER_PS1%"
-set "EXITCODE=%ERRORLEVEL%"
-del "%INSTALLER_PS1%" >nul 2>nul
-if not "%EXITCODE%"=="0" (
-  echo Installer failed with exit code %EXITCODE%.
-  pause
-  exit /b %EXITCODE%
-)
-echo Done. This Windows PC is enrolled as ${user.email}.
-pause
-`;
+  const windowsCmd = `@echo off\r\nsetlocal\r\necho Installing Neodym employee tracker for ${user.email} on Windows\r\nset "INSTALLER_PS1=%TEMP%\\neodym-tracker-installer-%RANDOM%.ps1"\r\npowershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '${installerUrl}&format=ps1' -OutFile '%INSTALLER_PS1%'"\r\nif errorlevel 1 (\r\n  echo Failed to download the installer.\r\n  pause\r\n  exit /b 1\r\n)\r\npowershell -NoProfile -ExecutionPolicy Bypass -File "%INSTALLER_PS1%"\r\nset "EXITCODE=%ERRORLEVEL%"\r\ndel "%INSTALLER_PS1%" >nul 2>nul\r\nif not "%EXITCODE%"=="0" (\r\n  echo Installer failed with exit code %EXITCODE%.\r\n  pause\r\n  exit /b %EXITCODE%\r\n)\r\necho Done. This Windows PC is enrolled as ${user.email}.\r\npause\r\n`;
   const selectedScript = platform === 'windows' ? (req.nextUrl.searchParams.get('format') === 'ps1' ? windowsScript : windowsCmd) : platform === 'macos' ? macosScript : platform === 'linux' ? script : script;
   const extension = platform === 'windows' ? (req.nextUrl.searchParams.get('format') === 'ps1' ? 'ps1' : 'cmd') : 'sh';
   const contentType = platform === 'windows' && req.nextUrl.searchParams.get('format') !== 'ps1' ? 'application/x-msdownload; charset=utf-8' : platform === 'windows' ? 'application/x-powershell; charset=utf-8' : 'text/x-shellscript; charset=utf-8';

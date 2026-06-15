@@ -22,6 +22,9 @@ for (const expected of [
 for (const expected of ['neodym-typing', '/browser-typing', 'isSensitiveInput', 'typing_activity', 'typed_sample_redacted', 'el.isContentEditable']) {
   assert.match(installer, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `installer browser extension should support safe typing telemetry: ${expected}`);
 }
+for (const expected of ['chrome.scripting.executeScript', 'injectContentScriptIntoOpenTabs', '__neodymTrackerBridgeContentInjected']) {
+  assert.match(installer, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `browser extension reload should inject typing listeners into already-open tabs: ${expected}`);
+}
 
 for (const expected of ['richEventRows', 'body.rich_events', 'event.event_type', 'JSON.stringify(event.payload)', 'rich_events:']) {
   assert.match(ingest, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `ingest should explode rich event uploads: ${expected}`);
