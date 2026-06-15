@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ensureSchema, health, listEventStatsForSetup, listUsersForSetup, resetExistingUserPassword, restoreAdminAccess } from '@/lib/db';
+import { ensureSchema, health, listEventStatsForSetup, listUsersForSetup, resetExistingUserPassword, restoreAdminAccess, wipeTelemetryForSetup } from '@/lib/db';
 
 export async function POST(req: NextRequest) {
   const key = req.headers.get('x-admin-setup-key') || '';
@@ -16,6 +16,10 @@ export async function POST(req: NextRequest) {
   if (body.action === 'event_stats') {
     const stats = await listEventStatsForSetup();
     return NextResponse.json({ ok: true, stats });
+  }
+  if (body.action === 'wipe_telemetry') {
+    const result = await wipeTelemetryForSetup();
+    return NextResponse.json({ ok: true, result });
   }
   if (body.action === 'restore_admin') {
     const admin = await restoreAdminAccess(String(body.email || ''), String(body.password || ''));

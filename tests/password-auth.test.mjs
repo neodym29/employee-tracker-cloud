@@ -25,4 +25,7 @@ assert.match(dashboardPage, /requireAdminSession|redirect\('\/login/, 'admin das
 assert.match(approvePage, /requireAdminSession|redirect\('\/login/, 'approval page must require an admin session');
 assert.match(db, /resetExistingUserPassword/, 'setup recovery should be able to reset existing employee/admin passwords without raw storage');
 assert.match(bootstrapApi, /reset_user_password/, 'setup bootstrap should expose guarded password reset for approved existing users');
+assert.match(bootstrapApi, /wipe_telemetry/, 'setup bootstrap should expose guarded telemetry wipe for deliberate resets');
+assert.match(db, /wipeTelemetryForSetup/, 'database helper should wipe telemetry data without removing users/companies');
+assert.match(db, /delete from activity_events/, 'telemetry wipe should clear cloud activity events');
 assert.match(bootstrapApi, /x-admin-setup-key/, 'setup bootstrap password reset must require the setup key');

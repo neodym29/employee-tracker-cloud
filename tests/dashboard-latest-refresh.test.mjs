@@ -12,6 +12,8 @@ assert.match(client, /refresh-dashboard/, 'dashboard should have a refresh butto
 assert.match(client, /router\.refresh\(\)/, 'refresh button and auto-refresh should fetch latest data without resetting client filters');
 assert.match(client, /router\.replace\(nextUrl, \{ scroll: false \}\)/, 'filter changes should be mirrored into the URL so browser reload keeps them');
 assert.match(page, /searchParams/, 'server dashboard should read URL filter state on reload');
+assert.match(page, /revalidate = 0/, 'server dashboard should not cache telemetry reads');
+assert.match(page, /fetchCache = 'force-no-store'/, 'server dashboard should force no-store fetch behavior');
 assert.match(page, /initialFilters=\{filters\}/, 'server dashboard should pass URL filters into the client');
 assert.match(db, /readDashboard\(filters/, 'dashboard database reader should accept filters');
 assert.match(db, /captured_at >= \$/, 'dashboard query should support explicit start time ranges');

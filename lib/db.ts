@@ -231,6 +231,34 @@ export async function listUsersForSetup() {
   return result.rows;
 }
 
+export async function wipeTelemetryForSetup() {
+  const db = getPool();
+  await ensureSchema();
+  const before = await db.query(`
+    select
+      (select count(*)::int from activity_events) as activity_events,
+      (select count(*)::int from activity_screenshots) as activity_screenshots,
+      (select count(*)::int from devices) as devices
+  `);
+  await db.query('begin');
+  try {
+    await db.query(`delete from activity_screenshots`);
+    await db.query(`delete from activity_events`);
+    await db.query(`delete from devices`);
+    await db.query('commit');
+  } catch (error) {
+    await db.query('rollback');
+    throw error;
+  }
+  const after = await db.query(`
+    select
+      (select count(*)::int from activity_events) as activity_events,
+      (select count(*)::int from activity_screenshots) as activity_screenshots,
+      (select count(*)::int from devices) as devices
+  `);
+  return { before: before.rows[0], after: after.rows[0] };
+}
+
 export async function restoreAdminAccess(email: string, password: string) {
   const normalized = normalizeEmail(email);
   const passwordHash = hashPassword(password);
