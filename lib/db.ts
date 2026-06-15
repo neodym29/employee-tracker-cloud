@@ -165,6 +165,11 @@ export async function ensureSchema() {
   await db.query(`alter table app_users add column if not exists enrollment_token text unique`);
   await db.query(`alter table app_users add column if not exists approved_at timestamptz`);
   await db.query(`alter table app_users add column if not exists password_hash text`);
+  await db.query(`create index if not exists idx_activity_events_received_id on activity_events (received_at desc, id desc)`);
+  await db.query(`create index if not exists idx_activity_events_captured_id on activity_events (captured_at desc, id desc)`);
+  await db.query(`create index if not exists idx_activity_events_employee_received on activity_events (employee_email, received_at desc, id desc)`);
+  await db.query(`create index if not exists idx_activity_events_type_received on activity_events (event_type, received_at desc, id desc)`);
+  await db.query(`create index if not exists idx_devices_last_seen on devices (last_seen_at desc)`);
 }
 
 export async function registerCompanyWithAdmin(companyName: string, adminEmail: string, adminPassword: string) {
@@ -417,7 +422,7 @@ export async function readDashboard(filters: DashboardReadFilters = {}) {
     eventParams.push(filters.endTime);
     eventWhere.push(`captured_at <= $${eventParams.length}`);
   }
-  eventParams.push(filters.mode === 'range' ? 1000 : 300);
+  eventParams.push(filters.mode === 'range' ? 500 : 120);
   const limitParam = eventParams.length;
   const eventSql = `select id, employee_email, hostname, os_user, captured_at, received_at, event_type, app_name, window_title, url, idle_seconds, payload,
       exists(select 1 from activity_screenshots s where s.activity_event_id = activity_events.id) as has_screenshot

@@ -19,3 +19,6 @@ assert.match(db, /readDashboard\(filters/, 'dashboard database reader should acc
 assert.match(db, /captured_at >= \$/, 'dashboard query should support explicit start time ranges');
 assert.match(db, /captured_at <= \$/, 'dashboard query should support explicit end time ranges');
 assert.ok(db.includes('limit $${limitParam}'), 'dashboard event query should keep a bounded parameterized latest result set');
+assert.match(db, /create index if not exists idx_activity_events_received_id/, 'activity dashboard should index latest received events for fast refresh');
+assert.match(db, /create index if not exists idx_activity_events_employee_received/, 'activity dashboard should index user-filtered latest events');
+assert.match(db, /filters\.mode === 'range' \? 500 : 120/, 'dashboard should keep latest payload small enough for fast auto-refresh');
