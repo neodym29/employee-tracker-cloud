@@ -194,13 +194,48 @@ export async function signupEmployee(email: string, password: string) {
   const company = await db.query(`select id, domain from companies where domain=$1`, [domain]);
   const companyId = company.rows[0]?.id;
   if (!companyId) throw new Error(`${domain} is not registered yet. Register the company and first admin before employee signups.`);
-  await db.query(
+  const signup = await db.query(
     `insert into app_users(company_id,email,password_hash,role,approval_status,employee_username)
      values($1,$2,$3,'employee','pending',$4)
-     on conflict(email) do update set role='employee', company_id=excluded.company_id, password_hash=excluded.password_hash, approval_status='pending', employee_username=excluded.employee_username`,
+     on conflict(email) do update set company_id=excluded.company_id, password_hash=excluded.password_hash, approval_status='pending', employee_username=excluded.employee_username
+     where app_users.role='employee'
+     returning email, role, approval_status`,
     [companyId, normalized, passwordHash, normalized.split('@')[0]],
   );
+  if (!signup.rows[0]) throw new Error(`${normalized} is already an admin. Use the login page or reset admin access.`);
   return { ok: true, email: normalized, company_domain: domain, status: 'pending' };
+}
+
+export async function listUsersForSetup() {
+  const db = getPool();
+  await ensureSchema();
+  const result = await db.query(
+    `select app_users.email, app_users.role, app_users.approval_status, app_users.employee_username, app_users.approved_at,
+      companies.domain as company_domain, app_users.password_hash is not null as has_password,
+      case when app_users.enrollment_token is null then null else left(app_users.enrollment_token, 8) || '…' end as enrollment_token_hint,
+      app_users.created_at
+     from app_users join companies on companies.id=app_users.company_id
+     order by app_users.id asc`,
+  );
+  return result.rows;
+}
+
+export async function restoreAdminAccess(email: string, password: string) {
+  const normalized = normalizeEmail(email);
+  const passwordHash = hashPassword(password);
+  const domain = domainFromEmail(normalized);
+  const db = getPool();
+  await ensureSchema();
+  const company = await db.query(`select id, domain from companies where domain=$1`, [domain]);
+  if (!company.rows[0]) throw new Error(`${domain} is not registered yet`);
+  const result = await db.query(
+    `insert into app_users(company_id,email,password_hash,role,approval_status,employee_username,approved_at)
+     values($1,$2,$3,'admin','approved',$4,now())
+     on conflict(email) do update set company_id=excluded.company_id, password_hash=excluded.password_hash, role='admin', approval_status='approved', approved_at=now(), employee_username=excluded.employee_username
+     returning email, role, approval_status, company_id`,
+    [company.rows[0].id, normalized, passwordHash, normalized.split('@')[0]],
+  );
+  return result.rows[0] as { email: string; role: 'admin'; approval_status: 'approved'; company_id: string };
 }
 
 export async function approveEmployee(email: string) {
