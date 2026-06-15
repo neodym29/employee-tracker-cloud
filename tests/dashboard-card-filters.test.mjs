@@ -8,7 +8,7 @@ const client = readFileSync(clientPath, 'utf8');
 const page = readFileSync(new URL('../app/dashboard/page.tsx', import.meta.url), 'utf8');
 
 assert.match(page, /<DashboardClient\s+data=\{(?:data|serializableData)\}/, 'server dashboard page should hand data to DashboardClient');
-assert.match(client, /Latest raw events/, 'dashboard should render a raw events card');
+assert.match(client, /Activity logs/, 'dashboard should render an activity logs card');
 assert.match(client, /filter-user/, 'raw events card should render a user filter control');
 assert.match(client, /filter-event-type/, 'raw events card should render an event type filter control');
 assert.match(client, /filter-start-time/, 'raw events card should render a start time control');

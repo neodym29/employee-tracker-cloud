@@ -27,12 +27,13 @@ for (const expected of ['richEventRows', 'body.rich_events', 'event.event_type',
   assert.match(ingest, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `ingest should explode rich event uploads: ${expected}`);
 }
 
-for (const expected of ['Latest raw events', 'All event types', 'Raw keystroke/character capture is intentionally not enabled']) {
+for (const expected of ['Activity logs', 'Currently open tabs', 'All event types', 'Raw keystroke/character capture is intentionally not enabled']) {
   assert.match(dashboard, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `dashboard should show ${expected}`);
 }
-for (const expected of ['input_click', 'browser_tab', 'audio_output', 'app_open']) {
-  assert.match(dashboard, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `dashboard raw event filter/table should support ${expected}`);
+for (const expected of ['input_click', 'audio_output', 'app_open']) {
+  assert.match(dashboard, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `dashboard activity log filter/table should support ${expected}`);
 }
+assert.match(dashboard, /currentOpenTabs/, 'dashboard should support browser_tab rows in the current open tabs section');
 
 for (const expected of ['_capture_windows', 'System.Windows.Forms', 'SystemInformation]::VirtualScreen', 'image/jpeg', 'CopyFromScreen']) {
   assert.match(screenshots, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `screenshot capture should support Windows silently: ${expected}`);

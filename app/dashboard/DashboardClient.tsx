@@ -65,6 +65,25 @@ function rowUser(row: any): string {
   return row.employee_email || row.email || row.os_user || row.employee_username || '';
 }
 
+function activityLogEvents(events: any[]): any[] {
+  return events.filter((event) => event.event_type !== 'browser_tab');
+}
+
+function currentOpenTabs(events: any[], user: string): any[] {
+  const seen = new Set<string>();
+  const tabs: any[] = [];
+  for (const event of events) {
+    if (event.event_type !== 'browser_tab') continue;
+    if (user !== 'all' && rowUser(event) !== user) continue;
+    const payload = event.payload || {};
+    const key = [event.employee_email, event.hostname, payload.window_id, payload.url || event.url, payload.title || event.window_title].filter(Boolean).join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    tabs.push(event);
+  }
+  return tabs.slice(0, 40);
+}
+
 function audioDescription(event: any): string {
   const payload = event.payload || {};
   const app = payload.application_name || event.app_name || payload.process_binary || 'Unknown app';
@@ -159,11 +178,34 @@ function EventsTable({ events }: { events: any[] }) {
   );
 }
 
+function CurrentOpenTabs({ tabs }: { tabs: any[] }) {
+  if (tabs.length === 0) return <p className="muted">No currently open browser tabs reported yet.</p>;
+  return (
+    <table className="table">
+      <thead><tr><th>Last seen</th><th>Employee</th><th>Host</th><th>Browser</th><th>Tab</th></tr></thead>
+      <tbody>{tabs.map((tab:any, index:number)=>{
+        const payload = tab.payload || {};
+        const title = payload.title || tab.window_title || 'Untitled browser tab';
+        const url = payload.url || tab.url || '';
+        return (
+          <tr key={`${tab.id || index}-${tab.employee_email}-${payload.window_id || url}`}>
+            <td>{formatLocalTime(tab.captured_at)}<br /><span className="muted">{relativeAge(tab.captured_at)}</span></td>
+            <td>{tab.employee_email}</td>
+            <td>{tab.hostname}</td>
+            <td>{payload.app_name || tab.app_name || 'Browser'}</td>
+            <td><strong>{title}</strong>{url && <><br /><span className="muted">{url}</span></>}</td>
+          </tr>
+        );
+      })}</tbody>
+    </table>
+  );
+}
+
 export default function DashboardClient({ data, configured, error, initialFilters }: { data: DashboardData; configured: boolean; error: string; initialFilters: DashboardFilters }) {
   const router = useRouter();
   const pathname = usePathname();
   const allUsers = useMemo(() => Array.from(new Set([...data.users, ...data.devices, ...data.events].map(rowUser).filter(Boolean))).sort(), [data.users, data.devices, data.events]);
-  const eventTypes = useMemo(() => Array.from(new Set(data.events.map((event) => event.event_type).filter(Boolean))).sort(), [data.events]);
+  const eventTypes = useMemo(() => Array.from(new Set(activityLogEvents(data.events).map((event) => event.event_type).filter(Boolean))).sort(), [data.events]);
   const now = useMemo(() => new Date(), []);
   const [mode, setMode] = useState<'latest' | 'range'>(initialFilters.mode || 'latest');
   const [user, setUser] = useState(initialFilters.user || 'all');
@@ -192,9 +234,10 @@ export default function DashboardClient({ data, configured, error, initialFilter
   }, [router]);
 
   const visibleEvents = useMemo(
-    () => filteredEvents(data.events, mode, user, eventType, startTime, endTime),
+    () => filteredEvents(activityLogEvents(data.events), mode, user, eventType, startTime, endTime),
     [data.events, mode, user, eventType, startTime, endTime],
   );
+  const visibleOpenTabs = useMemo(() => currentOpenTabs(data.events, user), [data.events, user]);
   const latestReceived = data.events[0]?.received_at;
   const latestCaptured = data.events[0]?.captured_at;
   const rangeDisabled = mode === 'latest';
@@ -212,9 +255,21 @@ export default function DashboardClient({ data, configured, error, initialFilter
       <section className="card" style={{marginTop:16}}>
         <div className="cardHeader">
           <div>
-            <h2>Latest raw events</h2>
+            <h2>Currently open tabs</h2>
             <p className="muted smallNote">
-              Showing {visibleEvents.length} of {data.events.length}. Use Latest events for the live feed, or choose Selected time period for historical filters.
+              These are live browser state snapshots, so they are separated from the activity logs below.
+            </p>
+          </div>
+        </div>
+        <CurrentOpenTabs tabs={visibleOpenTabs} />
+      </section>
+
+      <section className="card" style={{marginTop:16}}>
+        <div className="cardHeader">
+          <div>
+            <h2>Activity logs</h2>
+            <p className="muted smallNote">
+              Showing {visibleEvents.length} of {activityLogEvents(data.events).length}. Use Latest events for the live feed, or choose Selected time period for historical filters.
             </p>
           </div>
           <div className="cardActions">

@@ -7,8 +7,12 @@ const db = readFileSync(new URL('../lib/db.ts', import.meta.url), 'utf8');
 const system = readFileSync(new URL('../agent/src/employee_tracker/system.py', import.meta.url), 'utf8');
 
 assert.match(page, /<DashboardClient\s+data=\{(?:data|serializableData)\}/, 'server dashboard page should hand data to DashboardClient');
-assert.match(client, /Latest raw events/, 'dashboard should keep one raw events card');
-assert.doesNotMatch(client, /title="Clicks"|title="Audio output"|title="Companies"|title="Accounts"|title="Devices"/, 'dashboard should not split into separate cards anymore');
+assert.match(client, /Activity logs/, 'dashboard should label the feed as activity logs, not raw state snapshots');
+assert.match(client, /Currently open tabs/, 'dashboard should show current browser tabs under their own header');
+assert.match(client, /activityLogEvents/, 'dashboard should derive an activity-log-only event list');
+assert.match(client, /currentOpenTabs/, 'dashboard should derive current open tabs separately from logs');
+assert.match(client, /event\.event_type !== 'browser_tab'/, 'browser_tab state snapshots should be excluded from activity logs');
+assert.doesNotMatch(client, /title="Clicks"|title="Audio output"|title="Companies"|title="Accounts"|title="Devices"/, 'dashboard should not split into separate legacy cards anymore');
 assert.match(client, /filter-start-time/, 'raw events filter should have explicit start time control');
 assert.match(client, /filter-end-time/, 'raw events filter should have explicit end time control');
 assert.match(client, /filter-event-type/, 'raw events filter should allow event type filtering');
