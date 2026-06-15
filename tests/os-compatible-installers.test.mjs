@@ -12,6 +12,8 @@ for (const platform of ['linux', 'macos', 'windows']) {
 }
 
 assert.match(client, /installerPlatform/, 'approval UI should store the selected installer OS');
+assert.match(client, /Refresh existing app/, 'approval UI should also show refresh package commands for already-installed employees');
+assert.match(client, /refresh-neodym-tracker/, 'approval refresh commands should be clearly named');
 assert.match(client, /JSON\.stringify\(\{ email, platform:/, 'approval API call should send selected platform');
 assert.match(approve, /platform = normalizeInstallerPlatform/, 'approval API should normalize requested installer platform');
 assert.match(approve, /installer\?token=\$\{result\.enrollment_token\}&platform=\$\{platform\}/, 'approval API should include selected platform in installer URL');

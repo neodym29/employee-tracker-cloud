@@ -6,6 +6,13 @@ function commandFor(url: string, platform: 'linux' | 'macos' | 'windows') {
   return `curl -fsSL '${url}' -o install-neodym-tracker.sh\nbash install-neodym-tracker.sh`;
 }
 
+function updateCommandFor(url: string, platform: 'linux' | 'macos' | 'windows') {
+  if (platform === 'windows') {
+    return `powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '${url}' -OutFile $env:TEMP\\refresh-neodym-tracker.cmd; & $env:TEMP\\refresh-neodym-tracker.cmd"`;
+  }
+  return `curl -fsSL '${url}' -o refresh-neodym-tracker.sh\nbash refresh-neodym-tracker.sh`;
+}
+
 export default async function Employee() {
   const session = await requireEmployeeOrAdminSession();
   const tokenRow = session.role === 'employee'
@@ -43,6 +50,11 @@ export default async function Employee() {
                       <p><a className="button" href={path}>Download {platform.label} installer</a></p>
                       <p><a href={path}>{url}</a></p>
                       <pre>{commandFor(url, platform.key)}</pre>
+                      <details className="refresh-package">
+                        <summary className="button">Refresh existing app</summary>
+                        <p className="muted">Already installed? Run this on that computer to pull the latest tracker package and restart/update the existing app. No new account approval is needed.</p>
+                        <pre>{updateCommandFor(url, platform.key)}</pre>
+                      </details>
                     </div>
                   );
                 })}

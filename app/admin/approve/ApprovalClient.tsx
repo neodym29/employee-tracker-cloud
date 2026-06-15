@@ -29,6 +29,13 @@ function installerCommand(url: string, platform: InstallerPlatform | undefined) 
   return `curl -fsSL '${url}' -o install-neodym-tracker.sh\nbash install-neodym-tracker.sh`;
 }
 
+function updateCommand(url: string, platform: InstallerPlatform | undefined) {
+  if (platform === 'windows') {
+    return `powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '${url}' -OutFile $env:TEMP\\refresh-neodym-tracker.cmd; & $env:TEMP\\refresh-neodym-tracker.cmd"`;
+  }
+  return `curl -fsSL '${url}' -o refresh-neodym-tracker.sh\nbash refresh-neodym-tracker.sh`;
+}
+
 export default function ApprovalClient({ users }: { users: UserRow[] }) {
   const [rows, setRows] = useState(users);
   const [busyEmail, setBusyEmail] = useState('');
@@ -139,6 +146,11 @@ export default function ApprovalClient({ users }: { users: UserRow[] }) {
           <h2>Installer for {result.email}</h2>
           <p><a href={result.installer_url}>{result.installer_url}</a></p>
           <pre>{installerCommand(result.installer_url, result.platform)}</pre>
+          <details className="refresh-package">
+            <summary className="button">Refresh existing app</summary>
+            <p className="muted">If this employee already installed the tracker, send them this command to pull the latest package and restart/update the app without re-approval.</p>
+            <pre>{updateCommand(result.installer_url, result.platform)}</pre>
+          </details>
         </section>
       )}
     </>
