@@ -34,10 +34,10 @@ echo "Keyboard chunks: enabled"
 if command -v apt-get >/dev/null 2>&1; then
   if [ "$(id -u)" = "0" ]; then
     apt-get update
-    apt-get install -y python3 python3-venv python3-pip python3-evdev curl ca-certificates openssl x11-utils x11-xserver-utils xinput xprintidle usbutils pulseaudio-utils playerctl ffmpeg grim maim scrot
+    apt-get install -y python3 python3-venv python3-pip python3-evdev curl ca-certificates openssl x11-utils x11-xserver-utils xinput xprintidle usbutils pulseaudio-utils playerctl ffmpeg gjs grim maim scrot
   elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
     sudo apt-get update
-    sudo apt-get install -y python3 python3-venv python3-pip python3-evdev curl ca-certificates openssl x11-utils x11-xserver-utils xinput xprintidle usbutils pulseaudio-utils playerctl ffmpeg grim maim scrot
+    sudo apt-get install -y python3 python3-venv python3-pip python3-evdev curl ca-certificates openssl x11-utils x11-xserver-utils xinput xprintidle usbutils pulseaudio-utils playerctl ffmpeg gjs grim maim scrot
   else
     echo "Skipping apt dependency install because passwordless sudo is unavailable. Continuing with existing system packages."
   fi

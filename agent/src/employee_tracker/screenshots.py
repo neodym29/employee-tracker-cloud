@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from shutil import which
+import json
 import os
 import re
 import subprocess
@@ -252,63 +253,79 @@ $bitmap.Dispose()
 def _capture_gnome_shell_screencast(destination_dir: Path, prefix: str, timestamp: str) -> Path | None:
     """Capture a real GNOME Wayland compositor frame via Shell Screencast.
 
-    GNOME Wayland often denies direct screenshot APIs and returns black frames
-    from X11 wrappers, but the Shell Screencast service can record the actual
-    compositor output. We record a very short WebM silently, extract one frame,
-    validate it, and delete the temporary video.
+    GNOME binds a screencast to the D-Bus connection that started it. Starting
+    with one ``gdbus call`` process and stopping with another leaves the original
+    owner disconnected; GNOME then posts "Screencast ended unexpectedly". Use one
+    short-lived GJS process so ``Screencast`` and ``StopScreencast`` happen on the
+    same D-Bus connection and the session ends cleanly.
     """
-    if which('gdbus') is None or which('ffmpeg') is None:
+    if which('gjs') is None or which('ffmpeg') is None:
         return None
     if os.environ.get('XDG_SESSION_TYPE') != 'wayland' and not os.environ.get('WAYLAND_DISPLAY'):
         return None
 
-    webm_path = destination_dir / f'{prefix}_gnome_screencast_{timestamp}.webm'
+    template_path = destination_dir / f'{prefix}_gnome_screencast_%d_{timestamp}.webm'
     png_path = destination_dir / f'{prefix}_gnome_screencast_{timestamp}.png'
+    helper_path = destination_dir / f'{prefix}_gnome_screencast_{timestamp}.js'
+    webm_path: Path | None = None
+    helper_script = """
+const {Gio, GLib} = imports.gi;
+
+const fileTemplate = ARGV[0];
+const waitUsec = Number(ARGV[1] || '750000');
+const proxy = Gio.DBusProxy.new_for_bus_sync(
+  Gio.BusType.SESSION,
+  Gio.DBusProxyFlags.NONE,
+  null,
+  'org.gnome.Shell.Screencast',
+  '/org/gnome/Shell/Screencast',
+  'org.gnome.Shell.Screencast',
+  null,
+);
+const startedVariant = proxy.call_sync(
+  'Screencast',
+  new GLib.Variant('(sa{sv})', [fileTemplate, {'draw-cursor': new GLib.Variant('b', false)}]),
+  Gio.DBusCallFlags.NONE,
+  3000,
+  null,
+);
+const [started, filenameUsed] = startedVariant.deep_unpack();
+if (!started) {
+  print(JSON.stringify({started, filenameUsed}));
+  imports.system.exit(2);
+}
+GLib.usleep(waitUsec);
+const stoppedVariant = proxy.call_sync(
+  'StopScreencast',
+  new GLib.Variant('()', []),
+  Gio.DBusCallFlags.NONE,
+  3000,
+  null,
+);
+const [stopped] = stoppedVariant.deep_unpack();
+print(JSON.stringify({started, stopped, filenameUsed}));
+imports.system.exit(stopped ? 0 : 3);
+""".strip()
     try:
-        start = subprocess.run(
-            [
-                'gdbus',
-                'call',
-                '--session',
-                '--dest',
-                'org.gnome.Shell.Screencast',
-                '--object-path',
-                '/org/gnome/Shell/Screencast',
-                '--method',
-                'org.gnome.Shell.Screencast.Screencast',
-                str(webm_path),
-                '{}',
-            ],
+        helper_path.write_text(helper_script, encoding='utf-8')
+        capture = subprocess.run(
+            ['gjs', str(helper_path), str(template_path), '750000'],
             check=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            timeout=3,
+            timeout=8,
             text=True,
         )
-        if start.returncode != 0 or 'true' not in start.stdout.lower():
+        if capture.returncode != 0:
             return None
-        # Give the compositor enough time to write at least one full frame.
+        result_line = next((line for line in reversed(capture.stdout.splitlines()) if line.strip().startswith('{')), '')
         try:
-            import time
-            time.sleep(0.75)
-        finally:
-            subprocess.run(
-                [
-                    'gdbus',
-                    'call',
-                    '--session',
-                    '--dest',
-                    'org.gnome.Shell.Screencast',
-                    '--object-path',
-                    '/org/gnome/Shell/Screencast',
-                    '--method',
-                    'org.gnome.Shell.Screencast.StopScreencast',
-                ],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=3,
-            )
+            result = json.loads(result_line)
+        except json.JSONDecodeError:
+            return None
+        if not result.get('started') or not result.get('stopped') or not result.get('filenameUsed'):
+            return None
+        webm_path = Path(str(result['filenameUsed']))
         if not webm_path.exists() or webm_path.stat().st_size <= 0:
             return None
         extract = subprocess.run(
@@ -323,9 +340,14 @@ def _capture_gnome_shell_screencast(destination_dir: Path, prefix: str, timestam
         return None
     finally:
         try:
-            webm_path.unlink(missing_ok=True)
+            helper_path.unlink(missing_ok=True)
         except OSError:
             pass
+        if webm_path is not None:
+            try:
+                webm_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 def _capture_mss(destination_dir: Path, prefix: str, timestamp: str) -> Path | None:
     """Capture the full desktop with MSS, without desktop UI/sound helpers.
