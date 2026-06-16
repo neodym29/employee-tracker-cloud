@@ -55,18 +55,23 @@ def capture_screenshot_with_status(destination_dir: Path, prefix: str, window_id
         if screenshot is not None:
             return ScreenshotCaptureResult(screenshot, 'captured', backend, None, tuple(attempts))
 
-    if _has_multiple_monitors():
-        return ScreenshotCaptureResult(None, 'skipped', None, 'multi_monitor_full_desktop_unavailable', tuple(attempts))
+    multi_monitor = _has_multiple_monitors()
 
-    # Last-resort silent X11 window-only fallback. This helps on single-monitor
-    # sessions when full-desktop capture is unavailable, but it is not suitable
-    # as the scheduled screenshot path on multi-monitor setups.
+    # Last-resort silent X11 window-only fallback. On multi-monitor Wayland/X11
+    # hybrid sessions this may capture only the active window/monitor, but that
+    # is still better than losing screenshots entirely when full-desktop capture
+    # is blocked. Mark the reason so the dashboard/logs can distinguish partial
+    # evidence from a true whole-desktop capture.
     x_window_id = _resolve_xwindow_id(window_id)
     if x_window_id and which('xwd') is not None:
         attempts.append('xwd_window')
         screenshot = _capture_xwindow(destination_dir, prefix, timestamp, x_window_id)
         if screenshot is not None:
-            return ScreenshotCaptureResult(screenshot, 'captured', 'xwd_window', None, tuple(attempts))
+            reason = 'partial_window_fallback_after_full_desktop_unavailable' if multi_monitor else None
+            return ScreenshotCaptureResult(screenshot, 'captured', 'xwd_window', reason, tuple(attempts))
+
+    if multi_monitor:
+        return ScreenshotCaptureResult(None, 'skipped', None, 'multi_monitor_full_desktop_unavailable', tuple(attempts))
 
     return ScreenshotCaptureResult(None, 'skipped', None, 'no_silent_backend_available_or_all_failed', tuple(attempts))
 
@@ -129,7 +134,7 @@ def _resolve_xwindow_id(window_id: str | None) -> str | None:
     if _is_real_xwindow_id(window_id):
         return str(window_id).strip()
     if which('xdotool') is None:
-        return None
+        return _topmost_xwindow_id()
     try:
         result = subprocess.run(
             ['xdotool', 'getactivewindow'],
@@ -140,9 +145,58 @@ def _resolve_xwindow_id(window_id: str | None) -> str | None:
             text=True,
         )
     except Exception:
-        return None
+        return _topmost_xwindow_id()
     candidate = result.stdout.strip()
-    return candidate if result.returncode == 0 and _is_real_xwindow_id(candidate) else None
+    if result.returncode == 0 and _is_real_xwindow_id(candidate):
+        return candidate
+    return _topmost_xwindow_id()
+
+
+def _topmost_xwindow_id() -> str | None:
+    """Return the topmost viewable X11/XWayland client window.
+
+    GNOME Wayland often reports ``_NET_ACTIVE_WINDOW`` as ``0x0`` even while
+    XWayland windows are visible. Falling back to the stacking list restores the
+    partial screenshot behavior that existed before full-desktop capture was
+    attempted, without pretending it is multi-monitor evidence.
+    """
+    if which('xprop') is None:
+        return None
+    try:
+        result = subprocess.run(
+            ['xprop', '-root', '_NET_CLIENT_LIST_STACKING'],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=1,
+            text=True,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0 or '#' not in result.stdout:
+        return None
+    window_ids = re.findall(r'0x[0-9a-fA-F]+|\b\d+\b', result.stdout.split('#', 1)[1])
+    for candidate in reversed(window_ids):
+        if _is_viewable_xwindow(candidate):
+            return candidate
+    return None
+
+
+def _is_viewable_xwindow(window_id: str) -> bool:
+    if which('xwininfo') is None:
+        return True
+    try:
+        result = subprocess.run(
+            ['xwininfo', '-id', window_id],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=1,
+            text=True,
+        )
+    except Exception:
+        return False
+    return result.returncode == 0 and 'Map State: IsViewable' in result.stdout
 
 
 def _capture_windows(destination_dir: Path, prefix: str, timestamp: str) -> Path | None:
@@ -265,7 +319,11 @@ def _capture_xroot(destination_dir: Path, prefix: str, timestamp: str) -> Path |
     xwd_path = destination_dir / f'{prefix}_root_{timestamp}.xwd'
     png_path = destination_dir / f'{prefix}_root_{timestamp}.png'
     xwd_result = _run_silent(['xwd', '-root', '-silent', '-out', str(xwd_path)])
-    if xwd_result.returncode != 0 or not xwd_path.exists():
+    if xwd_result.returncode != 0 or not xwd_path.exists() or xwd_path.stat().st_size <= 0:
+        try:
+            xwd_path.unlink(missing_ok=True)
+        except OSError:
+            pass
         return None
     converted = _convert_xwd_to_png(xwd_path, png_path)
     try:

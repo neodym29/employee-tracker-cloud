@@ -18,8 +18,13 @@ assert.match(screenshots, /xwd', '-root'/, 'xwd root fallback should target the 
 assert.match(screenshots, /def _has_multiple_monitors/, 'code should detect multi-monitor desktops');
 assert.match(
   screenshots,
-  /if _has_multiple_monitors\(\):[\s\S]*multi_monitor_full_desktop_unavailable[\s\S]*attempts\.append\('xwd_window'\)/,
-  'multi-monitor sessions should skip misleading xwd_window fallback when full-desktop capture is unavailable',
+  /multi_monitor = _has_multiple_monitors\(\)/,
+  'code should detect multi-monitor desktops before deciding whether a fallback is partial',
+);
+assert.match(
+  screenshots,
+  /attempts\.append\('xwd_window'\)[\s\S]*partial_window_fallback_after_full_desktop_unavailable[\s\S]*multi_monitor_full_desktop_unavailable/,
+  'multi-monitor sessions should restore xwd_window as a partial fallback before skipping entirely',
 );
 assert.match(
   screenshots,
