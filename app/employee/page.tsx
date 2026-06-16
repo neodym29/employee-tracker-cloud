@@ -1,16 +1,9 @@
+import InstallManual, { refreshCommand } from '@/app/components/InstallManual';
 import { requireEmployeeOrAdminSession } from '@/lib/auth';
 import { approvedEmployeeInstallerToken } from '@/lib/db';
 
-function commandFor(url: string, platform: 'linux' | 'macos' | 'windows') {
-  if (platform === 'windows') return `Download the .cmd file, then double-click it. If Windows SmartScreen appears, choose More info → Run anyway.`;
-  return `curl -fsSL '${url}' -o install-neodym-tracker.sh\nbash install-neodym-tracker.sh`;
-}
-
 function updateCommandFor(url: string, platform: 'linux' | 'macos' | 'windows') {
-  if (platform === 'windows') {
-    return `powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '${url}' -OutFile $env:TEMP\\refresh-neodym-tracker.cmd; & $env:TEMP\\refresh-neodym-tracker.cmd"`;
-  }
-  return `curl -fsSL '${url}' -o refresh-neodym-tracker.sh\nbash refresh-neodym-tracker.sh`;
+  return refreshCommand(url, platform);
 }
 
 export default async function Employee() {
@@ -49,11 +42,10 @@ export default async function Employee() {
                       <h2>{platform.label}</h2>
                       <p><a className="button" href={path}>Download {platform.label} installer</a></p>
                       <p><a href={path}>{url}</a></p>
-                      <pre>{commandFor(url, platform.key)}</pre>
-                      <details className="refresh-package">
-                        <summary className="button">Refresh existing app</summary>
-                        <p className="muted">Already installed? Run this on that computer to pull the latest tracker package and restart/update the existing app. No new account approval is needed.</p>
-                        <pre>{updateCommandFor(url, platform.key)}</pre>
+                      <p className="muted">The manual includes first-time install steps plus Refresh existing app / refresh-neodym-tracker instructions for already-installed agents.</p>
+                      <details className="install-manual-details" open>
+                        <summary className="button">Open full install manual</summary>
+                        <InstallManual url={url} platform={platform.key} context="employee" />
                       </details>
                     </div>
                   );
