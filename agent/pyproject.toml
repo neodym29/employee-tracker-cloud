@@ -9,6 +9,7 @@ description = "Transparent Ubuntu background activity logger with workspace file
 requires-python = ">=3.10"
 dependencies = [
     "Pillow>=10",
+    "mss>=9; sys_platform == 'linux'",
     "evdev>=1.7; sys_platform == 'linux'",
 ]
 

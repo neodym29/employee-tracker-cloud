@@ -48,10 +48,11 @@ def capture_screenshot_with_status(destination_dir: Path, prefix: str, window_id
     # used for unattended tracking. If no quiet backend works, skip the
     # screenshot rather than showing UI to the user.
     for backend, capture in (
-        ('gnome_shell_dbus_no_flash', _capture_gnome_shell_dbus),
+        ('mss', _capture_mss),
         ('grim', _capture_grim),
         ('maim', _capture_maim),
         ('scrot_silent', _capture_scrot),
+        ('gnome_shell_dbus_no_flash', _capture_gnome_shell_dbus),
     ):
         attempts.append(backend)
         screenshot = capture(destination_dir, prefix, timestamp)
@@ -126,6 +127,37 @@ $bitmap.Dispose()
 """.strip()
     result = _run_silent([powershell, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script])
     return _validated_screenshot(path) if result.returncode == 0 else None
+
+
+def _capture_mss(destination_dir: Path, prefix: str, timestamp: str) -> Path | None:
+    """Capture the full desktop with MSS, without desktop UI/sound helpers.
+
+    MSS reads from the display APIs directly. On Linux/X11 this avoids GNOME's
+    screenshot UI, portal dialogs, flash animations, and screenshot sounds. If
+    MSS is unavailable or cannot access the current display/session, the caller
+    falls back to other explicitly silent backends.
+    """
+    try:
+        import mss
+        import mss.tools
+    except Exception:
+        return None
+
+    path = destination_dir / f'{prefix}_{timestamp}.png'
+    try:
+        with mss.mss() as sct:
+            monitor = sct.monitors[0] if sct.monitors else None
+            if monitor is None:
+                return None
+            image = sct.grab(monitor)
+            mss.tools.to_png(image.rgb, image.size, output=str(path))
+    except Exception:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return None
+    return _validated_screenshot(path)
 
 
 def _capture_grim(destination_dir: Path, prefix: str, timestamp: str) -> Path | None:

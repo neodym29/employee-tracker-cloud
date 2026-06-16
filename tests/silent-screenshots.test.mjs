@@ -4,7 +4,9 @@ import { readFileSync } from 'node:fs';
 const screenshots = readFileSync(new URL('../agent/src/employee_tracker/screenshots.py', import.meta.url), 'utf8');
 const installer = readFileSync(new URL('../app/api/installer/route.ts', import.meta.url), 'utf8');
 
-assert.match(screenshots, /_capture_gnome_shell_dbus/, 'agent should support GNOME Shell D-Bus screenshot with flash=false on Wayland');
+assert.match(screenshots, /_capture_mss/, 'agent should prefer MSS screen-buffer capture before desktop screenshot helpers');
+assert.match(screenshots, /'mss', _capture_mss/, 'MSS should be the first Linux whole-screen backend so capture is silent/no flash/no sound');
+assert.match(screenshots, /_capture_gnome_shell_dbus/, 'agent should support GNOME Shell D-Bus screenshot with flash=false on Wayland as a last fallback');
 assert.match(screenshots, /org\.gnome\.Shell\.Screenshot\.Screenshot/, 'agent should call GNOME Shell screenshot D-Bus API directly');
 assert.match(screenshots, /'false',\s*'false'/, 'GNOME Shell screenshot call should disable cursor and flash');
 assert.match(screenshots, /_capture_grim/, 'agent should try silent Wayland screenshot tools first when available');
