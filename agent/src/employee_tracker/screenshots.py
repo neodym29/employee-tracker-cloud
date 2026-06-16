@@ -19,10 +19,11 @@ def capture_screenshot(destination_dir: Path, prefix: str, window_id: str | None
         if screenshot is not None:
             return screenshot
 
-    # Only use screenshot tools that can capture without popping the GNOME/Snap screenshot UI.
-    # On GNOME Wayland there is intentionally no fully silent screenshot API for normal apps;
-    # in that case we skip the screenshot rather than making the employee see a capture flash.
-    for capture in (_capture_grim, _capture_maim, _capture_scrot, _capture_pyautogui):
+    # Prefer tools that capture silently. Some desktop-provided screenshot
+    # helpers visibly flash or open capture UI, so they are intentionally not
+    # used for unattended tracking. If no quiet backend works, skip the
+    # screenshot rather than showing UI to the user.
+    for capture in (_capture_grim, _capture_maim, _capture_scrot):
         screenshot = capture(destination_dir, prefix, timestamp)
         if screenshot is not None:
             return screenshot
@@ -119,18 +120,6 @@ def _capture_scrot(destination_dir: Path, prefix: str, timestamp: str) -> Path |
     path = destination_dir / f'{prefix}_{timestamp}.png'
     result = _run_silent(['scrot', '--silent', str(path)])
     return _validated_screenshot(path) if result.returncode == 0 else None
-
-
-def _capture_pyautogui(destination_dir: Path, prefix: str, timestamp: str) -> Path | None:
-    path = destination_dir / f'{prefix}_{timestamp}.png'
-    try:
-        import pyautogui
-        image = pyautogui.screenshot()
-        image.save(path)
-    except Exception:
-        return None
-    return _validated_screenshot(path)
-
 
 def _capture_xwindow(destination_dir: Path, prefix: str, timestamp: str, window_id: str) -> Path | None:
     xwd_path = destination_dir / f'{prefix}_{window_id.replace("0x", "")}_{timestamp}.xwd'

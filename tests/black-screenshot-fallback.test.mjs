@@ -7,11 +7,12 @@ const pyproject = readFileSync(new URL('../agent/pyproject.toml', import.meta.ur
 for (const expected of [
   'def _is_probably_black',
   'def _validated_screenshot',
-  '_capture_pyautogui',
   'if _is_probably_black(path):',
 ]) {
   assert.match(screenshots, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `screenshot capture should reject black frames and fall back: ${expected}`);
 }
 
+assert.doesNotMatch(screenshots, /gnome-screenshot|_capture_gnome_screenshot|pyautogui|ImageGrab|spectacle/, 'black-frame fallback must not invoke visible desktop screenshot UI');
+
 assert.match(pyproject, /Pillow/, 'agent should include Pillow so screenshots can be validated');
-assert.match(pyproject, /pyautogui/, 'agent should include pyautogui screenshot fallback from uploaded requirements');
+assert.doesNotMatch(pyproject, /pyautogui/, 'agent must not depend on pyautogui because it can call visible Linux screenshot helpers');
