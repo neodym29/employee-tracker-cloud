@@ -440,7 +440,9 @@ export async function readDashboard(filters: DashboardReadFilters = {}) {
   eventParams.push(filters.mode === 'range' ? 500 : 120);
   const limitParam = eventParams.length;
   const eventSql = `select id, employee_email, hostname, os_user, captured_at, received_at, event_type, app_name, window_title, url, idle_seconds, payload,
-      exists(select 1 from activity_screenshots s where s.activity_event_id = activity_events.id) as has_screenshot
+      exists(select 1 from activity_screenshots s where s.activity_event_id = activity_events.id)
+        or exists(select 1 from activity_screenshots s where s.activity_event_id = case when (activity_events.payload->>'source_event_id') ~ '^\\d+$' then (activity_events.payload->>'source_event_id')::bigint end)
+        as has_screenshot
     from activity_events
     ${eventWhere.length ? `where ${eventWhere.join(' and ')}` : ''}
     order by received_at desc, id desc

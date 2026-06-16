@@ -10,6 +10,7 @@ const agentDb = readFileSync(new URL('../agent/src/employee_tracker/db.py', impo
 
 assert.match(db, /create table if not exists activity_screenshots/, 'schema should store screenshots in a separate table');
 assert.match(db, /has_screenshot/, 'dashboard query should expose only a screenshot availability flag');
+assert.match(db, /payload->>'source_event_id'/, 'dashboard query should mark screenshot_capture logs as showable when they point at a source screenshot');
 assert.doesNotMatch(db, /screenshot_png_base64[\s\S]*from activity_events/, 'dashboard query must not inline screenshot base64 in the event feed');
 
 assert.match(ingest, /screenshot_png_base64/, 'ingest should accept screenshot bytes from agent uploads');
@@ -20,11 +21,13 @@ assert.match(ingest, /15_000_000/, 'ingest should accept compressed multi-monito
 
 assert.match(screenshotApi, /requireAdminSession/, 'screenshot API should require admin auth');
 assert.match(screenshotApi, /activity_screenshots/, 'screenshot API should read from screenshot table');
+assert.match(screenshotApi, /payload->>'source_event_id'/, 'screenshot API should resolve screenshot_capture rows that reference a source event');
 assert.match(screenshotApi, /image\/png/, 'screenshot API should return png data');
 
 assert.match(dashboard, /showScreenshot/, 'dashboard should fetch screenshots only when Show is clicked');
 assert.match(dashboard, /\/api\/screenshot\?id=/, 'dashboard should call screenshot API on demand');
 assert.match(dashboard, /Show/, 'dashboard should render a Show button for screenshots');
+assert.match(dashboard, /status=\$\{payload\.status\}/, 'dashboard should explain skipped or failed screenshot capture rows');
 
 assert.match(collector, /screenshot_png_base64/, 'collector should upload screenshot bytes with activity payloads');
 assert.match(collector, /screenshot_mime_type/, 'collector should include the screenshot MIME type');

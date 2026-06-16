@@ -13,9 +13,11 @@ export async function GET(req: NextRequest) {
   const db = getPool();
   const result = await db.query(
     `select s.mime_type, s.image_base64, e.employee_email, e.hostname, e.captured_at
-     from activity_screenshots s
-     join activity_events e on e.id = s.activity_event_id
-     where s.activity_event_id = $1
+     from activity_events e
+     join activity_screenshots s on s.activity_event_id = e.id
+       or s.activity_event_id = case when (e.payload->>'source_event_id') ~ '^\\d+$' then (e.payload->>'source_event_id')::bigint end
+     where e.id = $1
+     order by case when s.activity_event_id = e.id then 0 else 1 end
      limit 1`,
     [id],
   );
