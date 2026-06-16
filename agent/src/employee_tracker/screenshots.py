@@ -38,27 +38,35 @@ def capture_screenshot_with_status(destination_dir: Path, prefix: str, window_id
             tuple(attempts),
         )
 
+    # Prefer silent whole-desktop backends first so scheduled evidence captures
+    # include the complete virtual desktop across multiple monitors. The xwd
+    # path below is intentionally only a window-only fallback because capturing
+    # the active window will miss anything visible on a second monitor.
+    whole_desktop_backends = (
+        ('mss', _capture_mss),
+        ('grim', _capture_grim),
+        ('maim', _capture_maim),
+        ('scrot_silent', _capture_scrot),
+        ('xwd_root', _capture_xroot),
+    )
+    for backend, capture in whole_desktop_backends:
+        attempts.append(backend)
+        screenshot = capture(destination_dir, prefix, timestamp)
+        if screenshot is not None:
+            return ScreenshotCaptureResult(screenshot, 'captured', backend, None, tuple(attempts))
+
+    if _has_multiple_monitors():
+        return ScreenshotCaptureResult(None, 'skipped', None, 'multi_monitor_full_desktop_unavailable', tuple(attempts))
+
+    # Last-resort silent X11 window-only fallback. This helps on single-monitor
+    # sessions when full-desktop capture is unavailable, but it is not suitable
+    # as the scheduled screenshot path on multi-monitor setups.
     x_window_id = _resolve_xwindow_id(window_id)
     if x_window_id and which('xwd') is not None:
         attempts.append('xwd_window')
         screenshot = _capture_xwindow(destination_dir, prefix, timestamp, x_window_id)
         if screenshot is not None:
             return ScreenshotCaptureResult(screenshot, 'captured', 'xwd_window', None, tuple(attempts))
-
-    # Prefer tools that capture silently. Some desktop-provided screenshot
-    # helpers visibly flash or open capture UI, so they are intentionally not
-    # used for unattended tracking. If no quiet backend works, skip the
-    # screenshot rather than showing UI to the user.
-    for backend, capture in (
-        ('mss', _capture_mss),
-        ('grim', _capture_grim),
-        ('maim', _capture_maim),
-        ('scrot_silent', _capture_scrot),
-    ):
-        attempts.append(backend)
-        screenshot = capture(destination_dir, prefix, timestamp)
-        if screenshot is not None:
-            return ScreenshotCaptureResult(screenshot, 'captured', backend, None, tuple(attempts))
 
     return ScreenshotCaptureResult(None, 'skipped', None, 'no_silent_backend_available_or_all_failed', tuple(attempts))
 
@@ -219,6 +227,75 @@ def _capture_scrot(destination_dir: Path, prefix: str, timestamp: str) -> Path |
     return _validated_screenshot(path) if result.returncode == 0 else None
 
 
+def _has_multiple_monitors() -> bool:
+    """Best-effort monitor count for deciding whether window-only fallback is misleading."""
+    if which('xrandr') is not None:
+        try:
+            result = subprocess.run(
+                ['xrandr', '--listmonitors'],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=1,
+                text=True,
+            )
+        except Exception:
+            result = None
+        if result is not None and result.returncode == 0:
+            match = re.search(r'^Monitors:\s*(\d+)', result.stdout, re.MULTILINE)
+            if match:
+                try:
+                    return int(match.group(1)) > 1
+                except ValueError:
+                    pass
+
+    try:
+        import mss
+        with mss.mss() as sct:
+            # MSS index 0 is the virtual desktop; physical outputs start at 1.
+            return max(0, len(sct.monitors) - 1) > 1
+    except Exception:
+        return False
+
+
+def _capture_xroot(destination_dir: Path, prefix: str, timestamp: str) -> Path | None:
+    """Capture the full X11 root window for Xorg multi-monitor sessions."""
+    if which('xwd') is None:
+        return None
+    xwd_path = destination_dir / f'{prefix}_root_{timestamp}.xwd'
+    png_path = destination_dir / f'{prefix}_root_{timestamp}.png'
+    xwd_result = _run_silent(['xwd', '-root', '-silent', '-out', str(xwd_path)])
+    if xwd_result.returncode != 0 or not xwd_path.exists():
+        return None
+    converted = _convert_xwd_to_png(xwd_path, png_path)
+    try:
+        xwd_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return _validated_screenshot(png_path) if converted else None
+
+
+def _convert_xwd_to_png(xwd_path: Path, png_path: Path) -> bool:
+    converted = False
+    if which('convert') is not None:
+        convert_result = _run_silent(['convert', str(xwd_path), str(png_path)])
+        converted = convert_result.returncode == 0
+    elif which('magick') is not None:
+        convert_result = _run_silent(['magick', str(xwd_path), str(png_path)])
+        converted = convert_result.returncode == 0
+
+    if not converted and which('ffmpeg') is not None:
+        convert_result = subprocess.run(
+            ['ffmpeg', '-y', '-i', str(xwd_path), '-frames:v', '1', '-update', '1', str(png_path)],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+        converted = convert_result.returncode == 0
+    return converted
+
+
 def _capture_gnome_shell_dbus(destination_dir: Path, prefix: str, timestamp: str) -> Path | None:
     """Capture through GNOME Shell's D-Bus API with flash disabled.
 
@@ -267,23 +344,7 @@ def _capture_xwindow(destination_dir: Path, prefix: str, timestamp: str, window_
     if xwd_result.returncode != 0 or not xwd_path.exists():
         return None
 
-    converted = False
-    if which('convert') is not None:
-        convert_result = _run_silent(['convert', str(xwd_path), str(png_path)])
-        converted = convert_result.returncode == 0
-    elif which('magick') is not None:
-        convert_result = _run_silent(['magick', str(xwd_path), str(png_path)])
-        converted = convert_result.returncode == 0
-
-    if not converted and which('ffmpeg') is not None:
-        convert_result = subprocess.run(
-            ['ffmpeg', '-y', '-i', str(xwd_path), '-frames:v', '1', '-update', '1', str(png_path)],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-        )
-        converted = convert_result.returncode == 0
+    converted = _convert_xwd_to_png(xwd_path, png_path)
 
     try:
         xwd_path.unlink(missing_ok=True)
