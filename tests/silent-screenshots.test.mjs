@@ -6,9 +6,7 @@ const installer = readFileSync(new URL('../app/api/installer/route.ts', import.m
 
 assert.match(screenshots, /_capture_mss/, 'agent should prefer MSS screen-buffer capture before desktop screenshot helpers');
 assert.match(screenshots, /'mss', _capture_mss/, 'MSS should be the first Linux whole-screen backend so capture is silent/no flash/no sound');
-assert.match(screenshots, /_capture_gnome_shell_dbus/, 'agent should support GNOME Shell D-Bus screenshot with flash=false on Wayland as a last fallback');
-assert.match(screenshots, /org\.gnome\.Shell\.Screenshot\.Screenshot/, 'agent should call GNOME Shell screenshot D-Bus API directly');
-assert.match(screenshots, /'false',\s*'false'/, 'GNOME Shell screenshot call should disable cursor and flash');
+assert.doesNotMatch(screenshots, /\('gnome_shell_dbus_no_flash',\s*_capture_gnome_shell_dbus\)/, 'unattended capture should not use GNOME screenshot backends that can trigger shell policy/sound/flash behavior');
 assert.match(screenshots, /_capture_grim/, 'agent should try silent Wayland screenshot tools first when available');
 assert.match(screenshots, /_capture_maim/, 'agent should support silent X11 maim fallback');
 assert.match(screenshots, /_capture_scrot/, 'agent should support silent X11 scrot fallback');

@@ -52,7 +52,6 @@ def capture_screenshot_with_status(destination_dir: Path, prefix: str, window_id
         ('grim', _capture_grim),
         ('maim', _capture_maim),
         ('scrot_silent', _capture_scrot),
-        ('gnome_shell_dbus_no_flash', _capture_gnome_shell_dbus),
     ):
         attempts.append(backend)
         screenshot = capture(destination_dir, prefix, timestamp)
