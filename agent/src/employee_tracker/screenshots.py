@@ -52,6 +52,7 @@ def capture_screenshot_with_status(destination_dir: Path, prefix: str, window_id
     # path below is intentionally only a window-only fallback because capturing
     # the active window will miss anything visible on a second monitor.
     whole_desktop_backends = (
+        ('gnome_shell_screencast', _capture_gnome_shell_screencast),
         ('mss', _capture_mss),
         ('grim', _capture_grim),
         ('maim', _capture_maim),
@@ -246,6 +247,85 @@ $bitmap.Dispose()
     result = _run_silent([powershell, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script])
     return _validated_screenshot(path) if result.returncode == 0 else None
 
+
+
+def _capture_gnome_shell_screencast(destination_dir: Path, prefix: str, timestamp: str) -> Path | None:
+    """Capture a real GNOME Wayland compositor frame via Shell Screencast.
+
+    GNOME Wayland often denies direct screenshot APIs and returns black frames
+    from X11 wrappers, but the Shell Screencast service can record the actual
+    compositor output. We record a very short WebM silently, extract one frame,
+    validate it, and delete the temporary video.
+    """
+    if which('gdbus') is None or which('ffmpeg') is None:
+        return None
+    if os.environ.get('XDG_SESSION_TYPE') != 'wayland' and not os.environ.get('WAYLAND_DISPLAY'):
+        return None
+
+    webm_path = destination_dir / f'{prefix}_gnome_screencast_{timestamp}.webm'
+    png_path = destination_dir / f'{prefix}_gnome_screencast_{timestamp}.png'
+    try:
+        start = subprocess.run(
+            [
+                'gdbus',
+                'call',
+                '--session',
+                '--dest',
+                'org.gnome.Shell.Screencast',
+                '--object-path',
+                '/org/gnome/Shell/Screencast',
+                '--method',
+                'org.gnome.Shell.Screencast.Screencast',
+                str(webm_path),
+                '{}',
+            ],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+            text=True,
+        )
+        if start.returncode != 0 or 'true' not in start.stdout.lower():
+            return None
+        # Give the compositor enough time to write at least one full frame.
+        try:
+            import time
+            time.sleep(0.75)
+        finally:
+            subprocess.run(
+                [
+                    'gdbus',
+                    'call',
+                    '--session',
+                    '--dest',
+                    'org.gnome.Shell.Screencast',
+                    '--object-path',
+                    '/org/gnome/Shell/Screencast',
+                    '--method',
+                    'org.gnome.Shell.Screencast.StopScreencast',
+                ],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+            )
+        if not webm_path.exists() or webm_path.stat().st_size <= 0:
+            return None
+        extract = subprocess.run(
+            ['ffmpeg', '-y', '-i', str(webm_path), '-frames:v', '1', '-update', '1', str(png_path)],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=8,
+        )
+        return _validated_screenshot(png_path) if extract.returncode == 0 else None
+    except Exception:
+        return None
+    finally:
+        try:
+            webm_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 def _capture_mss(destination_dir: Path, prefix: str, timestamp: str) -> Path | None:
     """Capture the full desktop with MSS, without desktop UI/sound helpers.

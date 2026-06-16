@@ -10,8 +10,8 @@ assert.match(
 );
 assert.match(
   screenshots,
-  /'mss', _capture_mss[\s\S]*'grim', _capture_grim[\s\S]*'maim', _capture_maim[\s\S]*'scrot_silent', _capture_scrot[\s\S]*'xwd_root', _capture_xroot/,
-  'multi-monitor screenshot capture should try silent whole-desktop backends',
+  /'gnome_shell_screencast', _capture_gnome_shell_screencast[\s\S]*'mss', _capture_mss[\s\S]*'grim', _capture_grim[\s\S]*'maim', _capture_maim[\s\S]*'scrot_silent', _capture_scrot[\s\S]*'xwd_root', _capture_xroot/,
+  'multi-monitor screenshot capture should try GNOME compositor screencast before X11/wrapper fallbacks',
 );
 assert.match(screenshots, /def _capture_xroot/, 'Xorg fallback should capture the full root desktop before any window-only fallback');
 assert.match(screenshots, /xwd', '-root'/, 'xwd root fallback should target the full virtual desktop, not one window');
