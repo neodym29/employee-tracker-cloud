@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from shutil import which
 import os
+import re
 import subprocess
 
 
@@ -37,9 +38,10 @@ def capture_screenshot_with_status(destination_dir: Path, prefix: str, window_id
             tuple(attempts),
         )
 
-    if window_id and which('xwd') is not None:
+    x_window_id = _resolve_xwindow_id(window_id)
+    if x_window_id and which('xwd') is not None:
         attempts.append('xwd_window')
-        screenshot = _capture_xwindow(destination_dir, prefix, timestamp, window_id)
+        screenshot = _capture_xwindow(destination_dir, prefix, timestamp, x_window_id)
         if screenshot is not None:
             return ScreenshotCaptureResult(screenshot, 'captured', 'xwd_window', None, tuple(attempts))
 
@@ -99,6 +101,40 @@ def _run_silent(command: list[str]) -> subprocess.CompletedProcess[bytes]:
         stderr=subprocess.DEVNULL,
         timeout=5,
     )
+
+
+def _is_real_xwindow_id(window_id: str | None) -> bool:
+    if not window_id:
+        return False
+    return bool(re.fullmatch(r'(0x[0-9a-fA-F]+|[0-9]+)', str(window_id).strip()))
+
+
+def _resolve_xwindow_id(window_id: str | None) -> str | None:
+    """Return a real X11 window id for xwd.
+
+    Browser-extension events use synthetic ids such as
+    ``browser:brave:window:...:tab:...``. Those are useful for dashboard
+    correlation but invalid for xwd. In that case, fall back to the current X
+    active window, which captures the visible browser/app window silently on
+    XWayland/X11 sessions.
+    """
+    if _is_real_xwindow_id(window_id):
+        return str(window_id).strip()
+    if which('xdotool') is None:
+        return None
+    try:
+        result = subprocess.run(
+            ['xdotool', 'getactivewindow'],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=1,
+            text=True,
+        )
+    except Exception:
+        return None
+    candidate = result.stdout.strip()
+    return candidate if result.returncode == 0 and _is_real_xwindow_id(candidate) else None
 
 
 def _capture_windows(destination_dir: Path, prefix: str, timestamp: str) -> Path | None:
@@ -224,13 +260,22 @@ def _capture_gnome_shell_dbus(destination_dir: Path, prefix: str, timestamp: str
 
 
 def _capture_xwindow(destination_dir: Path, prefix: str, timestamp: str, window_id: str) -> Path | None:
-    xwd_path = destination_dir / f'{prefix}_{window_id.replace("0x", "")}_{timestamp}.xwd'
-    png_path = destination_dir / f'{prefix}_{window_id.replace("0x", "")}_{timestamp}.png'
+    safe_window_id = re.sub(r'[^0-9A-Za-z]+', '_', window_id.replace('0x', ''))
+    xwd_path = destination_dir / f'{prefix}_{safe_window_id}_{timestamp}.xwd'
+    png_path = destination_dir / f'{prefix}_{safe_window_id}_{timestamp}.png'
     xwd_result = _run_silent(['xwd', '-id', window_id, '-silent', '-out', str(xwd_path)])
     if xwd_result.returncode != 0 or not xwd_path.exists():
         return None
 
-    if which('ffmpeg') is not None:
+    converted = False
+    if which('convert') is not None:
+        convert_result = _run_silent(['convert', str(xwd_path), str(png_path)])
+        converted = convert_result.returncode == 0
+    elif which('magick') is not None:
+        convert_result = _run_silent(['magick', str(xwd_path), str(png_path)])
+        converted = convert_result.returncode == 0
+
+    if not converted and which('ffmpeg') is not None:
         convert_result = subprocess.run(
             ['ffmpeg', '-y', '-i', str(xwd_path), '-frames:v', '1', '-update', '1', str(png_path)],
             check=False,
@@ -238,12 +283,13 @@ def _capture_xwindow(destination_dir: Path, prefix: str, timestamp: str, window_
             stderr=subprocess.DEVNULL,
             timeout=5,
         )
-        try:
-            xwd_path.unlink(missing_ok=True)
-        except OSError:
-            pass
-        if convert_result.returncode == 0:
-            return _validated_screenshot(png_path)
-        return None
+        converted = convert_result.returncode == 0
 
-    return _validated_screenshot(xwd_path)
+    try:
+        xwd_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+    if converted:
+        return _validated_screenshot(png_path)
+    return None

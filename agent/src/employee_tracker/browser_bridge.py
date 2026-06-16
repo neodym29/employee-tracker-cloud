@@ -100,6 +100,20 @@ class BrowserTypingInfo:
     source: str = 'browser-extension'
 
 
+@dataclass(frozen=True)
+class BrowserScreenshotInfo:
+    browser: str
+    app_key: str
+    tab_id: int | None
+    window_id: int | None
+    title: str | None
+    url: str | None
+    data_url: str
+    captured_at: str | None
+    received_at: float
+    source: str = 'browser-extension-captureVisibleTab'
+
+
 class BrowserBridge:
     def __init__(self, host: str = '127.0.0.1', port: int = 8766) -> None:
         self.host = host
@@ -108,6 +122,7 @@ class BrowserBridge:
         self._tabs: list[BrowserTabInfo] = []
         self._clicks: list[BrowserClickInfo] = []
         self._typing_events: list[BrowserTypingInfo] = []
+        self._screenshots: list[BrowserScreenshotInfo] = []
         self._focus_events: list[BrowserFocusEventInfo] = []
         self._last_active_tab_by_app: dict[str, BrowserTabInfo] = {}
         self._gnome_windows: list[GnomeWindowInfo] = []
@@ -127,7 +142,7 @@ class BrowserBridge:
 
             def do_POST(self) -> None:  # noqa: N802
                 try:
-                    length = min(int(self.headers.get('Content-Length', '0')), 2_000_000)
+                    length = min(int(self.headers.get('Content-Length', '0')), 4_000_000)
                     payload = json.loads(self.rfile.read(length).decode('utf-8')) if length else {}
                     if self.path == '/browser-state':
                         bridge.update_state(payload)
@@ -139,6 +154,10 @@ class BrowserBridge:
                         return
                     if self.path == '/browser-typing':
                         bridge.add_typing_event(payload)
+                        self._send_json({'ok': True})
+                        return
+                    if self.path == '/browser-screenshot':
+                        bridge.add_screenshot(payload)
                         self._send_json({'ok': True})
                         return
                     if self.path == '/browser-focus':
@@ -257,6 +276,46 @@ class BrowserBridge:
             self._typing_events.append(event)
             self._typing_events = self._typing_events[-500:]
             self._last_seen = time.time()
+
+    def add_screenshot(self, payload: dict[str, Any]) -> None:
+        browser = _browser_name(payload.get('browser'))
+        app_key = _app_key(browser)
+        data_url = _clean_text(payload.get('dataUrl'), 4_000_000)
+        if not data_url or not data_url.startswith('data:image/'):
+            return
+        screenshot = BrowserScreenshotInfo(
+            browser=browser,
+            app_key=app_key,
+            tab_id=_safe_int(payload.get('tabId')),
+            window_id=_safe_int(payload.get('windowId')),
+            title=_clean_text(payload.get('title'), 300),
+            url=_clean_text(payload.get('url'), 1000),
+            data_url=data_url,
+            captured_at=_clean_text(payload.get('capturedAt'), 80),
+            received_at=time.time(),
+        )
+        with self._lock:
+            self._screenshots.append(screenshot)
+            self._screenshots = self._screenshots[-20:]
+            self._last_seen = time.time()
+
+    def latest_screenshot(self, tab: BrowserTabInfo | None = None, max_age_seconds: int = 45) -> BrowserScreenshotInfo | None:
+        with self._lock:
+            screenshots = list(self._screenshots)
+        if not screenshots:
+            return None
+        now = time.time()
+        for screenshot in reversed(screenshots):
+            if tab is not None:
+                if tab.tab_id is not None and screenshot.tab_id != tab.tab_id:
+                    continue
+                if tab.window_id is not None and screenshot.window_id != tab.window_id:
+                    continue
+            # Browser extension screenshots are pushed periodically; keep the
+            # freshness check conservative without trusting client clocks.
+            if now - screenshot.received_at <= max_age_seconds:
+                return screenshot
+        return None
 
     def add_focus_event(self, payload: dict[str, Any]) -> None:
         browser = _browser_name(payload.get('browser'))

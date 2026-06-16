@@ -34,6 +34,27 @@ def _plural(count: int, singular: str) -> str:
     return f'{count} {singular}' if count == 1 else f'{count} {singular}s'
 
 
+def _decode_browser_screenshot(data_url: str) -> tuple[bytes, str, str] | None:
+    if not data_url.startswith('data:image/') or ';base64,' not in data_url:
+        return None
+    header, encoded = data_url.split(';base64,', 1)
+    mime_type = header.removeprefix('data:').lower()
+    extension = {
+        'image/png': '.png',
+        'image/jpeg': '.jpg',
+        'image/webp': '.webp',
+    }.get(mime_type)
+    if extension is None:
+        return None
+    try:
+        image_bytes = base64.b64decode(encoded, validate=True)
+    except Exception:
+        return None
+    if not image_bytes:
+        return None
+    return image_bytes, mime_type, extension
+
+
 def _int_value(value: object, default: int = 0) -> int:
     try:
         return int(value)  # type: ignore[arg-type]
@@ -1065,6 +1086,29 @@ class ActivityCollector:
                     screenshot_mime_type = None
                     screenshot_log['status'] = 'captured_local_read_failed'
                     screenshot_log['reason'] = str(exc)
+            if screenshot_image_base64 is None and browser_tab is not None:
+                browser_screenshot = self._browser_bridge.latest_screenshot(browser_tab)
+                decoded = _decode_browser_screenshot(browser_screenshot.data_url) if browser_screenshot is not None else None
+                if decoded is not None and browser_screenshot is not None:
+                    image_bytes, mime_type, extension = decoded
+                    browser_path = self.screenshot_dir / f'{self.username}_browser_tab_{int(now)}{extension}'
+                    try:
+                        browser_path.write_bytes(image_bytes)
+                        screenshot_path = str(browser_path)
+                        screenshot_image_base64 = base64.b64encode(image_bytes).decode('ascii')
+                        screenshot_mime_type = mime_type
+                        screenshot_log.update({
+                            'status': 'captured',
+                            'backend': 'browser_extension_capture_visible_tab',
+                            'reason': None,
+                            'attempts': list(screenshot_result.attempts) + ['browser_extension_capture_visible_tab'],
+                            'screenshot_path': screenshot_path,
+                            'uploaded': True,
+                            'mime_type': mime_type,
+                            'source': browser_screenshot.source,
+                        })
+                    except OSError as exc:
+                        screenshot_log['reason'] = f"browser_extension_capture_failed: {exc}"
             self._last_screenshot_at = now
             insert_screenshot_event(connection, screenshot_log)
 

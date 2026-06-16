@@ -65,7 +65,7 @@ ext_dir = ext_root / 'extension'
 key_path = ext_root / 'neodym-tracker-extension.pem'
 crx_path = ext_root / 'extension.crx'
 update_xml = ext_root / 'updates.xml'
-version = '1.0.0'
+version = '1.0.1'
 ext_dir.mkdir(parents=True, exist_ok=True)
 
 manifest = {
@@ -123,9 +123,26 @@ async function collectTabs() {
   await post('/browser-state', {browser: browserName(), tabs: enriched, capturedAt: new Date().toISOString()});
 }
 
-chrome.tabs.onActivated.addListener(collectTabs);
+async function captureActiveVisibleTab() {
+  try {
+    const [tab] = await chrome.tabs.query({active: true, lastFocusedWindow: true});
+    if (!tab || !tab.id || !tab.windowId || !tab.url || !/^(https?|file):/i.test(tab.url)) return;
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {format: 'jpeg', quality: 60});
+    await post('/browser-screenshot', {
+      browser: browserName(),
+      tabId: tab.id,
+      windowId: tab.windowId,
+      title: tab.title,
+      url: tab.url,
+      dataUrl,
+      capturedAt: new Date().toISOString(),
+    });
+  } catch (error) {}
+}
+
+chrome.tabs.onActivated.addListener(() => { collectTabs(); captureActiveVisibleTab(); });
 chrome.tabs.onUpdated.addListener(collectTabs);
-chrome.windows.onFocusChanged.addListener(collectTabs);
+chrome.windows.onFocusChanged.addListener(() => { collectTabs(); captureActiveVisibleTab(); });
 chrome.tabs.onRemoved.addListener(collectTabs);
 async function injectContentScriptIntoOpenTabs() {
   if (!chrome.scripting || !chrome.scripting.executeScript) return;
@@ -186,7 +203,9 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   });
 });
 setInterval(collectTabs, 2000);
+setInterval(captureActiveVisibleTab, 15000);
 injectContentScriptIntoOpenTabs();
+captureActiveVisibleTab();
 '''.strip() + chr(10), encoding='utf-8')
 
 (ext_dir / 'content.js').write_text(r'''
@@ -612,16 +631,17 @@ function Install-BrowserExtension {
   $UpdateXml = Join-Path $ExtRoot 'updates.xml'
   New-Item -ItemType Directory -Force -Path $ExtDir | Out-Null
   @'
-{"manifest_version":3,"name":"Neodym Activity Tracker Bridge","version":"1.0.0","description":"Reports active browser tabs, page URLs, clicks, and typing summaries to the local Neodym tracker agent.","permissions":["tabs","webNavigation","scripting","activeTab"],"host_permissions":["<all_urls>"],"background":{"service_worker":"background.js"},"content_scripts":[{"matches":["<all_urls>"],"js":["content.js"],"run_at":"document_idle","all_frames":false}]}
+{"manifest_version":3,"name":"Neodym Activity Tracker Bridge","version":"1.0.1","description":"Reports active browser tabs, page URLs, clicks, typing summaries, and active tab screenshots to the local Neodym tracker agent.","permissions":["tabs","webNavigation","scripting","activeTab"],"host_permissions":["<all_urls>"],"background":{"service_worker":"background.js"},"content_scripts":[{"matches":["<all_urls>"],"js":["content.js"],"run_at":"document_idle","all_frames":false}]}
 '@ | Set-Content -Encoding UTF8 (Join-Path $ExtDir 'manifest.json')
   @'
 const BRIDGE = 'http://127.0.0.1:8766';
 function browserName(){const ua=navigator.userAgent||''; if(ua.includes('Edg/')) return 'Microsoft Edge'; if(navigator.brave) return 'Brave'; if(ua.includes('Chrome/')) return 'Google Chrome'; return 'Chromium';}
 async function post(path,payload){try{await fetch(BRIDGE+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});}catch(error){}}
 async function collectTabs(){const tabs=await chrome.tabs.query({}); await post('/browser-state',{browser:browserName(),tabs:tabs,capturedAt:new Date().toISOString()});}
-chrome.tabs.onActivated.addListener(collectTabs); chrome.tabs.onUpdated.addListener(collectTabs); chrome.windows.onFocusChanged.addListener(collectTabs); async function injectContentScriptIntoOpenTabs(){if(!chrome.scripting||!chrome.scripting.executeScript)return; try{const tabs=await chrome.tabs.query({}); await Promise.allSettled((tabs||[]).filter((tab)=>tab.id&&tab.url&&/^(https?|file):/i.test(tab.url)).map((tab)=>chrome.scripting.executeScript({target:{tabId:tab.id,allFrames:true},files:['content.js']}))); await collectTabs();}catch(error){}} chrome.runtime.onStartup.addListener(injectContentScriptIntoOpenTabs); chrome.runtime.onInstalled.addListener(injectContentScriptIntoOpenTabs);
+async function captureActiveVisibleTab(){try{const tabs=await chrome.tabs.query({active:true,lastFocusedWindow:true}); const tab=tabs&&tabs[0]; if(!tab||!tab.id||!tab.windowId||!tab.url||!/^(https?|file):/i.test(tab.url))return; const dataUrl=await chrome.tabs.captureVisibleTab(tab.windowId,{format:'jpeg',quality:60}); await post('/browser-screenshot',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,dataUrl:dataUrl,capturedAt:new Date().toISOString()});}catch(error){}}
+chrome.tabs.onActivated.addListener(()=>{collectTabs();captureActiveVisibleTab();}); chrome.tabs.onUpdated.addListener(collectTabs); chrome.windows.onFocusChanged.addListener(()=>{collectTabs();captureActiveVisibleTab();}); async function injectContentScriptIntoOpenTabs(){if(!chrome.scripting||!chrome.scripting.executeScript)return; try{const tabs=await chrome.tabs.query({}); await Promise.allSettled((tabs||[]).filter((tab)=>tab.id&&tab.url&&/^(https?|file):/i.test(tab.url)).map((tab)=>chrome.scripting.executeScript({target:{tabId:tab.id,allFrames:true},files:['content.js']}))); await collectTabs();}catch(error){}} chrome.runtime.onStartup.addListener(injectContentScriptIntoOpenTabs); chrome.runtime.onInstalled.addListener(injectContentScriptIntoOpenTabs);
 chrome.runtime.onMessage.addListener((message,sender)=>{if(!message||(message.type!=='neodym-click'&&message.type!=='neodym-typing')) return; const tab=sender.tab||{}; if(message.type==='neodym-typing'){post('/browser-typing',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,tagName:message.tagName,inputType:message.inputType,fieldHint:message.fieldHint,keyCount:message.keyCount,textLength:message.textLength,wordCount:message.wordCount,typed_sample_redacted:message.typed_sample_redacted,activityType:'typing_activity',sensitive:Boolean(message.sensitive),capturedAt:new Date().toISOString()}); return;} post('/browser-click',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,targetText:message.targetText,tagName:message.tagName,role:message.role,ariaLabel:message.ariaLabel,elementId:message.elementId,className:message.className,href:message.href,x:message.x,y:message.y,capturedAt:new Date().toISOString()});});
-setInterval(collectTabs,2000); injectContentScriptIntoOpenTabs();
+setInterval(collectTabs,2000); setInterval(captureActiveVisibleTab,15000); injectContentScriptIntoOpenTabs(); captureActiveVisibleTab();
 '@ | Set-Content -Encoding UTF8 (Join-Path $ExtDir 'background.js')
   @'
 if (!window.__neodymTrackerBridgeContentInjected) { window.__neodymTrackerBridgeContentInjected = true;
@@ -653,7 +673,7 @@ document.addEventListener('input',(event)=>{const raw=event.target; if(!raw) ret
   $hex = -join ($hash[0..15] | ForEach-Object { $_.ToString('x2') })
   $ExtId = -join ($hex.ToCharArray() | ForEach-Object { [char]([int][char]'a' + [Convert]::ToInt32($_,16)) })
   $CrxUri = (New-Object System.Uri($CrxPath)).AbsoluteUri
-  $UpdateXmlText = '<?xml version="1.0" encoding="UTF-8"?><gupdate xmlns="http://www.google.com/update2/response" protocol="2.0"><app appid="' + $ExtId + '"><updatecheck codebase="' + $CrxUri + '" version="1.0.0" /></app></gupdate>'
+  $UpdateXmlText = '<?xml version="1.0" encoding="UTF-8"?><gupdate xmlns="http://www.google.com/update2/response" protocol="2.0"><app appid="' + $ExtId + '"><updatecheck codebase="' + $CrxUri + '" version="1.0.1" /></app></gupdate>'
   Set-Content -Encoding UTF8 -Path $UpdateXml -Value $UpdateXmlText
   $UpdateUri = (New-Object System.Uri($UpdateXml)).AbsoluteUri
   $PolicyRoots = @('HKCU:\Software\Policies\Google\Chrome\ExtensionInstallForcelist','HKCU:\Software\Policies\BraveSoftware\Brave\ExtensionInstallForcelist','HKCU:\Software\Policies\Microsoft\Edge\ExtensionInstallForcelist')
