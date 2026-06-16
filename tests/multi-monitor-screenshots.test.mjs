@@ -23,9 +23,16 @@ assert.match(
 );
 assert.match(
   screenshots,
-  /attempts\.append\('xwd_window'\)[\s\S]*partial_window_fallback_after_full_desktop_unavailable[\s\S]*multi_monitor_full_desktop_unavailable/,
-  'multi-monitor sessions should restore xwd_window as a partial fallback before skipping entirely',
+  /attempts\.append\('x11_window_stitch'\)[\s\S]*_capture_x11_window_stitch[\s\S]*stitched_x11_windows_after_full_desktop_unavailable/,
+  'multi-monitor Wayland/XWayland sessions should stitch visible windows across both monitors before falling back to one window',
 );
+assert.match(
+  screenshots,
+  /attempts\.append\('xwd_window'\)[\s\S]*partial_window_fallback_after_full_desktop_unavailable[\s\S]*multi_monitor_full_desktop_unavailable/,
+  'multi-monitor sessions should still keep xwd_window as the final partial fallback before skipping entirely',
+);
+assert.match(screenshots, /def _virtual_desktop_geometry/, 'stitched fallback should derive the full virtual desktop geometry');
+assert.match(screenshots, /Image\.new\('RGB', \(desktop_width, desktop_height\)/, 'stitched fallback should create a full-desktop canvas');
 assert.match(
   screenshots,
   /for backend, capture in whole_desktop_backends:[\s\S]*if screenshot is not None:[\s\S]*return ScreenshotCaptureResult\(screenshot, 'captured', backend/,

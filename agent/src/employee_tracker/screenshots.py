@@ -18,6 +18,15 @@ class ScreenshotCaptureResult:
     attempts: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class XWindowGeometry:
+    window_id: str
+    x: int
+    y: int
+    width: int
+    height: int
+
+
 def capture_screenshot(destination_dir: Path, prefix: str, window_id: str | None = None) -> Path | None:
     return capture_screenshot_with_status(destination_dir, prefix, window_id).path
 
@@ -56,6 +65,18 @@ def capture_screenshot_with_status(destination_dir: Path, prefix: str, window_id
             return ScreenshotCaptureResult(screenshot, 'captured', backend, None, tuple(attempts))
 
     multi_monitor = _has_multiple_monitors()
+
+    if multi_monitor:
+        attempts.append('x11_window_stitch')
+        stitched = _capture_x11_window_stitch(destination_dir, prefix, timestamp)
+        if stitched is not None:
+            return ScreenshotCaptureResult(
+                stitched,
+                'captured',
+                'x11_window_stitch',
+                'stitched_x11_windows_after_full_desktop_unavailable',
+                tuple(attempts),
+            )
 
     # Last-resort silent X11 window-only fallback. On multi-monitor Wayland/X11
     # hybrid sessions this may capture only the active window/monitor, but that
@@ -332,6 +353,173 @@ def _capture_xroot(destination_dir: Path, prefix: str, timestamp: str) -> Path |
         pass
     return _validated_screenshot(png_path) if converted else None
 
+
+
+def _virtual_desktop_geometry() -> tuple[int, int, int, int] | None:
+    """Return the virtual desktop bounds as (left, top, width, height)."""
+    if which('xrandr') is None:
+        return None
+    try:
+        result = subprocess.run(
+            ['xrandr', '--current'],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=1,
+            text=True,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+
+    rects: list[tuple[int, int, int, int]] = []
+    for line in result.stdout.splitlines():
+        if ' connected' not in line:
+            continue
+        match = re.search(r'\b(\d+)x(\d+)\+(-?\d+)\+(-?\d+)\b', line)
+        if not match:
+            continue
+        width, height, x, y = (int(value) for value in match.groups())
+        rects.append((x, y, x + width, y + height))
+
+    if not rects:
+        return None
+    left = min(rect[0] for rect in rects)
+    top = min(rect[1] for rect in rects)
+    right = max(rect[2] for rect in rects)
+    bottom = max(rect[3] for rect in rects)
+    width = right - left
+    height = bottom - top
+    if width <= 0 or height <= 0:
+        return None
+    return left, top, width, height
+
+
+def _xwindow_geometry(window_id: str) -> XWindowGeometry | None:
+    if which('xwininfo') is None:
+        return None
+    try:
+        result = subprocess.run(
+            ['xwininfo', '-id', window_id],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=1,
+            text=True,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0 or 'Map State: IsViewable' not in result.stdout:
+        return None
+
+    def number(label: str) -> int | None:
+        match = re.search(rf'{re.escape(label)}:\s*(-?\d+)', result.stdout)
+        return int(match.group(1)) if match else None
+
+    x = number('Absolute upper-left X')
+    y = number('Absolute upper-left Y')
+    width = number('Width')
+    height = number('Height')
+    if x is None or y is None or width is None or height is None:
+        return None
+    if width <= 1 or height <= 1:
+        return None
+    return XWindowGeometry(window_id=window_id, x=x, y=y, width=width, height=height)
+
+
+def _stacked_xwindow_geometries() -> list[XWindowGeometry]:
+    if which('xprop') is None:
+        return []
+    try:
+        result = subprocess.run(
+            ['xprop', '-root', '_NET_CLIENT_LIST_STACKING'],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=1,
+            text=True,
+        )
+    except Exception:
+        return []
+    if result.returncode != 0 or '#' not in result.stdout:
+        return []
+    window_ids = re.findall(r'0x[0-9a-fA-F]+|\b\d+\b', result.stdout.split('#', 1)[1])
+    geometries: list[XWindowGeometry] = []
+    seen: set[str] = set()
+    for window_id in window_ids:
+        if window_id in seen:
+            continue
+        seen.add(window_id)
+        geometry = _xwindow_geometry(window_id)
+        if geometry is not None:
+            geometries.append(geometry)
+    return geometries
+
+
+def _capture_x11_window_stitch(destination_dir: Path, prefix: str, timestamp: str) -> Path | None:
+    """Stitch visible X11/XWayland windows into one multi-monitor canvas.
+
+    GNOME Wayland can block real full-desktop capture while still allowing xwd
+    capture of individual XWayland windows. On dual-monitor desks that is better
+    than a single active-window screenshot: windows on either monitor are pasted
+    into their root-coordinate position on the full virtual desktop.
+    """
+    if which('xwd') is None:
+        return None
+    bounds = _virtual_desktop_geometry()
+    if bounds is None:
+        return None
+    desktop_left, desktop_top, desktop_width, desktop_height = bounds
+    if desktop_width <= 0 or desktop_height <= 0:
+        return None
+    windows = _stacked_xwindow_geometries()
+    if not windows:
+        return None
+
+    try:
+        from PIL import Image
+    except Exception:
+        return None
+
+    canvas = Image.new('RGB', (desktop_width, desktop_height), (0, 0, 0))
+    pasted = 0
+    temp_paths: list[Path] = []
+    try:
+        for index, geometry in enumerate(windows):
+            safe_window_id = re.sub(r'[^0-9A-Za-z]+', '_', geometry.window_id.replace('0x', ''))
+            xwd_path = destination_dir / f'{prefix}_stitch_{index}_{safe_window_id}_{timestamp}.xwd'
+            png_path = destination_dir / f'{prefix}_stitch_{index}_{safe_window_id}_{timestamp}.png'
+            temp_paths.extend([xwd_path, png_path])
+            xwd_result = _run_silent(['xwd', '-id', geometry.window_id, '-silent', '-out', str(xwd_path)])
+            if xwd_result.returncode != 0 or not xwd_path.exists() or xwd_path.stat().st_size <= 0:
+                continue
+            if not _convert_xwd_to_png(xwd_path, png_path):
+                continue
+            try:
+                with Image.open(png_path) as window_image:
+                    image = window_image.convert('RGB')
+                    paste_x = geometry.x - desktop_left
+                    paste_y = geometry.y - desktop_top
+                    if paste_x >= desktop_width or paste_y >= desktop_height:
+                        continue
+                    if paste_x + image.width <= 0 or paste_y + image.height <= 0:
+                        continue
+                    canvas.paste(image, (paste_x, paste_y))
+                    pasted += 1
+            except Exception:
+                continue
+        if pasted == 0:
+            return None
+        stitched_path = destination_dir / f'{prefix}_x11_stitched_{timestamp}.png'
+        canvas.save(stitched_path)
+        return _validated_screenshot(stitched_path)
+    finally:
+        for temp_path in temp_paths:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 def _convert_xwd_to_png(xwd_path: Path, png_path: Path) -> bool:
     converted = False
