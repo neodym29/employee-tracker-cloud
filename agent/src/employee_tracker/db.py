@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import sqlite3
 from typing import Any
 
@@ -24,6 +25,26 @@ CREATE TABLE IF NOT EXISTS activity_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_activity_snapshots_user_time
     ON activity_snapshots(username, captured_at DESC);
+
+CREATE TABLE IF NOT EXISTS screenshot_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    captured_at TEXT NOT NULL,
+    username TEXT NOT NULL,
+    host TEXT NOT NULL,
+    window_id TEXT,
+    window_title TEXT,
+    app_name TEXT,
+    status TEXT NOT NULL,
+    backend TEXT,
+    reason TEXT,
+    attempts_json TEXT,
+    screenshot_path TEXT,
+    uploaded INTEGER NOT NULL DEFAULT 0,
+    mime_type TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_screenshot_events_user_time
+    ON screenshot_events(username, captured_at DESC);
 
 CREATE TABLE IF NOT EXISTS window_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -389,6 +410,33 @@ def insert_activity(connection: sqlite3.Connection, row: dict[str, Any]) -> None
             row.get('window_class'),
             row.get('idle_seconds', 0),
             row.get('screenshot_path'),
+        ),
+    )
+    connection.commit()
+
+
+def insert_screenshot_event(connection: sqlite3.Connection, row: dict[str, Any]) -> None:
+    connection.execute(
+        """
+        INSERT INTO screenshot_events (
+            captured_at, username, host, window_id, window_title, app_name,
+            status, backend, reason, attempts_json, screenshot_path, uploaded, mime_type
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            row['captured_at'],
+            row['username'],
+            row['host'],
+            row.get('window_id'),
+            row.get('window_title'),
+            row.get('app_name'),
+            row['status'],
+            row.get('backend'),
+            row.get('reason'),
+            json.dumps(row.get('attempts') or [], ensure_ascii=False),
+            row.get('screenshot_path'),
+            1 if row.get('uploaded') else 0,
+            row.get('mime_type'),
         ),
     )
     connection.commit()

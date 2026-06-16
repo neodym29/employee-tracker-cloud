@@ -164,13 +164,14 @@ from .db import (
     insert_peripheral_snapshot,
     insert_process_lifecycle_event,
     insert_process_snapshot,
+    insert_screenshot_event,
     insert_warp_activity_snapshot,
     insert_window_snapshot,
     mark_file_deleted,
     upsert_file_state,
 )
 from .keyboard_chunks import KeyboardChunkRecorder, serialize_keys
-from .screenshots import capture_screenshot
+from .screenshots import capture_screenshot_with_status
 from .terminal_commands import TerminalCommandReader
 from .system import (
     XInputClickReader,
@@ -1033,17 +1034,41 @@ class ActivityCollector:
         screenshot_path = None
         screenshot_image_base64 = None
         screenshot_mime_type = None
+        screenshot_log = None
         if self.enable_screenshots and (now - self._last_screenshot_at) >= self.screenshot_interval_seconds:
-            screenshot = capture_screenshot(self.screenshot_dir, self.username, window.window_id)
+            screenshot_result = capture_screenshot_with_status(self.screenshot_dir, self.username, window.window_id)
+            screenshot = screenshot_result.path
             screenshot_path = str(screenshot) if screenshot else None
+            screenshot_log = {
+                'captured_at': captured_at,
+                'event_type': 'screenshot_capture',
+                'app_name': window.app_name,
+                'window_title': window.title,
+                'window_id': window.window_id,
+                'status': screenshot_result.status,
+                'backend': screenshot_result.backend,
+                'reason': screenshot_result.reason,
+                'attempts': list(screenshot_result.attempts),
+                'screenshot_path': screenshot_path,
+                'uploaded': False,
+                'username': self.username,
+                'host': host,
+            }
             if screenshot and screenshot.suffix.lower() in {'.png', '.jpg', '.jpeg', '.webp'}:
                 try:
                     screenshot_image_base64 = base64.b64encode(screenshot.read_bytes()).decode('ascii')
                     screenshot_mime_type = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp'}[screenshot.suffix.lower()]
-                except OSError:
+                    screenshot_log['uploaded'] = True
+                    screenshot_log['mime_type'] = screenshot_mime_type
+                except OSError as exc:
                     screenshot_image_base64 = None
                     screenshot_mime_type = None
+                    screenshot_log['status'] = 'captured_local_read_failed'
+                    screenshot_log['reason'] = str(exc)
             self._last_screenshot_at = now
+            insert_screenshot_event(connection, screenshot_log)
+
+        screenshot_events = [screenshot_log] if screenshot_log else []
 
         rich_events = (
             [{**row, 'event_type': 'app_open'} for row in open_state.get('open_apps', [])]
@@ -1054,6 +1079,7 @@ class ActivityCollector:
             + [{**row, 'event_type': 'typing_activity'} for row in typing_activity_events]
             + keystroke_events
             + activity_session_events
+            + screenshot_events
             + [{**row, 'event_type': 'audio_output'} for row in audio_outputs]
         )
 
@@ -1080,6 +1106,7 @@ class ActivityCollector:
                 'typing_activity': typing_activity_events[:120],
                 'keystrokes': keystroke_events[:120],
                 'activity_sessions': activity_session_events[:120],
+                'screenshot_events': screenshot_events[:20],
                 'audio_outputs': audio_outputs[:80],
             },
             'rich_events': rich_events[:250],

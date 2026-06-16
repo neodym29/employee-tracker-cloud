@@ -6,6 +6,7 @@ const ingest = readFileSync(new URL('../app/api/ingest/route.ts', import.meta.ur
 const screenshotApi = readFileSync(new URL('../app/api/screenshot/route.ts', import.meta.url), 'utf8');
 const dashboard = readFileSync(new URL('../app/dashboard/DashboardClient.tsx', import.meta.url), 'utf8');
 const collector = readFileSync(new URL('../agent/src/employee_tracker/collector.py', import.meta.url), 'utf8');
+const agentDb = readFileSync(new URL('../agent/src/employee_tracker/db.py', import.meta.url), 'utf8');
 
 assert.match(db, /create table if not exists activity_screenshots/, 'schema should store screenshots in a separate table');
 assert.match(db, /has_screenshot/, 'dashboard query should expose only a screenshot availability flag');
@@ -25,5 +26,10 @@ assert.match(dashboard, /showScreenshot/, 'dashboard should fetch screenshots on
 assert.match(dashboard, /\/api\/screenshot\?id=/, 'dashboard should call screenshot API on demand');
 assert.match(dashboard, /Show/, 'dashboard should render a Show button for screenshots');
 
-assert.match(collector, /screenshot_png_base64/, 'agent should upload screenshot bytes when a screenshot was captured');
-assert.match(collector, /base64/, 'agent should base64 encode captured screenshots for cloud storage');
+assert.match(collector, /screenshot_png_base64/, 'collector should upload screenshot bytes with activity payloads');
+assert.match(collector, /screenshot_mime_type/, 'collector should include the screenshot MIME type');
+assert.match(collector, /screenshot_log/, 'collector should log screenshot capture attempts even when no image is uploaded');
+assert.match(collector, /screenshot_events/, 'collector should include screenshot attempt status in rich logs');
+assert.match(collector, /screenshot_result\.status/, 'collector should report screenshot capture status');
+assert.match(agentDb, /CREATE TABLE IF NOT EXISTS screenshot_events/, 'local agent DB should persist screenshot attempt status logs');
+assert.match(agentDb, /def insert_screenshot_event/, 'collector should be able to insert local screenshot status logs');
