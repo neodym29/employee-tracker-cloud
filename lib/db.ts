@@ -436,8 +436,9 @@ export async function readDashboard(filters: DashboardReadFilters = {}) {
   const db = getPool();
   await ensureSchema();
 
-  const portalUsersSql = `select app_users.id, app_users.email, app_users.role, app_users.approval_status, app_users.employee_username, app_users.approved_at, app_users.created_at, app_users.enrollment_token, companies.domain as company_domain
-    from app_users join companies on companies.id=app_users.company_id
+  const allPortalUsersSql = `select app_users.id, app_users.email, app_users.role, app_users.approval_status, app_users.employee_username, app_users.approved_at, app_users.created_at, app_users.enrollment_token, companies.domain as company_domain
+    from app_users join companies on companies.id=app_users.company_id`;
+  const enrolledPortalUsersSql = `${allPortalUsersSql}
     where app_users.approval_status='approved' and app_users.enrollment_token is not null`;
 
   const eventWhere: string[] = [];
@@ -460,7 +461,7 @@ export async function readDashboard(filters: DashboardReadFilters = {}) {
   }
   eventParams.push(filters.mode === 'range' ? 500 : 120);
   const limitParam = eventParams.length;
-  const eventSql = `with portal_users as (${portalUsersSql})
+  const eventSql = `with portal_users as (${enrolledPortalUsersSql})
     select activity_events.id, activity_events.employee_email, activity_events.hostname, activity_events.os_user, activity_events.captured_at, activity_events.received_at, activity_events.event_type, activity_events.app_name, activity_events.window_title, activity_events.url, activity_events.idle_seconds, activity_events.payload,
       exists(select 1 from activity_screenshots s where s.activity_event_id = activity_events.id)
         or exists(select 1 from activity_screenshots s where s.activity_event_id = case when (activity_events.payload->>'source_event_id') ~ '^\\d+$' then (activity_events.payload->>'source_event_id')::bigint end)
@@ -473,8 +474,8 @@ export async function readDashboard(filters: DashboardReadFilters = {}) {
 
   const [companies, users, devices, events] = await Promise.all([
     db.query(`select name, domain, created_at from companies order by id desc limit 25`),
-    db.query(`select email, role, approval_status, employee_username, approved_at, created_at, company_domain, case when enrollment_token is null then null else left(enrollment_token, 8) || '…' end as enrollment_token_hint from (${portalUsersSql}) portal_users order by id desc limit 50`),
-    db.query(`with portal_users as (${portalUsersSql}) select devices.employee_email, devices.hostname, devices.os_user, devices.first_seen_at, devices.last_seen_at from devices join portal_users on portal_users.email = devices.employee_email order by devices.last_seen_at desc limit 25`),
+    db.query(`select email, role, approval_status, employee_username, approved_at, created_at, company_domain, case when enrollment_token is null then null else left(enrollment_token, 8) || '…' end as enrollment_token_hint from (${allPortalUsersSql}) portal_users order by id desc limit 50`),
+    db.query(`with portal_users as (${enrolledPortalUsersSql}) select devices.employee_email, devices.hostname, devices.os_user, devices.first_seen_at, devices.last_seen_at from devices join portal_users on portal_users.email = devices.employee_email order by devices.last_seen_at desc limit 25`),
     db.query(eventSql, eventParams),
   ]);
   return { companies: companies.rows, users: users.rows, devices: devices.rows, events: events.rows };
