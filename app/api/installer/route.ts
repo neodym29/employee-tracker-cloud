@@ -154,33 +154,59 @@ SERVICE_FILE="$SERVICE_DIR/employee-tracker.service"
 
 echo "Installing Neodym employee tracker for ${user.email}"
 echo "Keyboard chunks: enabled"
+TRACKER_PYTHON="/usr/bin/python3"
+if [ ! -x "$TRACKER_PYTHON" ]; then
+  TRACKER_PYTHON="$(command -v python3 || true)"
+fi
+if [ -z "$TRACKER_PYTHON" ]; then
+  echo "ERROR: python3 is required and was not found."
+  exit 1
+fi
+
 apt_install_tracker_dependencies() {
   if ! command -v apt-get >/dev/null 2>&1; then
     return 0
   fi
+
+  local use_sudo=0
+  if [ "$(id -u)" = "0" ]; then
+    use_sudo=0
+  elif command -v sudo >/dev/null 2>&1; then
+    echo "Installing required system packages. If prompted, enter this computer's sudo password."
+    sudo -v
+    use_sudo=1
+  else
+    echo "ERROR: sudo is required to install python3-venv/python3-pip and tracker system dependencies on Debian/Ubuntu."
+    exit 1
+  fi
+
+  if [ "$use_sudo" = "1" ]; then
+    sudo apt-get update
+  else
+    apt-get update
+  fi
+
+  local packages="python3 python3-venv python3-pip python3-evdev curl ca-certificates openssl acl x11-utils x11-xserver-utils xinput xprintidle usbutils pulseaudio-utils playerctl ffmpeg gjs grim maim scrot"
   local python_minor=""
-  if command -v python3 >/dev/null 2>&1; then
-    python_minor="$(python3 - <<'PY' 2>/dev/null || true
+  if [ -x "$TRACKER_PYTHON" ]; then
+    python_minor="$($TRACKER_PYTHON - <<'PY' 2>/dev/null || true
 import sys
 print(f"python{sys.version_info.major}.{sys.version_info.minor}-venv")
 PY
 )"
   fi
-  local packages="python3 python3-venv python3-pip python3-evdev curl ca-certificates openssl acl x11-utils x11-xserver-utils xinput xprintidle usbutils pulseaudio-utils playerctl ffmpeg gjs grim maim scrot"
   if [ -n "$python_minor" ]; then
-    packages="$packages $python_minor"
+    if apt-cache show "$python_minor" >/dev/null 2>&1; then
+      packages="$packages $python_minor"
+    else
+      echo "Skipping unavailable apt package $python_minor; using python3-venv instead."
+    fi
   fi
-  if [ "$(id -u)" = "0" ]; then
-    apt-get update
-    apt-get install -y $packages
-  elif command -v sudo >/dev/null 2>&1; then
-    echo "Installing required system packages. If prompted, enter this computer's sudo password."
-    sudo -v
-    sudo apt-get update
+
+  if [ "$use_sudo" = "1" ]; then
     sudo apt-get install -y $packages
   else
-    echo "ERROR: sudo is required to install python3-venv/python3-pip and tracker system dependencies on Debian/Ubuntu."
-    exit 1
+    apt-get install -y $packages
   fi
 }
 apt_install_tracker_dependencies
@@ -223,13 +249,13 @@ mkdir -p "$SRC_DIR"
 curl -fsSL ${shq(archive)} | tar -xz --strip-components=1 -C "$SRC_DIR"
 create_tracker_venv() {
   rm -rf "$VENV_DIR"
-  if python3 -m venv "$VENV_DIR"; then
+  if "$TRACKER_PYTHON" -m venv "$VENV_DIR"; then
     return 0
   fi
-  echo "python3 venv creation failed; reinstalling Python venv support and retrying."
+  echo "$TRACKER_PYTHON venv creation failed; reinstalling Python venv support and retrying."
   apt_install_tracker_dependencies
   rm -rf "$VENV_DIR"
-  python3 -m venv "$VENV_DIR"
+  "$TRACKER_PYTHON" -m venv "$VENV_DIR"
 }
 create_tracker_venv
 "$VENV_DIR/bin/python" -m pip install --upgrade pip
