@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { resolve4, resolve6, resolveMx, resolveNs } from 'node:dns/promises';
 
 let pool: Pool | null = null;
+let schemaReady: Promise<void> | null = null;
 
 export type Health = {
   configured: boolean;
@@ -38,7 +39,14 @@ export function getPool(): Pool {
   const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
   if (!connectionString) throw new Error('DATABASE_URL or POSTGRES_URL is not configured');
   if (!pool) {
-    pool = new Pool({ connectionString, ssl: connectionString.includes('localhost') ? undefined : { rejectUnauthorized: false } });
+    pool = new Pool({
+      connectionString,
+      ssl: connectionString.includes('localhost') ? undefined : { rejectUnauthorized: false },
+      max: Number(process.env.DATABASE_POOL_MAX || '1'),
+      idleTimeoutMillis: 10_000,
+      connectionTimeoutMillis: 8_000,
+      statement_timeout: 30_000,
+    });
   }
   return pool;
 }
@@ -98,6 +106,15 @@ export function verifyPassword(password: string, storedHash: string | null | und
 }
 
 export async function ensureSchema() {
+  if (schemaReady) return schemaReady;
+  schemaReady = ensureSchemaNow().catch((error) => {
+    schemaReady = null;
+    throw error;
+  });
+  return schemaReady;
+}
+
+async function ensureSchemaNow() {
   const db = getPool();
   await db.query(`
     create table if not exists companies (
