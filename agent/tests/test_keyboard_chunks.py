@@ -68,11 +68,55 @@ class KeyboardChunkTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             recorder = KeyboardChunkRecorder(data_dir=Path(tmp), debug=False)
             recorder.list_keyboard_devices = lambda: []  # type: ignore[method-assign]
+            recorder._start_xinput_listener = lambda: False  # type: ignore[method-assign]
             recorder.start()
 
             self.assertFalse(recorder.running)
             self.assertIn('status', recorder.status)
             self.assertFalse(recorder.status['running'])
+
+    def test_xinput_fallback_parses_keypresses_into_typed_chunks(self) -> None:
+        with TemporaryDirectory() as tmp:
+            recorder = KeyboardChunkRecorder(data_dir=Path(tmp), debug=False)
+            keymap = {38: 'a', 50: 'Shift_L', 65: 'space', 36: 'Return'}
+            state = {}
+
+            for line in [
+                'EVENT type 13 (RawKeyPress)\n',
+                '    detail: 50\n',
+                'EVENT type 13 (RawKeyPress)\n',
+                '    detail: 38\n',
+                'EVENT type 14 (RawKeyRelease)\n',
+                '    detail: 50\n',
+                'EVENT type 13 (RawKeyPress)\n',
+                '    detail: 65\n',
+                'EVENT type 13 (RawKeyPress)\n',
+                '    detail: 38\n',
+                'EVENT type 13 (RawKeyPress)\n',
+                '    detail: 36\n',
+            ]:
+                recorder._handle_xinput_line(line, state, keymap)
+
+            events = recorder.drain_events()
+
+        self.assertEqual(events[0]['type'], 'typed_chunk')
+        self.assertEqual(events[0]['reason'], 'enter')
+        self.assertEqual(events[0]['text'], 'A a\n')
+
+    def test_no_evdev_status_includes_permission_diagnostics(self) -> None:
+        with TemporaryDirectory() as tmp:
+            recorder = KeyboardChunkRecorder(data_dir=Path(tmp), debug=False)
+            recorder.input_permission_diagnostics = lambda paths=None: {'user': 'worker', 'groups': ['worker'], 'devices': []}  # type: ignore[method-assign]
+            recorder.status = {
+                'enabled': True,
+                'running': False,
+                'device_count': 0,
+                'status': 'no_readable_keyboard_devices',
+                'permission_diagnostics': recorder.input_permission_diagnostics(),
+            }
+
+            self.assertEqual(recorder.status['permission_diagnostics']['user'], 'worker')
+            self.assertIn('groups', recorder.status['permission_diagnostics'])
 
 
 if __name__ == '__main__':

@@ -3,8 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import grp
 import json
+import os
+import pwd
 import queue
+import re
+import shutil
+import stat
+import subprocess
 import threading
 import time
 from typing import Any
@@ -49,6 +56,29 @@ MODIFIER_KEYS = {
 SHORTCUT_MODIFIERS = {
     'KEY_LEFTCTRL', 'KEY_RIGHTCTRL', 'KEY_LEFTALT', 'KEY_RIGHTALT',
     'KEY_LEFTMETA', 'KEY_RIGHTMETA',
+}
+
+X11_KEY_ALIASES = {
+    'Shift_L': 'KEY_LEFTSHIFT', 'Shift_R': 'KEY_RIGHTSHIFT',
+    'Control_L': 'KEY_LEFTCTRL', 'Control_R': 'KEY_RIGHTCTRL',
+    'Alt_L': 'KEY_LEFTALT', 'Alt_R': 'KEY_RIGHTALT',
+    'Super_L': 'KEY_LEFTMETA', 'Super_R': 'KEY_RIGHTMETA',
+    'Return': 'KEY_ENTER', 'BackSpace': 'KEY_BACKSPACE', 'Tab': 'KEY_TAB',
+    'space': 'KEY_SPACE', 'period': 'KEY_DOT', 'comma': 'KEY_COMMA',
+    'slash': 'KEY_SLASH', 'backslash': 'KEY_BACKSLASH',
+    'semicolon': 'KEY_SEMICOLON', 'apostrophe': 'KEY_APOSTROPHE',
+    'minus': 'KEY_MINUS', 'equal': 'KEY_EQUAL',
+    'bracketleft': 'KEY_LEFTBRACE', 'bracketright': 'KEY_RIGHTBRACE',
+    'grave': 'KEY_GRAVE',
+}
+
+X11_SHIFT_KEYSYMS = {
+    'exclam': 'KEY_1', 'at': 'KEY_2', 'numbersign': 'KEY_3', 'dollar': 'KEY_4',
+    'percent': 'KEY_5', 'asciicircum': 'KEY_6', 'ampersand': 'KEY_7', 'asterisk': 'KEY_8',
+    'parenleft': 'KEY_9', 'parenright': 'KEY_0', 'greater': 'KEY_DOT', 'less': 'KEY_COMMA',
+    'question': 'KEY_SLASH', 'bar': 'KEY_BACKSLASH', 'colon': 'KEY_SEMICOLON',
+    'quotedbl': 'KEY_APOSTROPHE', 'underscore': 'KEY_MINUS', 'plus': 'KEY_EQUAL',
+    'braceleft': 'KEY_LEFTBRACE', 'braceright': 'KEY_RIGHTBRACE', 'asciitilde': 'KEY_GRAVE',
 }
 
 
@@ -209,6 +239,174 @@ class KeyboardChunkRecorder:
         except Exception:
             pass
 
+    def input_permission_diagnostics(self, paths: list[str] | None = None) -> dict[str, Any]:
+        paths = paths or sorted(str(path) for path in Path('/dev/input').glob('event*'))[:20]
+        groups: list[str] = []
+        try:
+            groups = [grp.getgrgid(gid).gr_name for gid in os.getgroups()]
+        except Exception:
+            groups = []
+        devices: list[dict[str, Any]] = []
+        for path in paths[:20]:
+            info: dict[str, Any] = {'path': path, 'readable': os.access(path, os.R_OK)}
+            try:
+                st = os.stat(path)
+                info.update({
+                    'mode': stat.filemode(st.st_mode),
+                    'uid': st.st_uid,
+                    'gid': st.st_gid,
+                    'owner': pwd.getpwuid(st.st_uid).pw_name,
+                    'group': grp.getgrgid(st.st_gid).gr_name,
+                })
+            except Exception as exc:
+                info['error'] = str(exc)
+            devices.append(info)
+        return {
+            'uid': os.getuid() if hasattr(os, 'getuid') else None,
+            'user': pwd.getpwuid(os.getuid()).pw_name if hasattr(os, 'getuid') else None,
+            'groups': groups,
+            'devices': devices,
+        }
+
+    def _x11_keymap(self) -> dict[int, str]:
+        xmodmap = shutil.which('xmodmap')
+        if not xmodmap:
+            return {}
+        try:
+            out = subprocess.check_output([xmodmap, '-pke'], stderr=subprocess.DEVNULL, text=True, timeout=2)
+        except Exception:
+            return {}
+        mapping: dict[int, str] = {}
+        for line in out.splitlines():
+            match = re.match(r'keycode\s+(\d+)\s+=\s+(.+)$', line.strip())
+            if not match:
+                continue
+            symbols = [part for part in match.group(2).split() if part and part != 'NoSymbol']
+            if symbols:
+                mapping[int(match.group(1))] = symbols[0]
+        return mapping
+
+    def _key_name_from_x11_keysym(self, keysym: str) -> str | None:
+        if keysym in X11_KEY_ALIASES:
+            return X11_KEY_ALIASES[keysym]
+        if keysym in X11_SHIFT_KEYSYMS:
+            return X11_SHIFT_KEYSYMS[keysym]
+        if len(keysym) == 1:
+            if keysym.isalpha():
+                return f'KEY_{keysym.upper()}'
+            if keysym.isdigit():
+                return f'KEY_{keysym}'
+        return None
+
+    def _handle_xinput_line(self, line: str, state: dict[str, Any], keymap: dict[int, str]) -> None:
+        if 'RawKeyPress' in line or 'KeyPress' in line:
+            state['event'] = 'down'
+            return
+        if 'RawKeyRelease' in line or 'KeyRelease' in line:
+            state['event'] = 'up'
+            return
+        match = re.search(r'detail:\s*(\d+)', line)
+        if not match or state.get('event') not in {'down', 'up'}:
+            return
+        keycode = int(match.group(1))
+        keysym = keymap.get(keycode)
+        key_name = self._key_name_from_x11_keysym(keysym or '')
+        event_type = state.pop('event', None)
+        if not key_name:
+            return
+        if event_type == 'down':
+            self.handle_key_down(key_name)
+        elif event_type == 'up':
+            self.handle_key_up(key_name)
+
+    def _start_xinput_listener(self) -> bool:
+        if not os.environ.get('DISPLAY'):
+            self.status = {
+                'enabled': True,
+                'running': False,
+                'device_count': 0,
+                'status': 'no_readable_keyboard_devices',
+                'reason': 'no readable evdev keyboard devices and DISPLAY is not set for X11 fallback',
+                'permission_diagnostics': self.input_permission_diagnostics(),
+            }
+            return False
+        xinput = shutil.which('xinput')
+        if not xinput:
+            self.status = {
+                'enabled': True,
+                'running': False,
+                'device_count': 0,
+                'status': 'xinput_unavailable',
+                'reason': 'no readable evdev keyboard devices and xinput is unavailable for X11 fallback',
+                'permission_diagnostics': self.input_permission_diagnostics(),
+            }
+            return False
+        keymap = self._x11_keymap()
+        if not keymap:
+            self.status = {
+                'enabled': True,
+                'running': False,
+                'device_count': 0,
+                'status': 'x11_keymap_unavailable',
+                'reason': 'no readable evdev keyboard devices and xmodmap did not return an X11 keymap',
+                'permission_diagnostics': self.input_permission_diagnostics(),
+            }
+            return False
+        try:
+            process = subprocess.Popen(
+                [xinput, 'test-xi2', '--root'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                bufsize=1,
+            )
+        except Exception as exc:
+            self.status = {
+                'enabled': True,
+                'running': False,
+                'device_count': 0,
+                'status': 'xinput_start_failed',
+                'reason': str(exc),
+                'permission_diagnostics': self.input_permission_diagnostics(),
+            }
+            return False
+        self.running = True
+        self.status = {
+            'enabled': True,
+            'running': True,
+            'device_count': 0,
+            'status': 'listening_xinput_fallback',
+            'reason': 'evdev keyboard devices were not readable; listening through X11 xinput fallback',
+            'permission_diagnostics': self.input_permission_diagnostics(),
+        }
+        idle_thread = threading.Thread(target=self._idle_watcher, daemon=True)
+        idle_thread.start()
+        self._threads.append(idle_thread)
+        thread = threading.Thread(target=self._xinput_thread, args=(process, keymap), daemon=True)
+        thread.start()
+        self._threads.append(thread)
+        return True
+
+    def _xinput_thread(self, process: subprocess.Popen[str], keymap: dict[int, str]) -> None:
+        state: dict[str, Any] = {}
+        try:
+            assert process.stdout is not None
+            for line in process.stdout:
+                if not self.running:
+                    break
+                self._handle_xinput_line(line, state, keymap)
+        except Exception as exc:
+            if self.debug:
+                print(f'[xinput keyboard fallback error] {exc}')
+        finally:
+            if process.poll() is None:
+                try:
+                    process.terminate()
+                except Exception:
+                    pass
+            if self.running and self.status.get('status') == 'listening_xinput_fallback':
+                self.status = {**self.status, 'running': False, 'status': 'xinput_stopped', 'reason': 'xinput fallback process stopped'}
+
     def list_keyboard_devices(self) -> list[Any]:
         if evdev is None or InputDevice is None or ecodes is None:
             self.status = {
@@ -242,8 +440,8 @@ class KeyboardChunkRecorder:
                     devices.append(dev)
                 else:
                     dev.close()
-            except Exception:
-                errors.append(str(path))
+            except Exception as exc:
+                errors.append(f'{path}: {exc}')
         if not devices:
             self.status = {
                 'enabled': True,
@@ -253,6 +451,7 @@ class KeyboardChunkRecorder:
                 'reason': 'no readable keyboard-like /dev/input/event* devices; grant input-device permissions or rerun the installer with sudo',
                 'checked_paths': paths[:20],
                 'failed_paths': errors[:20],
+                'permission_diagnostics': self.input_permission_diagnostics(paths),
             }
         return devices
 
@@ -261,6 +460,8 @@ class KeyboardChunkRecorder:
             return
         devices = self.list_keyboard_devices()
         if not devices:
+            if self._start_xinput_listener():
+                return
             if self.debug:
                 print('No keyboard devices found or evdev unavailable; keyboard chunks disabled until permissions/dependency are fixed.')
             return

@@ -23,6 +23,7 @@ for (const expected of [
   'setfacl -m',
   '70-neodym-tracker-input.rules',
   'Keyboard chunks: enabled',
+  'xinput fallback',
 ]) {
   assert.match(installer, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `installer should enable evdev keyboard chunks and input permissions: ${expected}`);
 }
@@ -36,3 +37,6 @@ assert.match(dashboard, /event\.event_type === 'typed_chunk'/, 'dashboard should
 assert.match(dashboard, /where typed/, 'typed chunk summary should explicitly include where the chunk was typed');
 assert.match(dashboard, /event\.app_name.*event\.window_title/s, 'typed chunk summary should include app and window title location');
 assert.match(dashboard, /event\.event_type === 'shortcut'/, 'dashboard should summarize shortcuts');
+
+assert.ok(installer.indexOf('udevadm trigger --subsystem-match=input') < installer.indexOf('setfacl -m'), 'installer should apply ACL after udev trigger so recreated event nodes stay readable immediately');
+assert.match(collector, /keyboard_status/, 'collector should upload keyboard status diagnostics');

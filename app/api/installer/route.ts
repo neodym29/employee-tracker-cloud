@@ -173,26 +173,29 @@ setup_keyboard_input_permissions() {
   if [ "$(id -u)" = "0" ]; then
     getent group input >/dev/null 2>&1 || groupadd -r input || true
     usermod -aG input "$target_user" 2>/dev/null || true
-    if command -v setfacl >/dev/null 2>&1; then
-      setfacl -m "u:$target_user:r" /dev/input/event* 2>/dev/null || true
-    fi
     mkdir -p /etc/udev/rules.d
     cat > /etc/udev/rules.d/70-neodym-tracker-input.rules <<'RULE'
 KERNEL=="event*", SUBSYSTEM=="input", GROUP="input", MODE="0660", TAG+="uaccess"
 RULE
     udevadm control --reload-rules 2>/dev/null || true
     udevadm trigger --subsystem-match=input 2>/dev/null || true
+    # Apply ACL after udev trigger because trigger can recreate event nodes and wipe earlier ACLs.
+    if command -v setfacl >/dev/null 2>&1; then
+      setfacl -m "u:$target_user:r" /dev/input/event* 2>/dev/null || true
+    fi
   elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
     sudo getent group input >/dev/null 2>&1 || sudo groupadd -r input || true
     sudo usermod -aG input "$target_user" 2>/dev/null || true
-    if command -v setfacl >/dev/null 2>&1; then
-      sudo setfacl -m "u:$target_user:r" /dev/input/event* 2>/dev/null || true
-    fi
     printf '%s\n' 'KERNEL=="event*", SUBSYSTEM=="input", GROUP="input", MODE="0660", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/70-neodym-tracker-input.rules >/dev/null
     sudo udevadm control --reload-rules 2>/dev/null || true
     sudo udevadm trigger --subsystem-match=input 2>/dev/null || true
+    # Apply ACL after udev trigger because trigger can recreate event nodes and wipe earlier ACLs.
+    if command -v setfacl >/dev/null 2>&1; then
+      sudo setfacl -m "u:$target_user:r" /dev/input/event* 2>/dev/null || true
+    fi
   else
     echo "Keyboard chunks may not work yet: sudo is unavailable, so /dev/input permissions could not be configured."
+    echo "The agent will try an X11 xinput fallback when DISPLAY is available."
   fi
 }
 setup_keyboard_input_permissions
