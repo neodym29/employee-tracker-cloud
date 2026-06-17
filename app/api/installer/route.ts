@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { health, userByEnrollmentToken } from '@/lib/db';
 
 function shq(value: string) {
@@ -6,6 +8,8 @@ function shq(value: string) {
 }
 
 const extensionVersion = '1.0.1';
+const signedFirefoxXpiFilename = 'neodym-browser-firefox-signed.xpi';
+const signedFirefoxXpiPath = join(process.cwd(), 'public', 'downloads', signedFirefoxXpiFilename);
 const agentVersion = process.env.NEODYM_AGENT_VERSION || process.env.VERCEL_GIT_COMMIT_SHA || process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || 'dev';
 const extensionManifest = {
   manifest_version: 3,
@@ -201,6 +205,16 @@ export async function GET(req: NextRequest) {
 
   const base = process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin;
   const format = req.nextUrl.searchParams.get('format');
+  if (format === 'firefox-signed') {
+    if (!existsSync(signedFirefoxXpiPath)) return new NextResponse('signed Firefox XPI is not available\n', { status: 404 });
+    return new NextResponse(readFileSync(signedFirefoxXpiPath), {
+      headers: {
+        'content-type': 'application/x-xpinstall',
+        'content-disposition': `attachment; filename="${signedFirefoxXpiFilename}"`,
+        'cache-control': 'no-store',
+      },
+    });
+  }
   if (format === 'firefox-extension') {
     return new NextResponse(firefoxExtensionZip(), {
       headers: {

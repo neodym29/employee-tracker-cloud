@@ -127,7 +127,7 @@ export default function ApprovalClient({ users }: { users: UserRow[] }) {
           <p className="muted">Includes the package install manual, browser extension checks, and Refresh existing app / refresh-neodym-tracker instructions for already-installed employees.</p>
           <details className="install-manual-details" open>
             <summary className="button">Open full install manual</summary>
-            <InstallManual url={result.installer_url} extensionUrl={`${result.installer_url}&format=extension`} firefoxExtensionUrl={`${result.installer_url}&format=firefox-extension`} firefoxTemporaryUrl={`${result.installer_url}&format=firefox-temporary`} platform={result.platform} context="admin" />
+            <InstallManual url={result.installer_url} extensionUrl={`${result.installer_url}&format=extension`} firefoxExtensionUrl={`${result.installer_url}&format=firefox-extension`} firefoxSignedUrl={`${result.installer_url}&format=firefox-signed`} firefoxTemporaryUrl={`${result.installer_url}&format=firefox-temporary`} platform={result.platform} context="admin" />
           </details>
         </section>
       )}

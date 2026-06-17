@@ -15,6 +15,8 @@ for (const expected of [
   'websiteActivity',
   'neodym-browser-firefox.xpi',
   "format === 'firefox-extension'",
+  "format === 'firefox-signed'",
+  'neodym-browser-firefox-signed.xpi',
   'application/x-xpinstall',
   "format === 'firefox-temporary'",
   'neodym-firefox-temporary.zip',
@@ -27,6 +29,7 @@ for (const expected of [
 }
 
 assert.match(manual, /signed AMO XPI/, 'manual must explain that permanent Firefox install should use the signed AMO XPI');
+assert.match(manual, /Download signed Firefox XPI/, 'manual should expose the signed Firefox XPI for permanent installs');
 assert.match(manual, /Download Firefox temporary ZIP/, 'manual should expose a Firefox temporary unpacked ZIP download');
 assert.match(manual, /select the extracted <code>manifest\.json<\/code>/, 'manual should tell users to load extracted manifest.json for temporary Firefox installs');
 
