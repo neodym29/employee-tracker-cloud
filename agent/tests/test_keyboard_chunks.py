@@ -103,6 +103,48 @@ class KeyboardChunkTests(unittest.TestCase):
         self.assertEqual(events[0]['reason'], 'enter')
         self.assertEqual(events[0]['text'], 'A a\n')
 
+    def test_xinput_legacy_stream_parses_keypresses_into_typed_chunks(self) -> None:
+        with TemporaryDirectory() as tmp:
+            recorder = KeyboardChunkRecorder(data_dir=Path(tmp), debug=False)
+            keymap = {38: 'a', 50: 'Shift_L', 65: 'space', 36: 'Return'}
+            state = {}
+
+            for line in [
+                'key press   50\n',
+                'key press   38\n',
+                'key release 50\n',
+                'key press   65\n',
+                'key press   38\n',
+                'key press   36\n',
+            ]:
+                recorder._handle_xinput_line(line, state, keymap)
+
+            events = recorder.drain_events()
+
+        self.assertEqual(events[0]['type'], 'typed_chunk')
+        self.assertEqual(events[0]['reason'], 'enter')
+        self.assertEqual(events[0]['text'], 'A a\n')
+
+    def test_xinput_keyboard_ids_excludes_virtual_xtest_devices(self) -> None:
+        with TemporaryDirectory() as tmp:
+            recorder = KeyboardChunkRecorder(data_dir=Path(tmp), debug=False)
+            listing = '''
+⎡ Virtual core pointer                          id=2    [master pointer  (3)]
+⎣ Virtual core keyboard                         id=3    [master keyboard (2)]
+    ↳ Virtual core XTEST keyboard               id=5    [slave  keyboard (3)]
+    ↳ AT Translated Set 2 keyboard              id=16   [slave  keyboard (3)]
+    ↳ USB Keyboard                              id=21   [slave  keyboard (3)]
+'''
+            import subprocess
+            original = subprocess.check_output
+            subprocess.check_output = lambda *args, **kwargs: listing  # type: ignore[assignment]
+            try:
+                ids = recorder._xinput_keyboard_ids('/usr/bin/xinput')
+            finally:
+                subprocess.check_output = original  # type: ignore[assignment]
+
+        self.assertEqual(ids, ['16', '21'])
+
     def test_no_evdev_status_includes_permission_diagnostics(self) -> None:
         with TemporaryDirectory() as tmp:
             recorder = KeyboardChunkRecorder(data_dir=Path(tmp), debug=False)

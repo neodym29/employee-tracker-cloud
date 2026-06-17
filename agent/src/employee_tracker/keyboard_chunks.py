@@ -298,7 +298,25 @@ class KeyboardChunkRecorder:
                 return f'KEY_{keysym}'
         return None
 
+    def _handle_xinput_keycode(self, keycode: int, event_type: str, keymap: dict[int, str]) -> None:
+        keysym = keymap.get(keycode)
+        key_name = self._key_name_from_x11_keysym(keysym or '')
+        if not key_name:
+            return
+        if event_type == 'down':
+            self.handle_key_down(key_name)
+        elif event_type == 'up':
+            self.handle_key_up(key_name)
+
     def _handle_xinput_line(self, line: str, state: dict[str, Any], keymap: dict[int, str]) -> None:
+        # xinput test <device-id> emits single-line records like "key press   38".
+        legacy = re.search(r'key\s+(press|release)\s+(\d+)', line, re.IGNORECASE)
+        if legacy:
+            event_type = 'down' if legacy.group(1).lower() == 'press' else 'up'
+            self._handle_xinput_keycode(int(legacy.group(2)), event_type, keymap)
+            return
+
+        # xinput test-xi2 --root emits an event header then a detail line.
         if 'RawKeyPress' in line or 'KeyPress' in line:
             state['event'] = 'down'
             return
@@ -308,16 +326,51 @@ class KeyboardChunkRecorder:
         match = re.search(r'detail:\s*(\d+)', line)
         if not match or state.get('event') not in {'down', 'up'}:
             return
-        keycode = int(match.group(1))
-        keysym = keymap.get(keycode)
-        key_name = self._key_name_from_x11_keysym(keysym or '')
         event_type = state.pop('event', None)
-        if not key_name:
-            return
-        if event_type == 'down':
-            self.handle_key_down(key_name)
-        elif event_type == 'up':
-            self.handle_key_up(key_name)
+        self._handle_xinput_keycode(int(match.group(1)), str(event_type), keymap)
+
+    def _xinput_keyboard_ids(self, xinput_path: str) -> list[str]:
+        try:
+            out = subprocess.check_output([xinput_path, 'list', '--short'], stderr=subprocess.DEVNULL, text=True, timeout=2)
+        except Exception:
+            return []
+        ids: list[str] = []
+        for line in out.splitlines():
+            lower = line.lower()
+            if not re.search(r'\bslave\s+keyboard\b', lower):
+                continue
+            if 'xtest' in lower or 'virtual core' in lower:
+                continue
+            match = re.search(r'id=(\d+)', line)
+            if match:
+                ids.append(match.group(1))
+        return ids
+
+    def _open_xinput_processes(self, xinput_path: str) -> list[tuple[subprocess.Popen[str], str]]:
+        processes: list[tuple[subprocess.Popen[str], str]] = []
+        for device_id in self._xinput_keyboard_ids(xinput_path)[:8]:
+            try:
+                processes.append((subprocess.Popen(
+                    [xinput_path, 'test', device_id],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    bufsize=1,
+                ), f'xinput-test-{device_id}'))
+            except Exception:
+                continue
+        # Keep the XI2 root stream too; some setups expose only master/root events.
+        try:
+            processes.append((subprocess.Popen(
+                [xinput_path, 'test-xi2', '--root'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                bufsize=1,
+            ), 'xinput-test-xi2-root'))
+        except Exception:
+            pass
+        return processes
 
     def _start_xinput_listener(self) -> bool:
         if not os.environ.get('DISPLAY'):
@@ -352,21 +405,14 @@ class KeyboardChunkRecorder:
                 'permission_diagnostics': self.input_permission_diagnostics(),
             }
             return False
-        try:
-            process = subprocess.Popen(
-                [xinput, 'test-xi2', '--root'],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-                bufsize=1,
-            )
-        except Exception as exc:
+        processes = self._open_xinput_processes(xinput)
+        if not processes:
             self.status = {
                 'enabled': True,
                 'running': False,
                 'device_count': 0,
                 'status': 'xinput_start_failed',
-                'reason': str(exc),
+                'reason': 'xinput was available but no keyboard event streams could be opened',
                 'permission_diagnostics': self.input_permission_diagnostics(),
             }
             return False
@@ -374,20 +420,22 @@ class KeyboardChunkRecorder:
         self.status = {
             'enabled': True,
             'running': True,
-            'device_count': 0,
+            'device_count': len(processes),
             'status': 'listening_xinput_fallback',
-            'reason': 'evdev keyboard devices were not readable; listening through X11 xinput fallback',
+            'reason': f'evdev keyboard devices were not readable; listening through {len(processes)} X11 xinput fallback stream(s)',
+            'xinput_streams': [name for _process, name in processes],
             'permission_diagnostics': self.input_permission_diagnostics(),
         }
         idle_thread = threading.Thread(target=self._idle_watcher, daemon=True)
         idle_thread.start()
         self._threads.append(idle_thread)
-        thread = threading.Thread(target=self._xinput_thread, args=(process, keymap), daemon=True)
-        thread.start()
-        self._threads.append(thread)
+        for process, name in processes:
+            thread = threading.Thread(target=self._xinput_thread, args=(process, keymap, name), daemon=True)
+            thread.start()
+            self._threads.append(thread)
         return True
 
-    def _xinput_thread(self, process: subprocess.Popen[str], keymap: dict[int, str]) -> None:
+    def _xinput_thread(self, process: subprocess.Popen[str], keymap: dict[int, str], stream_name: str = 'xinput') -> None:
         state: dict[str, Any] = {}
         try:
             assert process.stdout is not None
@@ -397,15 +445,15 @@ class KeyboardChunkRecorder:
                 self._handle_xinput_line(line, state, keymap)
         except Exception as exc:
             if self.debug:
-                print(f'[xinput keyboard fallback error] {exc}')
+                print(f'[xinput keyboard fallback error] {stream_name}: {exc}')
         finally:
             if process.poll() is None:
                 try:
                     process.terminate()
                 except Exception:
                     pass
-            if self.running and self.status.get('status') == 'listening_xinput_fallback':
-                self.status = {**self.status, 'running': False, 'status': 'xinput_stopped', 'reason': 'xinput fallback process stopped'}
+            # Individual xinput streams can exit when devices disappear/reappear; keep
+            # the fallback marked listening because sibling streams may still be active.
 
     def list_keyboard_devices(self) -> list[Any]:
         if evdev is None or InputDevice is None or ecodes is None:
