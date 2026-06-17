@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Sequence
 import base64
 import time
 
@@ -625,7 +626,7 @@ class ActivityCollector:
             if key in windows_counts:
                 app_row['window_count'] = max(int(app_row.get('window_count') or 0), len(windows_counts[key]))
 
-        self._record_browser_compliance_events(connection, captured_at, host, app_rows, browser_tabs)
+        browser_compliance_events = self._record_browser_compliance_events(connection, captured_at, host, app_rows, browser_tabs)
 
         for app in app_rows.values():
             insert_current_app_snapshot(
@@ -637,7 +638,7 @@ class ActivityCollector:
                 connection,
                 subwindow,
             )
-        return {'open_apps': list(app_rows.values()), 'subwindows': subwindow_rows}
+        return {'open_apps': list(app_rows.values()), 'subwindows': subwindow_rows, 'browser_compliance_events': browser_compliance_events}
 
 
     def _record_browser_focus_events(self, connection, captured_at: str, host: str) -> list[dict[str, object]]:
@@ -905,8 +906,9 @@ class ActivityCollector:
         captured_at: str,
         host: str,
         apps: dict[str, dict[str, object]],
-        browser_tabs: list[object],
-    ) -> None:
+        browser_tabs: Sequence[object],
+    ) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
         extension_keys = {getattr(tab, 'app_key', None) for tab in browser_tabs}
         browser_names = {
             'brave': 'Brave',
@@ -923,27 +925,31 @@ class ActivityCollector:
             if key in extension_keys:
                 status = 'extension-active'
                 severity = 'ok'
-                note = 'Browser extension bridge is reporting tabs/clicks/audio state.'
+                note = 'Browser extension bridge is reporting fresh tabs/clicks/audio state.'
             else:
                 status = 'extension-missing-or-incognito'
                 severity = 'critical'
-                note = 'Browser is open but the extension bridge did not report tabs. Possible missing extension, disabled extension, unsupported browser, or incognito/private window without extension access.'
-            insert_browser_compliance_event(
-                connection,
-                {
-                    'captured_at': captured_at,
-                    'username': self.username,
-                    'host': host,
-                    'browser_key': key,
-                    'browser_name': browser_names[key],
-                    'pid': app.get('pid'),
-                    'process_name': app.get('process_name'),
-                    'command_line': None,
-                    'status': status,
-                    'severity': severity,
-                    'note': note,
-                },
-            )
+                note = 'Browser is open but the extension bridge did not report tabs/fresh tabs. Possible extension missing, disabled, incognito/private, unsupported, or portable browser without policy coverage.'
+            row = {
+                'captured_at': captured_at,
+                'username': self.username,
+                'host': host,
+                'event_type': 'browser_compliance',
+                'app_name': browser_names[key],
+                'window_title': f'{browser_names[key]} extension safety',
+                'browser_key': key,
+                'browser_name': browser_names[key],
+                'pid': app.get('pid'),
+                'process_name': app.get('process_name'),
+                'command_line': app.get('command_line'),
+                'status': status,
+                'severity': severity,
+                'note': note,
+                'source': 'native-browser-safety-check',
+            }
+            rows.append(row)
+            insert_browser_compliance_event(connection, row)
+        return rows
 
     def _enrich_audio_output(self, row: dict[str, object]) -> dict[str, object]:
         if row.get('content_title') or row.get('mpris_title'):
@@ -1113,6 +1119,7 @@ class ActivityCollector:
             insert_screenshot_event(connection, screenshot_log)
 
         screenshot_events = [screenshot_log] if screenshot_log else []
+        browser_compliance_events = open_state.get('browser_compliance_events', [])
 
         rich_events = (
             [{**row, 'event_type': 'app_open'} for row in open_state.get('open_apps', [])]
@@ -1124,6 +1131,7 @@ class ActivityCollector:
             + keystroke_events
             + activity_session_events
             + screenshot_events
+            + [{**row, 'event_type': 'browser_compliance'} for row in browser_compliance_events]
             + [{**row, 'event_type': 'audio_output'} for row in audio_outputs]
         )
 
@@ -1151,6 +1159,7 @@ class ActivityCollector:
                 'keystrokes': keystroke_events[:120],
                 'activity_sessions': activity_session_events[:120],
                 'screenshot_events': screenshot_events[:20],
+                'browser_compliance_events': browser_compliance_events[:80],
                 'audio_outputs': audio_outputs[:80],
             },
             'rich_events': rich_events[:250],

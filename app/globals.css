@@ -23,6 +23,9 @@ th { color:#334155; font-size:12px; text-transform:uppercase; letter-spacing:.05
 .warn { color:var(--amber); font-weight:900; }
 .good { color:var(--green); font-weight:900; }
 .bad { color:var(--red); font-weight:900; }
+.redAlert { border-color:#fecaca; background:linear-gradient(180deg,#fff1f2,#fff); box-shadow:0 18px 48px rgba(220,38,38,.14); }
+.redAlert h2 { color:#991b1b; }
+.alertBox { border:1px solid #fecaca; border-radius:16px; background:#fff; padding:14px; }
 form { display:grid; gap:12px; }
 input, textarea, select { width:100%; border:1px solid var(--line); border-radius:14px; padding:12px; font:inherit; background:#fff; }
 button, .button { display:inline-block; border:0; border-radius:999px; background:#111827; color:#fff; padding:12px 16px; font-weight:900; cursor:pointer; }

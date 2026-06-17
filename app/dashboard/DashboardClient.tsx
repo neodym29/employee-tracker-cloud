@@ -17,6 +17,7 @@ const typeLabels: Record<string, string> = {
   shortcut: 'Shortcut',
   window_focus: 'Focus change',
   audio_output: 'Audio',
+  browser_compliance: 'Browser safety',
   typing_activity: 'Typing activity',
 };
 
@@ -87,6 +88,26 @@ function currentOpenTabs(events: any[], user: string): any[] {
   return tabs.slice(0, 40);
 }
 
+function browserSafetyAlerts(events: any[], user: string): any[] {
+  const latestByBrowser = new Map<string, any>();
+  for (const event of events) {
+    if (event.event_type !== 'browser_compliance') continue;
+    if (user !== 'all' && rowUser(event) !== user) continue;
+    const payload = event.payload || {};
+    const key = [event.employee_email, event.hostname, payload.browser_key || event.app_name || payload.browser_name].filter(Boolean).join('|');
+    const existing = latestByBrowser.get(key);
+    const eventTime = new Date(eventTimestamp(event)).getTime();
+    const existingTime = existing ? new Date(eventTimestamp(existing)).getTime() : -Infinity;
+    if (!existing || eventTime >= existingTime) latestByBrowser.set(key, event);
+  }
+  return Array.from(latestByBrowser.values())
+    .filter((event) => {
+      const payload = event.payload || {};
+      return payload.severity === 'critical' || event.severity === 'critical';
+    })
+    .slice(0, 12);
+}
+
 function audioDescription(event: any): string {
   const payload = event.payload || {};
   const app = payload.application_name || event.app_name || payload.process_binary || 'Unknown app';
@@ -118,6 +139,7 @@ function eventSummary(event: any): string {
   const payload = event.payload || {};
   const location = [event.app_name, event.window_title].filter(Boolean).join(' — ');
   if (event.event_type === 'audio_output') return audioDescription(event);
+  if (event.event_type === 'browser_compliance') return [payload.note || 'Browser is open but extension telemetry is missing', payload.status && `status=${payload.status}`, payload.severity && `severity=${payload.severity}`, payload.browser_name || event.app_name].filter(Boolean).join(' · ');
   if (event.event_type === 'typing_activity') return [payload.note || 'typing activity', payload.field_hint && `field=${payload.field_hint}`, payload.key_count != null && `${payload.key_count} input events`, payload.text_length != null && `${payload.text_length} chars`, payload.word_count != null && `${payload.word_count} words`, payload.typed_text, payload.url || event.url].filter(Boolean).join(' · ');
   if (event.event_type === 'typed_chunk') return [payload.note || 'typed chunk', location && `where typed: ${location}`, payload.reason && `reason=${payload.reason}`, payload.key_count != null && `${payload.key_count} keys`, payload.duration_seconds != null && `${payload.duration_seconds}s`, payload.typed_text].filter(Boolean).join(' · ');
   if (event.event_type === 'shortcut') return [payload.note || 'shortcut', location && `where typed: ${location}`, payload.shortcut, payload.keys_json].filter(Boolean).join(' · ');
@@ -209,6 +231,33 @@ function CurrentOpenTabs({ tabs }: { tabs: any[] }) {
   );
 }
 
+function BrowserSafetyAlerts({ alerts }: { alerts: any[] }) {
+  if (alerts.length === 0) return null;
+  return (
+    <section className="card redAlert browser-safety-alerts" style={{ marginTop: 16 }}>
+      <div className="cardHeader">
+        <div>
+          <h2>Browser safety alerts</h2>
+          <p className="smallNote">Red means a browser is open, but no fresh extension data is coming in. The extension may be missing, disabled, incognito/private, unsupported, or portable.</p>
+        </div>
+      </div>
+      <div className="grid">
+        {alerts.map((event:any, index:number) => {
+          const payload = event.payload || {};
+          return (
+            <div className="alertBox" key={`${event.id || index}-${event.employee_email}-${payload.browser_key || event.app_name}`}>
+              <strong>{event.employee_email}</strong> · {event.hostname}<br />
+              <span className="bad">{payload.browser_name || event.app_name || 'Browser'}: extension missing, disabled, incognito/private, unsupported, or portable</span><br />
+              <span>{payload.note || eventSummary(event)}</span><br />
+              <span className="muted">Last checked {formatLocalTime(event.captured_at)} ({relativeAge(event.captured_at)})</span>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export default function DashboardClient({ data, configured, error, initialFilters }: { data: DashboardData; configured: boolean; error: string; initialFilters: DashboardFilters }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -246,6 +295,7 @@ export default function DashboardClient({ data, configured, error, initialFilter
     [data.events, mode, user, eventType, startTime, endTime],
   );
   const visibleOpenTabs = useMemo(() => currentOpenTabs(data.events, user), [data.events, user]);
+  const visibleBrowserSafetyAlerts = useMemo(() => browserSafetyAlerts(data.events, user), [data.events, user]);
   const latestReceived = data.events[0]?.received_at;
   const latestCaptured = data.events[0]?.captured_at;
   const rangeDisabled = mode === 'latest';
@@ -259,6 +309,8 @@ export default function DashboardClient({ data, configured, error, initialFilter
         {error && <p className="bad">Database error: {error}</p>}
         <p className="muted">Latest captured: {formatLocalTime(latestCaptured)} ({relativeAge(latestCaptured)}). Latest uploaded: {formatLocalTime(latestReceived)} ({relativeAge(latestReceived)}).</p>
       </section>
+
+      <BrowserSafetyAlerts alerts={visibleBrowserSafetyAlerts} />
 
       <section className="card" style={{marginTop:16}}>
         <div className="cardHeader">
