@@ -358,7 +358,7 @@ export async function userByEnrollmentToken(token: string) {
   const result = await db.query(
     `select app_users.id, app_users.email, app_users.employee_username, app_users.company_id, companies.domain
      from app_users join companies on companies.id=app_users.company_id
-     where enrollment_token=$1 and approval_status='approved' and role='employee'`,
+     where enrollment_token=$1 and approval_status='approved'`,
     [token],
   );
   return result.rows[0] || null;
@@ -396,7 +396,7 @@ export async function loginUser(email: string, password: string) {
   );
   const user = result.rows[0];
   if (!user || !verifyPassword(password, user.password_hash)) throw new Error('Invalid email or password');
-  if (user.role === 'employee' && user.approval_status !== 'approved') throw new Error('Employee account is pending admin approval');
+  if (user.approval_status !== 'approved') throw new Error('Account is not approved');
   return {
     id: String(user.id),
     company_id: String(user.company_id),
@@ -421,7 +421,7 @@ export async function readDashboard(filters: DashboardReadFilters = {}) {
 
   const portalUsersSql = `select app_users.id, app_users.email, app_users.role, app_users.approval_status, app_users.employee_username, app_users.approved_at, app_users.created_at, app_users.enrollment_token, companies.domain as company_domain
     from app_users join companies on companies.id=app_users.company_id
-    where app_users.role='employee' and app_users.approval_status='approved' and app_users.enrollment_token is not null`;
+    where app_users.approval_status='approved' and app_users.enrollment_token is not null`;
 
   const eventWhere: string[] = [];
   const eventParams: unknown[] = [];

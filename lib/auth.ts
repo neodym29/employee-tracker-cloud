@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { getPool, health } from './db';
 
 export type SessionUser = {
   id: string;
@@ -59,9 +60,40 @@ export async function clearSessionCookie() {
   jar.delete(COOKIE_NAME);
 }
 
+async function getSessionUserFromDatabase(parsed: SessionUser): Promise<SessionUser | null> {
+  if (!health().configured) return parsed;
+  try {
+    const db = getPool();
+    const result = await db.query(
+      `select app_users.id, app_users.company_id, app_users.email, app_users.role, companies.domain as company_domain
+       from app_users join companies on companies.id=app_users.company_id
+       where app_users.id=$1
+         and app_users.email=$2
+         and app_users.company_id=$3
+         and app_users.role=$4
+         and app_users.approval_status='approved'`,
+      [parsed.id, parsed.email, parsed.company_id, parsed.role],
+    );
+    const liveUser = result.rows[0];
+    if (!liveUser) return null;
+    return {
+      id: String(liveUser.id),
+      company_id: String(liveUser.company_id),
+      email: liveUser.email,
+      role: liveUser.role,
+      company_domain: liveUser.company_domain,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function currentSession(): Promise<SessionUser | null> {
   const jar = await cookies();
-  return parseSessionToken(jar.get(COOKIE_NAME)?.value);
+  const parsed = parseSessionToken(jar.get(COOKIE_NAME)?.value);
+  if (!parsed) return null;
+  const liveUser = await getSessionUserFromDatabase(parsed);
+  return liveUser;
 }
 
 export async function requireAdminSession(): Promise<SessionUser> {

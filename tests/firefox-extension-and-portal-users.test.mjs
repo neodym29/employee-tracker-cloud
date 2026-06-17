@@ -18,16 +18,18 @@ for (const expected of [
   'application/x-xpinstall',
   'about:debugging#/runtime/this-firefox',
   'Load Temporary Add-on',
+  'Mozilla Add-ons has tentatively approved version 1.0.1',
 ]) {
   assert.match(installer + manual, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `Firefox add-on support should include ${expected}`);
 }
 
-assert.match(manual, /Firefox Release requires signed add-ons for permanent install/, 'manual must explain why Firefox cannot be silently/permanently installed like Chromium yet');
+assert.match(manual, /signed AMO-approved XPI/, 'manual must explain that permanent Firefox install should use the signed AMO-approved XPI');
 assert.match(manual, /Download Firefox add-on XPI/, 'manual should expose a Firefox-specific XPI download');
 
 assert.match(db, /portalUsersSql/, 'dashboard query should define portal-approved user scope');
 assert.match(db, /approval_status='approved'/, 'dashboard portal user scope should only include approved users');
-assert.match(db, /enrollment_token is not null/, 'dashboard portal user scope should only include enrolled/portal-connected employees');
+assert.match(db, /enrollment_token is not null/, 'dashboard portal user scope should only include enrolled/portal-connected users');
+assert.doesNotMatch(db, /portalUsersSql[\s\S]*role='employee'/, 'dashboard portal user scope should include approved admins with enrollment tokens, not only employee-role users');
 assert.match(db, /activity_events[\s\S]*join portal_users/, 'event feed should join portal users instead of showing stray telemetry identities');
 assert.match(db, /devices[\s\S]*join portal_users/, 'device list should join portal users instead of showing stray telemetry identities');
 assert.doesNotMatch(dashboard, /\.\.\.data\.users, \.\.\.data\.devices, \.\.\.data\.events/, 'user filter should not derive users from devices/events because that leaks stale telemetry identities');
