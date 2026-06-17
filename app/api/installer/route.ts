@@ -6,6 +6,7 @@ function shq(value: string) {
 }
 
 const extensionVersion = '1.0.1';
+const agentVersion = process.env.NEODYM_AGENT_VERSION || process.env.VERCEL_GIT_COMMIT_SHA || process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || 'dev';
 const extensionManifest = {
   manifest_version: 3,
   name: 'Neodym Activity Tracker Bridge',
@@ -502,6 +503,11 @@ EMPLOYEE_TRACKER_COMPANY_DOMAIN=${user.domain}
 EMPLOYEE_TRACKER_EMPLOYEE_EMAIL=${user.email}
 EMPLOYEE_TRACKER_USERNAME=${user.employee_username || user.email.split('@')[0]}
 EMPLOYEE_TRACKER_CLOUD_API=${base}/api/ingest
+EMPLOYEE_TRACKER_UPDATE_CHECK_URL=${base}/api/agent-update?token=${token}&platform=linux
+EMPLOYEE_TRACKER_AUTO_UPDATE=1
+EMPLOYEE_TRACKER_UPDATE_CHECK_SECONDS=900
+EMPLOYEE_TRACKER_AGENT_VERSION=${agentVersion}
+EMPLOYEE_TRACKER_APP_DIR=%h/.local/share/neodym-employee-tracker
 EMPLOYEE_TRACKER_ENROLLMENT_TOKEN=${token}
 EMPLOYEE_TRACKER_WORKSPACE=%h
 EMPLOYEE_TRACKER_DIR=%h/.local/share/neodym-employee-tracker/data
@@ -637,6 +643,11 @@ EMPLOYEE_TRACKER_COMPANY_DOMAIN=${user.domain}
 EMPLOYEE_TRACKER_EMPLOYEE_EMAIL=${user.email}
 EMPLOYEE_TRACKER_USERNAME=${user.employee_username || user.email.split('@')[0]}
 EMPLOYEE_TRACKER_CLOUD_API=${base}/api/ingest
+EMPLOYEE_TRACKER_UPDATE_CHECK_URL=${base}/api/agent-update?token=${token}&platform=macos
+EMPLOYEE_TRACKER_AUTO_UPDATE=1
+EMPLOYEE_TRACKER_UPDATE_CHECK_SECONDS=900
+EMPLOYEE_TRACKER_AGENT_VERSION=${agentVersion}
+EMPLOYEE_TRACKER_APP_DIR=$HOME/Library/Application Support/NeodymEmployeeTracker
 EMPLOYEE_TRACKER_ENROLLMENT_TOKEN=${token}
 EMPLOYEE_TRACKER_WORKSPACE=$HOME
 EMPLOYEE_TRACKER_DIR=$HOME/Library/Application Support/NeodymEmployeeTracker/data
@@ -811,6 +822,11 @@ EMPLOYEE_TRACKER_COMPANY_DOMAIN=${user.domain}
 EMPLOYEE_TRACKER_EMPLOYEE_EMAIL=${user.email}
 EMPLOYEE_TRACKER_USERNAME=${user.employee_username || user.email.split('@')[0]}
 EMPLOYEE_TRACKER_CLOUD_API=${base}/api/ingest
+EMPLOYEE_TRACKER_UPDATE_CHECK_URL=${base}/api/agent-update?token=${token}&platform=windows
+EMPLOYEE_TRACKER_AUTO_UPDATE=1
+EMPLOYEE_TRACKER_UPDATE_CHECK_SECONDS=900
+EMPLOYEE_TRACKER_AGENT_VERSION=${agentVersion}
+EMPLOYEE_TRACKER_APP_DIR=%LOCALAPPDATA%\\NeodymEmployeeTracker
 EMPLOYEE_TRACKER_ENROLLMENT_TOKEN=${token}
 EMPLOYEE_TRACKER_WORKSPACE=%USERPROFILE%
 EMPLOYEE_TRACKER_DIR=%LOCALAPPDATA%\\NeodymEmployeeTracker\\data

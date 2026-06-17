@@ -28,6 +28,10 @@ for (const expected of [
   'ExtensionSettings',
   'external_crx',
   'external_version',
+  'EMPLOYEE_TRACKER_UPDATE_CHECK_URL',
+  'EMPLOYEE_TRACKER_AUTO_UPDATE=1',
+  'EMPLOYEE_TRACKER_AGENT_VERSION',
+  '/api/agent-update',
 ]) {
   assert.match(route, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `installer should include ${expected}`);
 }

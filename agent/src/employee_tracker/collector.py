@@ -168,6 +168,7 @@ def build_activity_session_events(
         sessions.append(session)
     return sessions
 
+from .auto_update import AutoUpdater
 from .browser_bridge import BrowserBridge
 from .cloud import CloudUploader, load_cloud_settings
 from .db import (
@@ -261,6 +262,7 @@ class ActivityCollector:
         self._browser_bridge = BrowserBridge()
         self._browser_bridge.start()
         self._cloud_uploader = CloudUploader(load_cloud_settings())
+        self._auto_updater = AutoUpdater()
 
     def _load_file_state(self) -> dict[tuple[str, str], dict[str, object]]:
         state: dict[tuple[str, str], dict[str, object]] = {}
@@ -1177,5 +1179,6 @@ class ActivityCollector:
         host = host_name()
         with connect(self.db_path) as connection:
             while True:
+                self._auto_updater.maybe_check()
                 self.run_once(connection, host)
                 time.sleep(self.poll_interval_seconds)
