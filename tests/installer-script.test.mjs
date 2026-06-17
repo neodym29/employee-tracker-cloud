@@ -32,6 +32,11 @@ for (const expected of [
   'EMPLOYEE_TRACKER_AUTO_UPDATE=1',
   'EMPLOYEE_TRACKER_AGENT_VERSION',
   '/api/agent-update',
+  'apt_install_tracker_dependencies',
+  'sudo -v',
+  'python_minor',
+  'create_tracker_venv',
+  'python3 venv creation failed; reinstalling Python venv support and retrying',
 ]) {
   assert.match(route, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `installer should include ${expected}`);
 }
@@ -65,3 +70,7 @@ for (const page of ['../app/employee/page.tsx', '../app/admin/approve/ApprovalCl
   const source = readFileSync(new URL(page, import.meta.url), 'utf8');
   assert.match(source, /InstallManual/, `${page} should render the full install manual instead of only a command snippet`);
 }
+
+assert.doesNotMatch(route, /Skipping apt dependency install because passwordless sudo is unavailable/, 'installer must not skip dependency installation just because sudo needs a password');
+assert.match(route, /sudo apt-get install -y \$packages/, 'installer should install Linux dependencies with interactive sudo when not root');
+assert.match(route, /python\{sys\.version_info\.major\}\.\{sys\.version_info\.minor\}-venv/, 'installer should include the exact python3.x-venv package when Python is already present');

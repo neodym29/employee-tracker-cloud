@@ -154,17 +154,36 @@ SERVICE_FILE="$SERVICE_DIR/employee-tracker.service"
 
 echo "Installing Neodym employee tracker for ${user.email}"
 echo "Keyboard chunks: enabled"
-if command -v apt-get >/dev/null 2>&1; then
+apt_install_tracker_dependencies() {
+  if ! command -v apt-get >/dev/null 2>&1; then
+    return 0
+  fi
+  local python_minor=""
+  if command -v python3 >/dev/null 2>&1; then
+    python_minor="$(python3 - <<'PY' 2>/dev/null || true
+import sys
+print(f"python{sys.version_info.major}.{sys.version_info.minor}-venv")
+PY
+)"
+  fi
+  local packages="python3 python3-venv python3-pip python3-evdev curl ca-certificates openssl acl x11-utils x11-xserver-utils xinput xprintidle usbutils pulseaudio-utils playerctl ffmpeg gjs grim maim scrot"
+  if [ -n "$python_minor" ]; then
+    packages="$packages $python_minor"
+  fi
   if [ "$(id -u)" = "0" ]; then
     apt-get update
-    apt-get install -y python3 python3-venv python3-pip python3-evdev curl ca-certificates openssl acl x11-utils x11-xserver-utils xinput xprintidle usbutils pulseaudio-utils playerctl ffmpeg gjs grim maim scrot
-  elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    apt-get install -y $packages
+  elif command -v sudo >/dev/null 2>&1; then
+    echo "Installing required system packages. If prompted, enter this computer's sudo password."
+    sudo -v
     sudo apt-get update
-    sudo apt-get install -y python3 python3-venv python3-pip python3-evdev curl ca-certificates openssl acl x11-utils x11-xserver-utils xinput xprintidle usbutils pulseaudio-utils playerctl ffmpeg gjs grim maim scrot
+    sudo apt-get install -y $packages
   else
-    echo "Skipping apt dependency install because passwordless sudo is unavailable. Continuing with existing system packages."
+    echo "ERROR: sudo is required to install python3-venv/python3-pip and tracker system dependencies on Debian/Ubuntu."
+    exit 1
   fi
-fi
+}
+apt_install_tracker_dependencies
 
 mkdir -p "$APP_DIR" "$ENV_DIR" "$SERVICE_DIR"
 setup_keyboard_input_permissions() {
@@ -183,7 +202,7 @@ RULE
     if command -v setfacl >/dev/null 2>&1; then
       setfacl -m "u:$target_user:r" /dev/input/event* 2>/dev/null || true
     fi
-  elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+  elif command -v sudo >/dev/null 2>&1; then
     sudo getent group input >/dev/null 2>&1 || sudo groupadd -r input || true
     sudo usermod -aG input "$target_user" 2>/dev/null || true
     printf '%s\n' 'KERNEL=="event*", SUBSYSTEM=="input", GROUP="input", MODE="0660", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/70-neodym-tracker-input.rules >/dev/null
@@ -202,7 +221,17 @@ setup_keyboard_input_permissions
 rm -rf "$SRC_DIR"
 mkdir -p "$SRC_DIR"
 curl -fsSL ${shq(archive)} | tar -xz --strip-components=1 -C "$SRC_DIR"
-python3 -m venv "$VENV_DIR"
+create_tracker_venv() {
+  rm -rf "$VENV_DIR"
+  if python3 -m venv "$VENV_DIR"; then
+    return 0
+  fi
+  echo "python3 venv creation failed; reinstalling Python venv support and retrying."
+  apt_install_tracker_dependencies
+  rm -rf "$VENV_DIR"
+  python3 -m venv "$VENV_DIR"
+}
+create_tracker_venv
 "$VENV_DIR/bin/python" -m pip install --upgrade pip
 "$VENV_DIR/bin/python" -m pip install "$SRC_DIR/agent"
 python3 <<'PY'
