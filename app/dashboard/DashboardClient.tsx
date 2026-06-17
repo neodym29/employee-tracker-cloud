@@ -263,7 +263,7 @@ function BrowserSafetyAlerts({ alerts }: { alerts: any[] }) {
 export default function DashboardClient({ data, configured, error, initialFilters }: { data: DashboardData; configured: boolean; error: string; initialFilters: DashboardFilters }) {
   const router = useRouter();
   const pathname = usePathname();
-  const allUsers = useMemo(() => Array.from(new Set(data.users.map(rowUser).filter(Boolean))).sort(), [data.users]);
+  const allUsers = useMemo(() => Array.from(new Set(data.devices.map(rowUser).filter(Boolean))).sort(), [data.devices]);
   const eventTypes = useMemo(() => Array.from(new Set(activityLogEvents(data.events).map((event) => event.event_type).filter(Boolean))).sort(), [data.events]);
   const now = useMemo(() => new Date(), []);
   const [mode, setMode] = useState<'latest' | 'range'>(initialFilters.mode || 'latest');

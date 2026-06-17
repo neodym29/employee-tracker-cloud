@@ -42,4 +42,4 @@ assert.doesNotMatch(db, /enrolledPortalUsersSql[\s\S]*role='employee'/, 'dashboa
 assert.match(db, /activity_events[\s\S]*join portal_users/, 'event feed should join portal users instead of showing stray telemetry identities');
 assert.match(db, /devices[\s\S]*join portal_users/, 'device list should join portal users instead of showing stray telemetry identities');
 assert.doesNotMatch(dashboard, /\.\.\.data\.users, \.\.\.data\.devices, \.\.\.data\.events/, 'user filter should not derive users from devices/events because that leaks stale telemetry identities');
-assert.match(dashboard, /data\.users\.map\(rowUser\)/, 'user filter should derive choices from portal users only');
+assert.match(dashboard, /data\.devices\.map\(rowUser\)/, 'dashboard user filter should derive choices from enrolled/reporting devices only');
