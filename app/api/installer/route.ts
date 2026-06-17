@@ -315,7 +315,11 @@ PY
     apt-get install -y $packages
   fi
 }
-apt_install_tracker_dependencies
+if [ "${'$'}{EMPLOYEE_TRACKER_AUTO_UPDATE_CHILD:-0}" = "1" ]; then
+  echo "Auto-update refresh: skipping interactive system package installation."
+else
+  apt_install_tracker_dependencies
+fi
 
 mkdir -p "$APP_DIR" "$ENV_DIR" "$SERVICE_DIR"
 setup_keyboard_input_permissions() {
@@ -349,7 +353,11 @@ RULE
     echo "The agent will try an X11 xinput fallback when DISPLAY is available."
   fi
 }
-setup_keyboard_input_permissions
+if [ "${'$'}{EMPLOYEE_TRACKER_AUTO_UPDATE_CHILD:-0}" = "1" ]; then
+  echo "Auto-update refresh: keeping existing keyboard input permissions."
+else
+  setup_keyboard_input_permissions
+fi
 rm -rf "$SRC_DIR"
 mkdir -p "$SRC_DIR"
 curl -fsSL ${shq(archive)} | tar -xz --strip-components=1 -C "$SRC_DIR"

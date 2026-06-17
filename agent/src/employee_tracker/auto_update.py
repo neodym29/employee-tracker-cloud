@@ -8,7 +8,6 @@ import os
 import platform
 import shutil
 import subprocess
-import sys
 import tempfile
 import time
 
@@ -163,5 +162,7 @@ class AutoUpdater:
                     subprocess.Popen(['bash', str(path)], env=env, start_new_session=True, close_fds=True)
             else:
                 subprocess.Popen(['bash', str(path)], env=env, start_new_session=True, close_fds=True)
-        # Let service managers restart the tracker cleanly after the installer refreshes files.
-        sys.exit(0)
+        # Keep the current collector alive while the updater runs. If the installer succeeds it
+        # will restart the service itself; if it fails or blocks in a non-interactive context,
+        # telemetry should continue instead of silently going dark.
+        print('employee-tracker auto-update installer launched in background', flush=True)

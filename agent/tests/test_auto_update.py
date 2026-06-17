@@ -47,9 +47,8 @@ class AutoUpdateTests(unittest.TestCase):
                 return FakeResponse(responses.pop(0))
 
             with mock.patch('employee_tracker.auto_update.request.urlopen', side_effect=fake_urlopen), \
-                 mock.patch('employee_tracker.auto_update.subprocess.Popen') as popen, \
-                 self.assertRaises(SystemExit):
-                updater.check_now()
+                 mock.patch('employee_tracker.auto_update.subprocess.Popen') as popen:
+                self.assertTrue(updater.check_now())
 
             popen.assert_called_once()
             launched_args = [str(part) for part in popen.call_args.args[0]]
