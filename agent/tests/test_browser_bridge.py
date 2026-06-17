@@ -14,11 +14,19 @@ class BrowserBridgeMappingTests(unittest.TestCase):
             'Edg/121': ('Microsoft Edge', 'edge'),
             'Opera': ('Opera', 'opera'),
             'OPR/106': ('Opera', 'opera'),
+            'Firefox': ('Firefox', 'firefox'),
+            'Mozilla Firefox': ('Firefox', 'firefox'),
+            'LibreWolf': ('Firefox', 'firefox'),
         }
         for raw, expected in cases.items():
             with self.subTest(raw=raw):
                 name = _browser_name(raw)
                 self.assertEqual((name, _app_key(name)), expected)
+
+    def test_unknown_browser_does_not_default_to_chrome(self) -> None:
+        name = _browser_name('Some Unknown Browser')
+        self.assertEqual(name, 'Some Unknown Browser')
+        self.assertEqual(_app_key(name), 'browser')
 
 
 if __name__ == '__main__':
