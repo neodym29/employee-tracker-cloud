@@ -16,6 +16,9 @@ for (const expected of [
   'neodym-browser-firefox.xpi',
   "format === 'firefox-extension'",
   'application/x-xpinstall',
+  "format === 'firefox-temporary'",
+  'neodym-firefox-temporary.zip',
+  'neodym-firefox-temporary/manifest.json',
   'about:debugging#/runtime/this-firefox',
   'Load Temporary Add-on',
   'Mozilla Add-ons has tentatively approved version 1.0.1',
@@ -23,8 +26,9 @@ for (const expected of [
   assert.match(installer + manual, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `Firefox add-on support should include ${expected}`);
 }
 
-assert.match(manual, /signed AMO-approved XPI/, 'manual must explain that permanent Firefox install should use the signed AMO-approved XPI');
-assert.match(manual, /Download Firefox add-on XPI/, 'manual should expose a Firefox-specific XPI download');
+assert.match(manual, /signed AMO XPI/, 'manual must explain that permanent Firefox install should use the signed AMO XPI');
+assert.match(manual, /Download Firefox temporary ZIP/, 'manual should expose a Firefox temporary unpacked ZIP download');
+assert.match(manual, /select the extracted <code>manifest\.json<\/code>/, 'manual should tell users to load extracted manifest.json for temporary Firefox installs');
 
 assert.match(db, /portalUsersSql/, 'dashboard query should define portal-approved user scope');
 assert.match(db, /approval_status='approved'/, 'dashboard portal user scope should only include approved users');

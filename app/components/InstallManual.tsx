@@ -4,6 +4,7 @@ type InstallManualProps = {
   url: string;
   extensionUrl?: string;
   firefoxExtensionUrl?: string;
+  firefoxTemporaryUrl?: string;
   platform: InstallerPlatform | undefined;
   context?: 'employee' | 'admin';
 };
@@ -20,7 +21,7 @@ function platformLabel(_platform: InstallerPlatform | undefined) {
   return 'Linux';
 }
 
-export default function InstallManual({ url, extensionUrl, firefoxExtensionUrl, platform, context = 'employee' }: InstallManualProps) {
+export default function InstallManual({ url, extensionUrl, firefoxExtensionUrl, firefoxTemporaryUrl, platform, context = 'employee' }: InstallManualProps) {
   const label = platformLabel(platform);
   const shellName = 'Terminal';
 
@@ -57,8 +58,8 @@ export default function InstallManual({ url, extensionUrl, firefoxExtensionUrl, 
         <li><strong>Try automatic install first.</strong> The Linux app installer writes managed browser policies for Chrome, Brave, Edge, Chromium, Opera, and Vivaldi when sudo/admin access succeeds.</li>
         <li><strong>Restart the browser.</strong> Managed policy extensions usually appear only after closing and reopening the browser.</li>
         <li><strong>If the extension is still missing, download it manually.</strong> {extensionUrl ? <a className="button secondary" href={extensionUrl}>Download Chromium browser extension ZIP</a> : 'Use the browser extension ZIP link beside the Linux installer.'}</li>
-        <li><strong>For Firefox / LibreWolf, download the Firefox add-on XPI.</strong> {firefoxExtensionUrl ? <a className="button secondary" href={firefoxExtensionUrl}>Download Firefox add-on XPI</a> : 'Use the Firefox add-on XPI link beside the Linux installer.'}</li>
-        <li><strong>Firefox has a different add-on flow.</strong> Version <strong>1.0.1</strong> has been tentatively approved by Mozilla Add-ons, but this portal link still downloads the locally generated XPI. If Firefox says the portal XPI is <em>not verified</em>, use <code>about:debugging#/runtime/this-firefox</code> → <strong>Load Temporary Add-on</strong>, or install the signed AMO-approved XPI from the Mozilla developer/version page for permanent use.</li>
+        <li><strong>For Firefox / LibreWolf, do not open the portal XPI directly if Firefox says it is not verified.</strong> {firefoxTemporaryUrl ? <a className="button secondary" href={firefoxTemporaryUrl}>Download Firefox temporary ZIP</a> : 'Use the Firefox temporary ZIP link beside the Linux installer.'} Extract the ZIP, then in <code>about:debugging#/runtime/this-firefox</code> click <strong>Load Temporary Add-on</strong> and select the extracted <code>manifest.json</code>.</li>
+        <li><strong>For permanent Firefox install, use the signed AMO XPI.</strong> Version <strong>1.0.1</strong> has been tentatively approved by Mozilla Add-ons, but this portal-generated XPI/ZIP is not the signed AMO artifact. Download the signed file from the Mozilla developer/version page when you want normal permanent install.</li>
         <li><strong>Unzip Chromium extensions only.</strong> Extract the Chromium ZIP. The folder you load must contain <code>manifest.json</code>, <code>background.js</code>, and <code>content.js</code>.</li>
         <li><strong>Open the Chromium browser extensions page.</strong> Use <code>chrome://extensions</code>, <code>brave://extensions</code>, <code>edge://extensions</code>, <code>opera://extensions</code>, or <code>vivaldi://extensions</code>.</li>
         <li><strong>Turn on Developer mode.</strong> Then click <strong>Load unpacked</strong> and select the unzipped <code>neodym-browser-extension</code> folder.</li>
@@ -77,7 +78,7 @@ export default function InstallManual({ url, extensionUrl, firefoxExtensionUrl, 
           <tr><td>Chromium</td><td>Auto-installed by managed policy when admin/sudo succeeds.</td><td>Open chromium://extensions or chrome://extensions and confirm the Neodym extension is installed by policy.</td></tr>
           <tr><td>Opera</td><td>Auto-installed by managed policy when admin/sudo succeeds.</td><td>Open opera://extensions and confirm the Neodym extension is installed by policy.</td></tr>
           <tr><td>Vivaldi</td><td>Chromium-compatible; the installer attempts managed-policy setup where supported.</td><td>Open vivaldi://extensions and confirm the Neodym extension is installed. If missing, report it; OS screenshots/process tracking still continues.</td></tr>
-          <tr><td>Firefox / LibreWolf</td><td>Uses a Firefox-specific WebExtension XPI. Mozilla Add-ons has tentatively approved version 1.0.1; use the signed AMO-approved XPI for permanent Firefox installs, or the temporary <code>about:debugging#/runtime/this-firefox</code> flow when testing the portal-generated XPI.</td><td>Install the signed XPI from Mozilla when available. For the portal XPI, open about:debugging, click Load Temporary Add-on, select neodym-browser-firefox.xpi, then verify Firefox rows on the dashboard.</td></tr>
+          <tr><td>Firefox / LibreWolf</td><td>Portal XPI/ZIP is generated locally and is not the signed AMO artifact. Normal Firefox install needs the signed AMO XPI. For immediate testing, use the temporary ZIP and load its extracted manifest through <code>about:debugging#/runtime/this-firefox</code>.</td><td>Download Firefox temporary ZIP, extract it, open about:debugging, click Load Temporary Add-on, select the extracted manifest.json, then verify Firefox rows on the dashboard.</td></tr>
           <tr><td>Incognito / private windows</td><td>Extensions may be blocked unless browser policy allows incognito access.</td><td>If private/incognito use bypasses the extension, the dashboard should show extension-missing-or-incognito compliance warnings plus OS-level evidence.</td></tr>
           <tr><td>Portable or unknown browsers</td><td>Managed policy may not reach them.</td><td>The tracker should still show the process/window/screenshot; the dashboard should warn that browser extension coverage is missing.</td></tr>
         </tbody>
@@ -101,7 +102,7 @@ export default function InstallManual({ url, extensionUrl, firefoxExtensionUrl, 
         <li>If no dashboard rows appear: rerun the installer on the employee PC and keep the terminal open until it finishes.</li>
         <li>If screenshots/activity appear but browser tabs/clicks do not: restart the browser, then check the extension page for the Neodym extension.</li>
         <li>If the extension is missing in Chrome/Brave/Edge/Chromium/Opera/Vivaldi: rerun the installer with admin/sudo access.</li>
-        <li>If Firefox says the portal add-on is not verified: use the signed AMO-approved XPI for permanent installs, or use <code>about:debugging#/runtime/this-firefox</code> → <strong>Load Temporary Add-on</strong> for the portal-generated XPI.</li>
+        <li>If Firefox says the portal add-on is not verified: do not open the XPI normally. Download the Firefox temporary ZIP, extract it, then use <code>about:debugging#/runtime/this-firefox</code> → <strong>Load Temporary Add-on</strong> and select the extracted <code>manifest.json</code>.</li>
         <li>If Firefox, private browsing, or a portable browser is used: expect a browser-compliance warning because high-fidelity extension telemetry may be unavailable.</li>
         <li>{context === 'admin' ? 'Send the employee this manual together with the installer link, and ask them to confirm every browser they use.' : 'Ask your admin if any browser you use does not show the Neodym extension after restart.'}</li>
       </ul>

@@ -183,6 +183,15 @@ function firefoxExtensionZip() {
   ]);
 }
 
+function firefoxTemporaryZip() {
+  return zipFiles([
+    ['neodym-firefox-temporary/manifest.json', JSON.stringify(firefoxExtensionManifest, null, 2) + '\n'],
+    ['neodym-firefox-temporary/background.js', firefoxExtensionBackground],
+    ['neodym-firefox-temporary/content.js', extensionContent],
+    ['neodym-firefox-temporary/README.txt', firefoxExtensionReadme],
+  ]);
+}
+
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get('token') || '';
   if (!token) return new NextResponse('missing token\n', { status: 400 });
@@ -197,6 +206,15 @@ export async function GET(req: NextRequest) {
       headers: {
         'content-type': 'application/x-xpinstall',
         'content-disposition': 'attachment; filename="neodym-browser-firefox.xpi"',
+        'cache-control': 'no-store',
+      },
+    });
+  }
+  if (format === 'firefox-temporary') {
+    return new NextResponse(firefoxTemporaryZip(), {
+      headers: {
+        'content-type': 'application/zip',
+        'content-disposition': 'attachment; filename="neodym-firefox-temporary.zip"',
         'cache-control': 'no-store',
       },
     });

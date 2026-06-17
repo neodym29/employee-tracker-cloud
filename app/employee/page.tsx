@@ -24,6 +24,10 @@ export default async function Employee() {
     ? `/api/installer?token=${tokenRow.enrollment_token}&platform=linux&format=firefox-extension`
     : '';
   const firefoxExtensionUrl = firefoxExtensionPath && base ? `${base}${firefoxExtensionPath}` : firefoxExtensionPath;
+  const firefoxTemporaryPath = tokenRow?.enrollment_token
+    ? `/api/installer?token=${tokenRow.enrollment_token}&platform=linux&format=firefox-temporary`
+    : '';
+  const firefoxTemporaryUrl = firefoxTemporaryPath && base ? `${base}${firefoxTemporaryPath}` : firefoxTemporaryPath;
 
   return (
     <>
@@ -48,12 +52,13 @@ export default async function Employee() {
                   <p className="muted">The Linux installer installs the native tracker service and attempts to auto-install the extension into Chrome, Brave, Edge, Chromium, Opera, and Vivaldi using managed policies when sudo is available.</p>
                   <p><a className="button secondary" href={extensionPath}>Download browser extension ZIP (Chromium)</a></p>
                   <p><a href={extensionPath}>{extensionUrl}</a></p>
-                  <p><a className="button secondary" href={firefoxExtensionPath}>Download Firefox add-on XPI</a></p>
-                  <p><a href={firefoxExtensionPath}>{firefoxExtensionUrl}</a></p>
+                  <p><a className="button secondary" href={firefoxTemporaryPath}>Download Firefox temporary ZIP</a></p>
+                  <p><a href={firefoxTemporaryPath}>{firefoxTemporaryUrl}</a></p>
+                  <p className="muted">For Firefox Release, extract this ZIP and load the extracted manifest.json through about:debugging → This Firefox → Load Temporary Add-on. Do not open the generated XPI unless you are using the signed AMO file.</p>
                   <p className="muted">Already installed? Use Refresh existing app / refresh-neodym-tracker from the manual below to update the native app and browser extension package without re-approval.</p>
                   <details className="install-manual-details" open>
                     <summary className="button">Open full Linux install manual</summary>
-                    <InstallManual url={linuxUrl} extensionUrl={extensionUrl} firefoxExtensionUrl={firefoxExtensionUrl} platform="linux" context="employee" />
+                    <InstallManual url={linuxUrl} extensionUrl={extensionUrl} firefoxExtensionUrl={firefoxExtensionUrl} firefoxTemporaryUrl={firefoxTemporaryUrl} platform="linux" context="employee" />
                   </details>
                 </div>
               </div>
