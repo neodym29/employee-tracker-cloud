@@ -39,7 +39,22 @@ const firefoxExtensionManifest = {
   browser_specific_settings: {
     gecko: {
       id: 'neodym-activity-tracker@neodym.ai',
-      strict_min_version: '109.0',
+      strict_min_version: '140.0',
+      data_collection_permissions: {
+        required: [
+          'browsingActivity',
+          'websiteActivity',
+          'websiteContent',
+          'searchTerms',
+          'personallyIdentifyingInfo',
+          'personalCommunications',
+        ],
+        optional: ['technicalAndInteraction'],
+        has_previous_consent: false,
+      },
+    },
+    gecko_android: {
+      strict_min_version: '142.0',
     },
   },
 };
