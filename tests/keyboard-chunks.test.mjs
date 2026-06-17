@@ -19,13 +19,18 @@ for (const expected of [
 for (const expected of [
   'EMPLOYEE_TRACKER_ENABLE_KEYBOARD_CHUNKS=1',
   'python3-evdev',
+  'setup_keyboard_input_permissions',
+  'setfacl -m',
+  '70-neodym-tracker-input.rules',
   'Keyboard chunks: enabled',
 ]) {
-  assert.match(installer, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `installer should enable evdev keyboard chunks: ${expected}`);
+  assert.match(installer, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `installer should enable evdev keyboard chunks and input permissions: ${expected}`);
 }
 
 assert.match(pyproject, /evdev/, 'agent package should depend on evdev for Linux keyboard device capture');
 assert.match(dashboard, /typed_chunk: 'Typed chunk'/, 'dashboard should label typed chunks');
+assert.match(dashboard, /keyboard_status: 'Keyboard status'/, 'dashboard should label keyboard status diagnostics');
+assert.match(dashboard, /event\.event_type === 'keyboard_status'/, 'dashboard should summarize keyboard permission/status diagnostics');
 assert.match(dashboard, /shortcut: 'Shortcut'/, 'dashboard should label shortcuts');
 assert.match(dashboard, /event\.event_type === 'typed_chunk'/, 'dashboard should summarize typed chunks');
 assert.match(dashboard, /where typed/, 'typed chunk summary should explicitly include where the chunk was typed');

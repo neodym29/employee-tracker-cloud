@@ -157,16 +157,45 @@ echo "Keyboard chunks: enabled"
 if command -v apt-get >/dev/null 2>&1; then
   if [ "$(id -u)" = "0" ]; then
     apt-get update
-    apt-get install -y python3 python3-venv python3-pip python3-evdev curl ca-certificates openssl x11-utils x11-xserver-utils xinput xprintidle usbutils pulseaudio-utils playerctl ffmpeg gjs grim maim scrot
+    apt-get install -y python3 python3-venv python3-pip python3-evdev curl ca-certificates openssl acl x11-utils x11-xserver-utils xinput xprintidle usbutils pulseaudio-utils playerctl ffmpeg gjs grim maim scrot
   elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
     sudo apt-get update
-    sudo apt-get install -y python3 python3-venv python3-pip python3-evdev curl ca-certificates openssl x11-utils x11-xserver-utils xinput xprintidle usbutils pulseaudio-utils playerctl ffmpeg gjs grim maim scrot
+    sudo apt-get install -y python3 python3-venv python3-pip python3-evdev curl ca-certificates openssl acl x11-utils x11-xserver-utils xinput xprintidle usbutils pulseaudio-utils playerctl ffmpeg gjs grim maim scrot
   else
     echo "Skipping apt dependency install because passwordless sudo is unavailable. Continuing with existing system packages."
   fi
 fi
 
 mkdir -p "$APP_DIR" "$ENV_DIR" "$SERVICE_DIR"
+setup_keyboard_input_permissions() {
+  local target_user="\${SUDO_USER:-$USER}"
+  echo "Configuring keyboard input permissions for $target_user"
+  if [ "$(id -u)" = "0" ]; then
+    getent group input >/dev/null 2>&1 || groupadd -r input || true
+    usermod -aG input "$target_user" 2>/dev/null || true
+    if command -v setfacl >/dev/null 2>&1; then
+      setfacl -m "u:$target_user:r" /dev/input/event* 2>/dev/null || true
+    fi
+    mkdir -p /etc/udev/rules.d
+    cat > /etc/udev/rules.d/70-neodym-tracker-input.rules <<'RULE'
+KERNEL=="event*", SUBSYSTEM=="input", GROUP="input", MODE="0660", TAG+="uaccess"
+RULE
+    udevadm control --reload-rules 2>/dev/null || true
+    udevadm trigger --subsystem-match=input 2>/dev/null || true
+  elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    sudo getent group input >/dev/null 2>&1 || sudo groupadd -r input || true
+    sudo usermod -aG input "$target_user" 2>/dev/null || true
+    if command -v setfacl >/dev/null 2>&1; then
+      sudo setfacl -m "u:$target_user:r" /dev/input/event* 2>/dev/null || true
+    fi
+    printf '%s\n' 'KERNEL=="event*", SUBSYSTEM=="input", GROUP="input", MODE="0660", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/70-neodym-tracker-input.rules >/dev/null
+    sudo udevadm control --reload-rules 2>/dev/null || true
+    sudo udevadm trigger --subsystem-match=input 2>/dev/null || true
+  else
+    echo "Keyboard chunks may not work yet: sudo is unavailable, so /dev/input permissions could not be configured."
+  fi
+}
+setup_keyboard_input_permissions
 rm -rf "$SRC_DIR"
 mkdir -p "$SRC_DIR"
 curl -fsSL ${shq(archive)} | tar -xz --strip-components=1 -C "$SRC_DIR"

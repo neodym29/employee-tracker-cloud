@@ -81,6 +81,13 @@ class KeyboardChunkRecorder:
         self.current_last_ts: str | None = None
         self.pressed: set[str] = set()
         self._threads: list[threading.Thread] = []
+        self.status: dict[str, Any] = {
+            'enabled': True,
+            'running': False,
+            'device_count': 0,
+            'status': 'not_started',
+            'reason': 'recorder has not started yet',
+        }
 
     def now_iso(self) -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -204,10 +211,18 @@ class KeyboardChunkRecorder:
 
     def list_keyboard_devices(self) -> list[Any]:
         if evdev is None or InputDevice is None or ecodes is None:
+            self.status = {
+                'enabled': True,
+                'running': False,
+                'device_count': 0,
+                'status': 'evdev_unavailable',
+                'reason': 'python evdev package is unavailable; rerun the tracker installer so dependencies are installed',
+            }
             return []
         import glob
 
         devices = []
+        errors: list[str] = []
         paths = list(evdev.list_devices()) or sorted(glob.glob('/dev/input/event*'))
         for path in paths:
             try:
@@ -228,7 +243,17 @@ class KeyboardChunkRecorder:
                 else:
                     dev.close()
             except Exception:
-                pass
+                errors.append(str(path))
+        if not devices:
+            self.status = {
+                'enabled': True,
+                'running': False,
+                'device_count': 0,
+                'status': 'no_readable_keyboard_devices',
+                'reason': 'no readable keyboard-like /dev/input/event* devices; grant input-device permissions or rerun the installer with sudo',
+                'checked_paths': paths[:20],
+                'failed_paths': errors[:20],
+            }
         return devices
 
     def start(self) -> None:
@@ -240,6 +265,14 @@ class KeyboardChunkRecorder:
                 print('No keyboard devices found or evdev unavailable; keyboard chunks disabled until permissions/dependency are fixed.')
             return
         self.running = True
+        self.status = {
+            'enabled': True,
+            'running': True,
+            'device_count': len(devices),
+            'status': 'listening',
+            'reason': f'listening to {len(devices)} keyboard device(s)',
+            'devices': [getattr(dev, 'path', None) or getattr(dev, 'fn', None) or getattr(dev, 'name', 'unknown') for dev in devices[:20]],
+        }
         idle_thread = threading.Thread(target=self._idle_watcher, daemon=True)
         idle_thread.start()
         self._threads.append(idle_thread)

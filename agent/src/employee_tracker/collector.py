@@ -252,6 +252,7 @@ class ActivityCollector:
         # Do not block first cloud connection on a potentially large home-directory scan.
         self._last_file_scan_at: float = time.time()
         self._last_process_scan_at: float = 0.0
+        self._last_keyboard_status_at: float = 0.0
         self._workspace_root = str(self.workspace_dir)
         self._file_roots = tuple(str(root) for root in self.file_roots)
         self._file_state = self._load_file_state()
@@ -808,6 +809,28 @@ class ActivityCollector:
         recorder = self._keyboard_recorder
         if recorder is None:
             return rows
+        now = time.time()
+        if now - self._last_keyboard_status_at >= 60:
+            self._last_keyboard_status_at = now
+            status_payload = dict(getattr(recorder, 'status', {}) or {})
+            rows.append({
+                'captured_at': captured_at,
+                'username': self.username,
+                'host': host,
+                'event_type': 'keyboard_status',
+                'app_name': 'Keyboard',
+                'window_title': status_payload.get('status') or 'keyboard status',
+                'window_id': getattr(window, 'window_id', None),
+                'typed_text': status_payload.get('reason'),
+                'key_count': status_payload.get('device_count'),
+                'keys_json': serialize_keys(status_payload.get('devices') or status_payload.get('checked_paths') or []),
+                'duration_seconds': None,
+                'reason': status_payload.get('status'),
+                'shortcut': None,
+                'source': 'evdev-keyboard-chunks',
+                'note': status_payload.get('reason') or 'keyboard chunk recorder status',
+                **status_payload,
+            })
         for event in recorder.drain_events(limit=120):
             event_type = str(event.get('type') or 'typed_chunk')
             if event_type == 'shortcut':

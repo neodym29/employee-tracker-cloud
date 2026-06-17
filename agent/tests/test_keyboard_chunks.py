@@ -64,6 +64,16 @@ class KeyboardChunkTests(unittest.TestCase):
         self.assertEqual(rows[0]['reason'], 'idle')
         self.assertEqual(rows[0]['source'], 'evdev-keyboard-chunks')
 
+    def test_reports_status_when_no_keyboard_devices_are_readable(self) -> None:
+        with TemporaryDirectory() as tmp:
+            recorder = KeyboardChunkRecorder(data_dir=Path(tmp), debug=False)
+            recorder.list_keyboard_devices = lambda: []  # type: ignore[method-assign]
+            recorder.start()
+
+            self.assertFalse(recorder.running)
+            self.assertIn('status', recorder.status)
+            self.assertFalse(recorder.status['running'])
+
 
 if __name__ == '__main__':
     unittest.main()
