@@ -6,12 +6,11 @@ const installer = readFileSync(new URL('../app/api/installer/route.ts', import.m
 const client = readFileSync(new URL('../app/admin/approve/ApprovalClient.tsx', import.meta.url), 'utf8');
 const system = readFileSync(new URL('../agent/src/employee_tracker/system.py', import.meta.url), 'utf8');
 
-for (const platform of ['linux', 'macos', 'windows']) {
-  assert.match(client, new RegExp(`value="${platform}"`), `approval UI should let admins select ${platform}`);
-  assert.match(installer, new RegExp(`platform === '${platform}'`), `installer route should branch for ${platform}`);
-}
-
-assert.match(client, /installerPlatform/, 'approval UI should store the selected installer OS');
+assert.match(client, /Linux installer only for now/, 'approval UI should explain that only Linux installers are offered now');
+assert.doesNotMatch(client, /value="macos"|value="windows"/, 'approval UI should hide Windows/macOS installer choices for now');
+assert.doesNotMatch(client, /setInstallerPlatform|installerPlatform/, 'approval UI should not show an OS picker while only Linux is supported');
+assert.match(installer, /platform === 'linux'/, 'installer route should still serve Linux installers');
+assert.match(installer, /format.*extension|extensionZip|application\/zip/, 'installer route should expose a browser extension ZIP download');
 assert.match(client, /Refresh existing app/, 'approval UI should also show refresh package commands for already-installed employees');
 assert.match(client, /refresh-neodym-tracker/, 'approval refresh commands should be clearly named');
 assert.match(client, /JSON\.stringify\(\{ email, platform:/, 'approval API call should send selected platform');

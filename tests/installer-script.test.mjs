@@ -50,6 +50,9 @@ for (const expected of [
   'Portable or unknown browsers',
   'browser-compliance warning',
   'Already installed? Refresh/update instead',
+  'How to add the browser extension',
+  'Load unpacked',
+  'Developer mode',
 ]) {
   assert.match(manual, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `install manual should explain: ${expected}`);
 }

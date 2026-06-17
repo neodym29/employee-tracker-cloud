@@ -5,6 +5,119 @@ function shq(value: string) {
   return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
 
+const extensionVersion = '1.0.1';
+const extensionManifest = {
+  manifest_version: 3,
+  name: 'Neodym Activity Tracker Bridge',
+  version: extensionVersion,
+  description: 'Reports active browser tabs, page URLs, clicks, typing summaries, and audio state to the local Neodym tracker agent.',
+  permissions: ['tabs', 'webNavigation', 'scripting', 'activeTab'],
+  host_permissions: ['<all_urls>'],
+  background: { service_worker: 'background.js' },
+  content_scripts: [{
+    matches: ['<all_urls>'],
+    js: ['content.js'],
+    run_at: 'document_idle',
+    all_frames: false,
+  }],
+};
+
+const extensionBackground = `const BRIDGE = 'http://127.0.0.1:8766';
+function browserName(){const ua=navigator.userAgent||''; if(ua.includes('Edg/')) return 'Microsoft Edge'; if(ua.includes('OPR/')||ua.includes('Opera')) return 'Opera'; if(navigator.brave) return 'Brave'; if(ua.includes('Vivaldi')) return 'Vivaldi'; if(ua.includes('Chromium')&&!ua.includes('Chrome/')) return 'Chromium'; if(ua.includes('Chrome/')) return 'Google Chrome'; return 'Chromium';}
+async function post(path,payload){try{await fetch(BRIDGE+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});}catch(error){}}
+async function collectTabs(){const tabs=await chrome.tabs.query({}); await post('/browser-state',{browser:browserName(),tabs:tabs,capturedAt:new Date().toISOString()});}
+async function captureActiveVisibleTab(){try{const tabs=await chrome.tabs.query({active:true,lastFocusedWindow:true}); const tab=tabs&&tabs[0]; if(!tab||!tab.id||!tab.windowId||!tab.url||!/^(https?|file):/i.test(tab.url))return; const dataUrl=await chrome.tabs.captureVisibleTab(tab.windowId,{format:'jpeg',quality:60}); await post('/browser-screenshot',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,dataUrl:dataUrl,capturedAt:new Date().toISOString()});}catch(error){}}
+chrome.tabs.onActivated.addListener(()=>{collectTabs();captureActiveVisibleTab();}); chrome.tabs.onUpdated.addListener(collectTabs); chrome.windows.onFocusChanged.addListener(()=>{collectTabs();captureActiveVisibleTab();}); chrome.tabs.onRemoved.addListener(collectTabs);
+async function injectContentScriptIntoOpenTabs(){if(!chrome.scripting||!chrome.scripting.executeScript)return; try{const tabs=await chrome.tabs.query({}); await Promise.allSettled((tabs||[]).filter((tab)=>tab.id&&tab.url&&/^(https?|file):/i.test(tab.url)).map((tab)=>chrome.scripting.executeScript({target:{tabId:tab.id,allFrames:true},files:['content.js']}))); await collectTabs();}catch(error){}}
+chrome.runtime.onStartup.addListener(injectContentScriptIntoOpenTabs); chrome.runtime.onInstalled.addListener(injectContentScriptIntoOpenTabs);
+chrome.runtime.onMessage.addListener((message,sender)=>{if(!message||(message.type!=='neodym-click'&&message.type!=='neodym-typing'))return; const tab=sender.tab||{}; if(message.type==='neodym-typing'){post('/browser-typing',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,tagName:message.tagName,inputType:message.inputType,fieldHint:message.fieldHint,keyCount:message.keyCount,textLength:message.textLength,wordCount:message.wordCount,typed_sample_redacted:message.typed_sample_redacted,activityType:'typing_activity',sensitive:Boolean(message.sensitive),capturedAt:new Date().toISOString()}); return;} post('/browser-click',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,audible:Boolean(tab.audible),muted:Boolean(tab.mutedInfo&&tab.mutedInfo.muted),targetText:message.targetText,tagName:message.tagName,role:message.role,ariaLabel:message.ariaLabel,elementId:message.elementId,className:message.className,href:message.href,x:message.x,y:message.y,capturedAt:new Date().toISOString()});});
+setInterval(collectTabs,2000); setInterval(captureActiveVisibleTab,15000); injectContentScriptIntoOpenTabs(); captureActiveVisibleTab();
+`;
+
+const extensionContent = `if(!window.__neodymTrackerBridgeContentInjected){window.__neodymTrackerBridgeContentInjected=true;
+document.addEventListener('click',(event)=>{const el=event.target&&event.target.closest?event.target.closest('a,button,input,textarea,select,[role],label,[onclick]'):event.target; if(!el)return; const text=(el.innerText||el.value||el.textContent||'').trim().slice(0,300); chrome.runtime.sendMessage({type:'neodym-click',targetText:text,tagName:el.tagName,role:el.getAttribute&&el.getAttribute('role'),ariaLabel:el.getAttribute&&el.getAttribute('aria-label'),elementId:el.id||null,className:typeof el.className==='string'?el.className.slice(0,300):null,href:el.href||null,x:event.clientX,y:event.clientY});},true);
+let typingTimer=null; let typingState={keyCount:0,element:null};
+function isSensitiveInput(el){const type=String(el.type||'').toLowerCase(); const autocomplete=String(el.autocomplete||'').toLowerCase(); const label=[el.name,el.id,el.placeholder,el.getAttribute&&el.getAttribute('aria-label')].filter(Boolean).join(' ').toLowerCase(); return type==='password'||['current-password','new-password','one-time-code','cc-number','cc-csc'].includes(autocomplete)||/password|passwd|secret|token|api[_ -]?key|otp|2fa|credit|card|cvv|pin/.test(label);}
+function fieldHint(el){return [el.getAttribute&&el.getAttribute('aria-label'),el.placeholder,el.name,el.id].filter(Boolean).join(' / ').trim().slice(0,180)||null;}
+function typedTextSample(el,sensitive){if(sensitive)return '[sensitive field redacted]'; return String(el.value||el.innerText||el.textContent||'').slice(0,500);}
+function emitTypingActivity(){const el=typingState.element; const keyCount=typingState.keyCount; typingTimer=null; typingState={keyCount:0,element:null}; if(!el||keyCount<=0)return; const value=String(el.value||el.innerText||el.textContent||''); const sensitive=isSensitiveInput(el); chrome.runtime.sendMessage({type:'neodym-typing',tagName:el.tagName,inputType:el.type||(el.isContentEditable?'contenteditable':null),fieldHint:fieldHint(el),keyCount,textLength:value.length,wordCount:(value.trim().match(/\\S+/g)||[]).length,typed_sample_redacted:typedTextSample(el,sensitive),sensitive});}
+document.addEventListener('input',(event)=>{const raw=event.target; if(!raw)return; const el=raw.matches&&raw.matches('input,textarea')?raw:(raw.closest&&raw.closest('input,textarea,[contenteditable]'))||raw; if(!el||!(el.matches&&(el.matches('input,textarea')||el.isContentEditable)))return; typingState.element=el; typingState.keyCount+=1; if(typingTimer)clearTimeout(typingTimer); typingTimer=setTimeout(emitTypingActivity,1200);},true);
+}
+`;
+
+const extensionReadme = `Neodym browser extension manual install\n\n1. Unzip this file.\n2. Open Chrome/Brave/Edge/Chromium/Opera/Vivaldi.\n3. Open chrome://extensions, brave://extensions, edge://extensions, opera://extensions, or vivaldi://extensions.\n4. Turn on Developer mode.\n5. Click Load unpacked.\n6. Select the unzipped folder that contains manifest.json.\n7. Keep the native Linux tracker app running; the extension reports to http://127.0.0.1:8766.\n`;
+
+function crc32(input: Buffer) {
+  let crc = 0xffffffff;
+  for (const byte of input) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function extensionZip() {
+  const files = [
+    ['neodym-browser-extension/manifest.json', JSON.stringify(extensionManifest, null, 2) + '\n'],
+    ['neodym-browser-extension/background.js', extensionBackground],
+    ['neodym-browser-extension/content.js', extensionContent],
+    ['neodym-browser-extension/README.txt', extensionReadme],
+  ] as const;
+  const localParts: Buffer[] = [];
+  const centralParts: Buffer[] = [];
+  let offset = 0;
+  for (const [name, text] of files) {
+    const nameBuf = Buffer.from(name);
+    const data = Buffer.from(text);
+    const crc = crc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0, 6);
+    local.writeUInt16LE(0, 8);
+    local.writeUInt16LE(0, 10);
+    local.writeUInt16LE(0, 12);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBuf.length, 26);
+    local.writeUInt16LE(0, 28);
+    localParts.push(local, nameBuf, data);
+
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0, 8);
+    central.writeUInt16LE(0, 10);
+    central.writeUInt16LE(0, 12);
+    central.writeUInt16LE(0, 14);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(nameBuf.length, 28);
+    central.writeUInt16LE(0, 30);
+    central.writeUInt16LE(0, 32);
+    central.writeUInt16LE(0, 34);
+    central.writeUInt16LE(0, 36);
+    central.writeUInt32LE(0, 38);
+    central.writeUInt32LE(offset, 42);
+    centralParts.push(central, nameBuf);
+    offset += local.length + nameBuf.length + data.length;
+  }
+  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(0, 4);
+  end.writeUInt16LE(0, 6);
+  end.writeUInt16LE(files.length, 8);
+  end.writeUInt16LE(files.length, 10);
+  end.writeUInt32LE(centralSize, 12);
+  end.writeUInt32LE(offset, 16);
+  end.writeUInt16LE(0, 20);
+  return Buffer.concat([...localParts, ...centralParts, end]);
+}
+
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get('token') || '';
   if (!token) return new NextResponse('missing token\n', { status: 400 });
@@ -13,6 +126,15 @@ export async function GET(req: NextRequest) {
   if (!user) return new NextResponse('invalid or unapproved enrollment token\n', { status: 403 });
 
   const base = process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin;
+  if (req.nextUrl.searchParams.get('format') === 'extension') {
+    return new NextResponse(extensionZip(), {
+      headers: {
+        'content-type': 'application/zip',
+        'content-disposition': 'attachment; filename="neodym-browser-extension.zip"',
+        'cache-control': 'no-store',
+      },
+    });
+  }
   const repo = process.env.NEXT_PUBLIC_GITHUB_REPO || 'https://github.com/neodym29/employee-tracker-cloud';
   const archive = `${repo.replace(/\.git$/, '')}/archive/refs/heads/main.tar.gz`;
   const platformParam = req.nextUrl.searchParams.get('platform') || 'linux';

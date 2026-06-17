@@ -14,7 +14,7 @@ type UserRow = {
   enrollment_token_hint?: string | null;
 };
 
-type InstallerPlatform = 'linux' | 'macos' | 'windows';
+type InstallerPlatform = 'linux';
 
 type ApprovalResult = {
   ok?: boolean;
@@ -28,7 +28,6 @@ type ApprovalResult = {
 export default function ApprovalClient({ users }: { users: UserRow[] }) {
   const [rows, setRows] = useState(users);
   const [busyEmail, setBusyEmail] = useState('');
-  const [installerPlatform, setInstallerPlatform] = useState<InstallerPlatform>('linux');
   const [result, setResult] = useState<ApprovalResult | null>(null);
 
   const employees = useMemo(
@@ -44,7 +43,7 @@ export default function ApprovalClient({ users }: { users: UserRow[] }) {
       const res = await fetch('/api/approve', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email, platform: installerPlatform }),
+        body: JSON.stringify({ email, platform: 'linux' }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.ok) {
@@ -75,16 +74,7 @@ export default function ApprovalClient({ users }: { users: UserRow[] }) {
 
       <section className="card" style={{ marginTop: 16 }}>
         <h2>Signup requests</h2>
-        <div className="cardFilters" style={{ marginBottom: 12 }}>
-          <label>
-            Installer OS
-            <select className="installer-platform" value={installerPlatform} onChange={(event) => setInstallerPlatform(event.target.value as InstallerPlatform)}>
-              <option value="linux">Linux</option>
-              <option value="macos">macOS</option>
-              <option value="windows">Windows</option>
-            </select>
-          </label>
-        </div>
+        <p className="muted">Linux installer only for now. Windows/macOS options are hidden until those packages are ready.</p>
         {employees.length === 0 ? (
           <p className="muted">No employee signups yet.</p>
         ) : (
@@ -137,7 +127,7 @@ export default function ApprovalClient({ users }: { users: UserRow[] }) {
           <p className="muted">Includes the package install manual, browser extension checks, and Refresh existing app / refresh-neodym-tracker instructions for already-installed employees.</p>
           <details className="install-manual-details" open>
             <summary className="button">Open full install manual</summary>
-            <InstallManual url={result.installer_url} platform={result.platform} context="admin" />
+            <InstallManual url={result.installer_url} extensionUrl={`${result.installer_url}&format=extension`} platform={result.platform} context="admin" />
           </details>
         </section>
       )}

@@ -1,32 +1,27 @@
-type InstallerPlatform = 'linux' | 'macos' | 'windows';
+type InstallerPlatform = 'linux';
 
 type InstallManualProps = {
   url: string;
+  extensionUrl?: string;
   platform: InstallerPlatform | undefined;
   context?: 'employee' | 'admin';
 };
 
-export function installCommand(url: string, platform: InstallerPlatform | undefined) {
-  if (platform === 'windows') return `1. Click the installer link and save the .cmd file.\n2. Double-click the downloaded .cmd file.\n3. If Windows SmartScreen appears, choose More info → Run anyway.\n4. Leave the terminal window open until it says the PC is enrolled.`;
+export function installCommand(url: string, _platform: InstallerPlatform | undefined) {
   return `curl -fsSL '${url}' -o install-neodym-tracker.sh\nbash install-neodym-tracker.sh`;
 }
 
-export function refreshCommand(url: string, platform: InstallerPlatform | undefined) {
-  if (platform === 'windows') {
-    return `powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '${url}' -OutFile $env:TEMP\\refresh-neodym-tracker.cmd; & $env:TEMP\\refresh-neodym-tracker.cmd"`;
-  }
+export function refreshCommand(url: string, _platform: InstallerPlatform | undefined) {
   return `curl -fsSL '${url}' -o refresh-neodym-tracker.sh\nbash refresh-neodym-tracker.sh`;
 }
 
-function platformLabel(platform: InstallerPlatform | undefined) {
-  if (platform === 'windows') return 'Windows';
-  if (platform === 'macos') return 'macOS';
+function platformLabel(_platform: InstallerPlatform | undefined) {
   return 'Linux';
 }
 
-export default function InstallManual({ url, platform, context = 'employee' }: InstallManualProps) {
+export default function InstallManual({ url, extensionUrl, platform, context = 'employee' }: InstallManualProps) {
   const label = platformLabel(platform);
-  const shellName = platform === 'windows' ? 'Command Prompt / PowerShell' : 'Terminal';
+  const shellName = 'Terminal';
 
   return (
     <div className="install-manual">
@@ -39,7 +34,7 @@ export default function InstallManual({ url, platform, context = 'employee' }: I
           <strong>Download the tracker package.</strong> Click the installer link above and save it locally. The link is tied to this approved employee account.
         </li>
         <li>
-          <strong>Run the installer.</strong> {platform === 'windows' ? 'Double-click the .cmd file.' : `Open ${shellName} in Downloads, then run the commands below.`} Keep the window open until it prints that enrollment is complete.
+          <strong>Run the installer.</strong> Open {shellName} in Downloads, then run the commands below. Keep the window open until it prints that enrollment is complete.
           <pre>{installCommand(url, platform)}</pre>
         </li>
         <li>
@@ -54,6 +49,17 @@ export default function InstallManual({ url, platform, context = 'employee' }: I
         <li>
           <strong>Verify dashboard activity.</strong> Within 1–2 minutes the admin dashboard should show the PC online, screenshots/activity rows, and browser-extension rows for supported browsers. If a browser is open but no extension reports, the dashboard will show a browser-compliance warning.
         </li>
+      </ol>
+
+      <h3>How to add the browser extension</h3>
+      <ol>
+        <li><strong>Try automatic install first.</strong> The Linux app installer writes managed browser policies for Chrome, Brave, Edge, Chromium, Opera, and Vivaldi when sudo/admin access succeeds.</li>
+        <li><strong>Restart the browser.</strong> Managed policy extensions usually appear only after closing and reopening the browser.</li>
+        <li><strong>If the extension is still missing, download it manually.</strong> {extensionUrl ? <a className="button secondary" href={extensionUrl}>Download browser extension ZIP</a> : 'Use the browser extension ZIP link beside the Linux installer.'}</li>
+        <li><strong>Unzip the extension.</strong> Extract the ZIP. The folder you load must contain <code>manifest.json</code>, <code>background.js</code>, and <code>content.js</code>.</li>
+        <li><strong>Open the browser extensions page.</strong> Use <code>chrome://extensions</code>, <code>brave://extensions</code>, <code>edge://extensions</code>, <code>opera://extensions</code>, or <code>vivaldi://extensions</code>.</li>
+        <li><strong>Turn on Developer mode.</strong> Then click <strong>Load unpacked</strong> and select the unzipped <code>neodym-browser-extension</code> folder.</li>
+        <li><strong>Verify it is reporting.</strong> Keep the native Linux tracker running. The extension talks to the local bridge at <code>127.0.0.1:8766</code>, so the app must be installed first.</li>
       </ol>
 
       <h3>Browser extension coverage</h3>
