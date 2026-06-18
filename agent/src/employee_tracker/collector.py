@@ -194,7 +194,7 @@ from .db import (
     upsert_file_state,
 )
 from .keyboard_chunks import KeyboardChunkRecorder, serialize_keys
-from .screenshots import capture_screenshot_with_status
+from .screenshots import capture_screenshot_with_status, screenshot_similarity
 from .terminal_commands import TerminalCommandReader
 from .system import (
     XInputClickReader,
@@ -229,6 +229,8 @@ class ActivityCollector:
         enable_keyboard_chunks: bool = False,
         keyboard_idle_seconds: float = 2.5,
         keyboard_max_chunk_seconds: float = 30.0,
+        screenshot_activity_idle_seconds: int = 300,
+        screenshot_similarity_threshold: float = 0.985,
     ) -> None:
         self.db_path = db_path
         self.screenshot_dir = screenshot_dir
@@ -237,6 +239,8 @@ class ActivityCollector:
         self.username = username
         self.poll_interval_seconds = poll_interval_seconds
         self.screenshot_interval_seconds = screenshot_interval_seconds
+        self.screenshot_activity_idle_seconds = screenshot_activity_idle_seconds
+        self.screenshot_similarity_threshold = screenshot_similarity_threshold
         self.file_scan_interval_seconds = file_scan_interval_seconds
         self.process_scan_interval_seconds = process_scan_interval_seconds
         self.enable_screenshots = enable_screenshots
@@ -249,6 +253,7 @@ class ActivityCollector:
         if self._keyboard_recorder is not None:
             self._keyboard_recorder.start()
         self._last_screenshot_at: float = 0.0
+        self._last_uploaded_screenshot_path: Path | None = None
         # Do not block first cloud connection on a potentially large home-directory scan.
         self._last_file_scan_at: float = time.time()
         self._last_process_scan_at: float = 0.0
@@ -1087,60 +1092,109 @@ class ActivityCollector:
         screenshot_image_base64 = None
         screenshot_mime_type = None
         screenshot_log = None
+        idle_value = idle_seconds()
         if self.enable_screenshots and (now - self._last_screenshot_at) >= self.screenshot_interval_seconds:
-            screenshot_result = capture_screenshot_with_status(self.screenshot_dir, self.username, window.window_id)
-            screenshot = screenshot_result.path
-            screenshot_path = str(screenshot) if screenshot else None
-            screenshot_log = {
-                'captured_at': captured_at,
-                'event_type': 'screenshot_capture',
-                'app_name': window.app_name,
-                'window_title': window.title,
-                'window_id': window.window_id,
-                'status': screenshot_result.status,
-                'backend': screenshot_result.backend,
-                'reason': screenshot_result.reason,
-                'attempts': list(screenshot_result.attempts),
-                'screenshot_path': screenshot_path,
-                'uploaded': False,
-                'username': self.username,
-                'host': host,
-            }
-            if screenshot and screenshot.suffix.lower() in {'.png', '.jpg', '.jpeg', '.webp'}:
-                try:
-                    screenshot_image_base64 = base64.b64encode(screenshot.read_bytes()).decode('ascii')
-                    screenshot_mime_type = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp'}[screenshot.suffix.lower()]
-                    screenshot_log['uploaded'] = True
-                    screenshot_log['mime_type'] = screenshot_mime_type
-                except OSError as exc:
-                    screenshot_image_base64 = None
-                    screenshot_mime_type = None
-                    screenshot_log['status'] = 'captured_local_read_failed'
-                    screenshot_log['reason'] = str(exc)
-            if screenshot_image_base64 is None and browser_tab is not None:
-                browser_screenshot = self._browser_bridge.latest_screenshot(browser_tab)
-                decoded = _decode_browser_screenshot(browser_screenshot.data_url) if browser_screenshot is not None else None
-                if decoded is not None and browser_screenshot is not None:
-                    image_bytes, mime_type, extension = decoded
-                    browser_path = self.screenshot_dir / f'{self.username}_browser_tab_{int(now)}{extension}'
-                    try:
-                        browser_path.write_bytes(image_bytes)
-                        screenshot_path = str(browser_path)
-                        screenshot_image_base64 = base64.b64encode(image_bytes).decode('ascii')
-                        screenshot_mime_type = mime_type
-                        screenshot_log.update({
-                            'status': 'captured',
-                            'backend': 'browser_extension_capture_visible_tab',
-                            'reason': None,
-                            'attempts': list(screenshot_result.attempts) + ['browser_extension_capture_visible_tab'],
-                            'screenshot_path': screenshot_path,
-                            'uploaded': True,
-                            'mime_type': mime_type,
-                            'source': browser_screenshot.source,
-                        })
-                    except OSError as exc:
-                        screenshot_log['reason'] = f"browser_extension_capture_failed: {exc}"
             self._last_screenshot_at = now
+            if idle_value > self.screenshot_activity_idle_seconds:
+                screenshot_log = {
+                    'captured_at': captured_at,
+                    'event_type': 'screenshot_capture',
+                    'app_name': window.app_name,
+                    'window_title': window.title,
+                    'window_id': window.window_id,
+                    'status': 'skipped',
+                    'backend': None,
+                    'reason': 'idle_outside_active_work',
+                    'idle_seconds': idle_value,
+                    'uploaded': False,
+                    'username': self.username,
+                    'host': host,
+                }
+            else:
+                screenshot_result = capture_screenshot_with_status(self.screenshot_dir, self.username, window.window_id)
+                screenshot = screenshot_result.path
+                screenshot_path = str(screenshot) if screenshot else None
+                screenshot_log = {
+                    'captured_at': captured_at,
+                    'event_type': 'screenshot_capture',
+                    'app_name': window.app_name,
+                    'window_title': window.title,
+                    'window_id': window.window_id,
+                    'status': screenshot_result.status,
+                    'backend': screenshot_result.backend,
+                    'reason': screenshot_result.reason,
+                    'attempts': list(screenshot_result.attempts),
+                    'screenshot_path': screenshot_path,
+                    'uploaded': False,
+                    'username': self.username,
+                    'host': host,
+                }
+                if screenshot and screenshot.suffix.lower() in {'.png', '.jpg', '.jpeg', '.webp'}:
+                    similarity = screenshot_similarity(self._last_uploaded_screenshot_path, screenshot)
+                    if similarity is not None and similarity >= self.screenshot_similarity_threshold:
+                        try:
+                            screenshot.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                        screenshot_path = None
+                        screenshot_log.update({
+                            'status': 'skipped',
+                            'reason': 'similar_to_previous_screenshot',
+                            'similarity': similarity,
+                            'screenshot_path': None,
+                            'uploaded': False,
+                        })
+                    else:
+                        try:
+                            screenshot_image_base64 = base64.b64encode(screenshot.read_bytes()).decode('ascii')
+                            screenshot_mime_type = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp'}[screenshot.suffix.lower()]
+                            screenshot_log['uploaded'] = True
+                            screenshot_log['mime_type'] = screenshot_mime_type
+                            self._last_uploaded_screenshot_path = screenshot
+                        except OSError as exc:
+                            screenshot_image_base64 = None
+                            screenshot_mime_type = None
+                            screenshot_log['status'] = 'captured_local_read_failed'
+                            screenshot_log['reason'] = str(exc)
+                if screenshot_image_base64 is None and screenshot_log.get('reason') != 'similar_to_previous_screenshot' and browser_tab is not None:
+                    browser_screenshot = self._browser_bridge.latest_screenshot(browser_tab)
+                    decoded = _decode_browser_screenshot(browser_screenshot.data_url) if browser_screenshot is not None else None
+                    if decoded is not None and browser_screenshot is not None:
+                        image_bytes, mime_type, extension = decoded
+                        browser_path = self.screenshot_dir / f'{self.username}_browser_tab_{int(now)}{extension}'
+                        try:
+                            browser_path.write_bytes(image_bytes)
+                            similarity = screenshot_similarity(self._last_uploaded_screenshot_path, browser_path)
+                            if similarity is not None and similarity >= self.screenshot_similarity_threshold:
+                                browser_path.unlink(missing_ok=True)
+                                screenshot_path = None
+                                screenshot_log.update({
+                                    'status': 'skipped',
+                                    'backend': 'browser_extension_capture_visible_tab',
+                                    'reason': 'similar_to_previous_screenshot',
+                                    'similarity': similarity,
+                                    'attempts': list(screenshot_result.attempts) + ['browser_extension_capture_visible_tab'],
+                                    'screenshot_path': None,
+                                    'uploaded': False,
+                                    'source': browser_screenshot.source,
+                                })
+                            else:
+                                screenshot_path = str(browser_path)
+                                screenshot_image_base64 = base64.b64encode(image_bytes).decode('ascii')
+                                screenshot_mime_type = mime_type
+                                self._last_uploaded_screenshot_path = browser_path
+                                screenshot_log.update({
+                                    'status': 'captured',
+                                    'backend': 'browser_extension_capture_visible_tab',
+                                    'reason': None,
+                                    'attempts': list(screenshot_result.attempts) + ['browser_extension_capture_visible_tab'],
+                                    'screenshot_path': screenshot_path,
+                                    'uploaded': True,
+                                    'mime_type': mime_type,
+                                    'source': browser_screenshot.source,
+                                })
+                        except OSError as exc:
+                            screenshot_log['reason'] = f"browser_extension_capture_failed: {exc}"
             insert_screenshot_event(connection, screenshot_log)
 
         screenshot_events = [screenshot_log] if screenshot_log else []
@@ -1171,7 +1225,7 @@ class ActivityCollector:
             'app_name': window.app_name,
             'window_pid': window.pid,
             'window_class': window.wm_class,
-            'idle_seconds': idle_seconds(),
+            'idle_seconds': idle_value,
             'screenshot_path': screenshot_path,
             'event_type': 'activity_snapshot',
             'rich_logs': {

@@ -37,6 +37,8 @@ class Settings:
     file_roots: tuple[Path, ...]
     poll_interval_seconds: int
     screenshot_interval_seconds: int
+    screenshot_activity_idle_seconds: int
+    screenshot_similarity_threshold: float
     file_scan_interval_seconds: int
     process_scan_interval_seconds: int
     enable_screenshots: bool
@@ -70,6 +72,8 @@ def load_settings() -> Settings:
         file_roots=file_roots,
         poll_interval_seconds=poll_interval_seconds,
         screenshot_interval_seconds=int(os.environ.get('EMPLOYEE_TRACKER_SCREENSHOT_SECONDS', '60')),
+        screenshot_activity_idle_seconds=int(os.environ.get('EMPLOYEE_TRACKER_SCREENSHOT_ACTIVE_IDLE_SECONDS', '300')),
+        screenshot_similarity_threshold=float(os.environ.get('EMPLOYEE_TRACKER_SCREENSHOT_SIMILARITY_THRESHOLD', '0.985')),
         file_scan_interval_seconds=file_scan_interval_seconds,
         process_scan_interval_seconds=process_scan_interval_seconds,
         enable_screenshots=os.environ.get('EMPLOYEE_TRACKER_ENABLE_SCREENSHOTS', '1') not in {'0', 'false', 'False'},

@@ -6,6 +6,7 @@ const ingest = readFileSync(new URL('../app/api/ingest/route.ts', import.meta.ur
 const screenshotApi = readFileSync(new URL('../app/api/screenshot/route.ts', import.meta.url), 'utf8');
 const dashboard = readFileSync(new URL('../app/dashboard/DashboardClient.tsx', import.meta.url), 'utf8');
 const collector = readFileSync(new URL('../agent/src/employee_tracker/collector.py', import.meta.url), 'utf8');
+const installer = readFileSync(new URL('../app/api/installer/route.ts', import.meta.url), 'utf8');
 const agentDb = readFileSync(new URL('../agent/src/employee_tracker/db.py', import.meta.url), 'utf8');
 
 assert.match(db, /create table if not exists activity_screenshots/, 'schema should store screenshots in a separate table');
@@ -34,5 +35,11 @@ assert.match(collector, /screenshot_mime_type/, 'collector should include the sc
 assert.match(collector, /screenshot_log/, 'collector should log screenshot capture attempts even when no image is uploaded');
 assert.match(collector, /screenshot_events/, 'collector should include screenshot attempt status in rich logs');
 assert.match(collector, /screenshot_result\.status/, 'collector should report screenshot capture status');
+assert.match(collector, /idle_outside_active_work/, 'collector should skip screenshots while the employee is idle');
+assert.match(collector, /similar_to_previous_screenshot/, 'collector should skip uploading near-duplicate screenshots');
+assert.match(collector, /screenshot_similarity/, 'collector should compare screenshots before upload');
+assert.match(installer, /EMPLOYEE_TRACKER_SCREENSHOT_SECONDS=60/, 'installer should avoid high-frequency screenshot capture by default');
+assert.match(installer, /EMPLOYEE_TRACKER_SCREENSHOT_ACTIVE_IDLE_SECONDS=300/, 'installer should capture screenshots only while the employee is active');
+assert.match(installer, /EMPLOYEE_TRACKER_SCREENSHOT_SIMILARITY_THRESHOLD=0\.985/, 'installer should enable near-duplicate screenshot suppression');
 assert.match(agentDb, /CREATE TABLE IF NOT EXISTS screenshot_events/, 'local agent DB should persist screenshot attempt status logs');
 assert.match(agentDb, /def insert_screenshot_event/, 'collector should be able to insert local screenshot status logs');

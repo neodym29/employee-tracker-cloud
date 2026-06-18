@@ -99,6 +99,45 @@ def capture_screenshot_with_status(destination_dir: Path, prefix: str, window_id
     return ScreenshotCaptureResult(None, 'skipped', None, 'no_silent_backend_available_or_all_failed', tuple(attempts))
 
 
+def screenshot_similarity(left: Path | None, right: Path | None) -> float | None:
+    """Return approximate visual similarity from 0.0..1.0 for two screenshots.
+
+    Uses a tiny average hash so near-identical screenshots can be skipped before
+    upload. Returns None when Pillow/image decoding is unavailable, so capture
+    continues rather than accidentally dropping evidence.
+    """
+    if left is None or right is None or not left.exists() or not right.exists():
+        return None
+    try:
+        from PIL import Image
+    except Exception:
+        return None
+
+    def average_hash(path: Path) -> int | None:
+        try:
+            with Image.open(path) as image:
+                gray = image.convert('L').resize((8, 8))
+                pixels = list(gray.getdata())
+        except Exception:
+            return None
+        if not pixels:
+            return None
+        avg = sum(pixels) / len(pixels)
+        value = 0
+        for index, pixel in enumerate(pixels):
+            if pixel >= avg:
+                value |= 1 << index
+        return value
+
+    left_hash = average_hash(left)
+    right_hash = average_hash(right)
+    if left_hash is None or right_hash is None:
+        return None
+    different_bits = (left_hash ^ right_hash).bit_count()
+    return 1.0 - (different_bits / 64.0)
+
+
+
 def _validated_screenshot(path: Path) -> Path | None:
     if not path.exists() or path.stat().st_size <= 0:
         return None
