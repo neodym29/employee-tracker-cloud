@@ -133,7 +133,14 @@ CREATE TABLE IF NOT EXISTS file_activity_events (
     line_count INTEGER,
     sha256 TEXT,
     language TEXT,
-    note TEXT
+    note TEXT,
+    content_status TEXT,
+    content_encoding TEXT,
+    content_text TEXT,
+    content_truncated INTEGER NOT NULL DEFAULT 0,
+    content_redacted INTEGER NOT NULL DEFAULT 0,
+    content_bytes_read INTEGER,
+    content_reason TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_file_activity_events_user_time
@@ -339,6 +346,17 @@ KEYSTROKE_SCHEMA_ALTERS = {
 }
 
 
+FILE_ACTIVITY_SCHEMA_ALTERS = {
+    'content_status': 'ALTER TABLE file_activity_events ADD COLUMN content_status TEXT',
+    'content_encoding': 'ALTER TABLE file_activity_events ADD COLUMN content_encoding TEXT',
+    'content_text': 'ALTER TABLE file_activity_events ADD COLUMN content_text TEXT',
+    'content_truncated': 'ALTER TABLE file_activity_events ADD COLUMN content_truncated INTEGER NOT NULL DEFAULT 0',
+    'content_redacted': 'ALTER TABLE file_activity_events ADD COLUMN content_redacted INTEGER NOT NULL DEFAULT 0',
+    'content_bytes_read': 'ALTER TABLE file_activity_events ADD COLUMN content_bytes_read INTEGER',
+    'content_reason': 'ALTER TABLE file_activity_events ADD COLUMN content_reason TEXT',
+}
+
+
 AUDIO_OUTPUT_SCHEMA_ALTERS = {
     'mpris_player': 'ALTER TABLE audio_output_snapshots ADD COLUMN mpris_player TEXT',
     'mpris_title': 'ALTER TABLE audio_output_snapshots ADD COLUMN mpris_title TEXT',
@@ -372,12 +390,21 @@ def init_db(db_path: Path) -> None:
     with connect(db_path) as connection:
         connection.executescript(SCHEMA)
         _migrate_keystroke_schema(connection)
+        _migrate_file_activity_schema(connection)
         _migrate_audio_output_schema(connection)
 
 
 def _migrate_keystroke_schema(connection: sqlite3.Connection) -> None:
     existing = {row['name'] for row in connection.execute('PRAGMA table_info(keystroke_events)').fetchall()}
     for column, statement in KEYSTROKE_SCHEMA_ALTERS.items():
+        if column not in existing:
+            connection.execute(statement)
+    connection.commit()
+
+
+def _migrate_file_activity_schema(connection: sqlite3.Connection) -> None:
+    existing = {row['name'] for row in connection.execute('PRAGMA table_info(file_activity_events)').fetchall()}
+    for column, statement in FILE_ACTIVITY_SCHEMA_ALTERS.items():
         if column not in existing:
             connection.execute(statement)
     connection.commit()
@@ -544,8 +571,10 @@ def insert_file_event(connection: sqlite3.Connection, row: dict[str, Any]) -> No
         INSERT INTO file_activity_events (
             captured_at, username, host, workspace_root, absolute_path,
             relative_path, event_type, previous_size, previous_line_count,
-            previous_sha256, file_size, line_count, sha256, language, note
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            previous_sha256, file_size, line_count, sha256, language, note,
+            content_status, content_encoding, content_text, content_truncated,
+            content_redacted, content_bytes_read, content_reason
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             row['captured_at'],
@@ -563,6 +592,13 @@ def insert_file_event(connection: sqlite3.Connection, row: dict[str, Any]) -> No
             row.get('sha256'),
             row.get('language'),
             row.get('note'),
+            row.get('content_status'),
+            row.get('content_encoding'),
+            row.get('content_text'),
+            1 if row.get('content_truncated') else 0,
+            1 if row.get('content_redacted') else 0,
+            row.get('content_bytes_read'),
+            row.get('content_reason'),
         ),
     )
     connection.commit()
@@ -848,7 +884,9 @@ def fetch_file_event_rows(db_path: Path, username: str | None = None) -> list[sq
         SELECT
             captured_at, username, host, workspace_root, absolute_path,
             relative_path, event_type, previous_size, previous_line_count,
-            previous_sha256, file_size, line_count, sha256, language, note
+            previous_sha256, file_size, line_count, sha256, language, note,
+            content_status, content_encoding, content_text, content_truncated,
+            content_redacted, content_bytes_read, content_reason
         FROM file_activity_events
     """
     params: list[Any] = []

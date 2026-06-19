@@ -304,6 +304,10 @@ def main(argv: list[str] | None = None) -> int:
             enable_keyboard_chunks=settings.enable_keyboard_chunks,
             keyboard_idle_seconds=settings.keyboard_idle_seconds,
             keyboard_max_chunk_seconds=settings.keyboard_max_chunk_seconds,
+            enable_file_content=settings.enable_file_content,
+            file_content_max_bytes=settings.file_content_max_bytes,
+            enable_process_cwd_roots=settings.enable_process_cwd_roots,
+            max_dynamic_file_roots=settings.max_dynamic_file_roots,
         )
         with connect(settings.db_path) as connection:
             payload = collector.run_once(connection)
@@ -331,6 +335,10 @@ def main(argv: list[str] | None = None) -> int:
             enable_keyboard_chunks=settings.enable_keyboard_chunks,
             keyboard_idle_seconds=settings.keyboard_idle_seconds,
             keyboard_max_chunk_seconds=settings.keyboard_max_chunk_seconds,
+            enable_file_content=settings.enable_file_content,
+            file_content_max_bytes=settings.file_content_max_bytes,
+            enable_process_cwd_roots=settings.enable_process_cwd_roots,
+            max_dynamic_file_roots=settings.max_dynamic_file_roots,
         )
         collector.run_forever()
         return 0

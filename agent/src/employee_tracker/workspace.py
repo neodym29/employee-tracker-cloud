@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -43,6 +44,16 @@ EXCLUDED_FILE_NAMES = {
 BINARY_SNIFF_BYTES = 8192
 CHUNK_SIZE = 1024 * 1024
 MAX_FILE_BYTES_TO_READ = 20 * 1024 * 1024
+DEFAULT_MAX_CONTENT_BYTES = 64 * 1024
+SECRET_NAME_MARKERS = (
+    'id_rsa', 'id_dsa', 'id_ecdsa', 'id_ed25519', '.pem', '.key', '.p12', '.pfx',
+)
+SECRET_VALUE_PATTERN = re.compile(
+    r'(?i)(password|passwd|pwd|secret|token|api[_-]?key|private[_-]?key|access[_-]?key|auth|bearer|cookie|session)'
+    r'\s*[:=]\s*([^\s#;&]+)'
+)
+PRIVATE_KEY_PATTERN = re.compile(r'-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----', re.DOTALL)
+
 
 
 @dataclass(frozen=True)
@@ -54,6 +65,17 @@ class FileSnapshot:
     line_count: int | None
     sha256: str
     language: str | None
+
+
+@dataclass(frozen=True)
+class FileContentCapture:
+    status: str
+    content: str | None = None
+    encoding: str | None = None
+    truncated: bool = False
+    redacted: bool = False
+    bytes_read: int = 0
+    reason: str | None = None
 
 
 def language_for_path(path: Path) -> str | None:
@@ -140,6 +162,68 @@ def collect_snapshot(path: Path, workspace_root: Path, previous: dict[str, objec
         line_count=line_count,
         sha256=file_hash,
         language=language,
+    )
+
+
+def _looks_like_secret_path(path: Path) -> bool:
+    lowered = path.name.lower()
+    if lowered in {'.env', '.env.local', '.env.production', '.env.production.local'}:
+        return False  # capture shape, but redact values below
+    return any(marker in lowered for marker in SECRET_NAME_MARKERS)
+
+
+def _redact_file_content(text: str) -> tuple[str, bool]:
+    redacted = False
+
+    def replace_secret(match: re.Match[str]) -> str:
+        nonlocal redacted
+        redacted = True
+        prefix = match.group(0)[: match.group(0).rfind(match.group(2))]
+        return f'{prefix}[REDACTED]'
+
+    text = PRIVATE_KEY_PATTERN.sub('[REDACTED_PRIVATE_KEY]', text)
+    redacted = redacted or '[REDACTED_PRIVATE_KEY]' in text
+    text = SECRET_VALUE_PATTERN.sub(replace_secret, text)
+    return text, redacted
+
+
+def capture_file_content(path: Path, *, max_bytes: int = DEFAULT_MAX_CONTENT_BYTES) -> FileContentCapture:
+    """Read small text file content for upload, with binary/secret/size guardrails."""
+    suffix = path.suffix.lower()
+    if _looks_like_secret_path(path):
+        return FileContentCapture(status='omitted', reason='secret_filename')
+    if suffix in METADATA_ONLY_SUFFIXES:
+        return FileContentCapture(status='omitted', reason='metadata_only_type')
+    try:
+        stat_result = path.stat()
+    except OSError as exc:
+        return FileContentCapture(status='error', reason=str(exc))
+    if stat_result.st_size > max_bytes:
+        return FileContentCapture(status='omitted', reason='too_large', bytes_read=0)
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        return FileContentCapture(status='error', reason=str(exc))
+    if b'\x00' in data[:BINARY_SNIFF_BYTES]:
+        return FileContentCapture(status='omitted', reason='binary')
+    try:
+        text = data.decode('utf-8')
+        encoding = 'utf-8'
+    except UnicodeDecodeError:
+        try:
+            text = data.decode('utf-8', errors='replace')
+            encoding = 'utf-8-replace'
+        except Exception as exc:
+            return FileContentCapture(status='omitted', reason=f'not_text: {exc}')
+    text, redacted = _redact_file_content(text)
+    return FileContentCapture(
+        status='captured',
+        content=text,
+        encoding=encoding,
+        truncated=False,
+        redacted=redacted,
+        bytes_read=len(data),
+        reason=None,
     )
 
 

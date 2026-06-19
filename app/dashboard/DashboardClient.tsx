@@ -20,6 +20,7 @@ const typeLabels: Record<string, string> = {
   browser_compliance: 'Browser safety',
   typing_activity: 'Typing activity',
   keyboard_status: 'Keyboard status',
+  file_change: 'File change',
 };
 
 type DashboardData = {
@@ -143,6 +144,18 @@ function eventSummary(event: any): string {
   if (event.event_type === 'browser_compliance') return [payload.note || 'Browser is open but extension telemetry is missing', payload.status && `status=${payload.status}`, payload.severity && `severity=${payload.severity}`, payload.browser_name || event.app_name].filter(Boolean).join(' · ');
   if (event.event_type === 'typing_activity') return [payload.note || 'typing activity', payload.field_hint && `field=${payload.field_hint}`, payload.key_count != null && `${payload.key_count} input events`, payload.text_length != null && `${payload.text_length} chars`, payload.word_count != null && `${payload.word_count} words`, payload.typed_text, payload.url || event.url].filter(Boolean).join(' · ');
   if (event.event_type === 'keyboard_status') return [payload.status || 'keyboard status', payload.reason || payload.note, payload.device_count != null && `${payload.device_count} readable keyboard devices`, payload.running === false && 'not listening'].filter(Boolean).join(' · ');
+  if (event.event_type === 'file_change') {
+    const content = typeof payload.content === 'string' ? payload.content.slice(0, 700) : '';
+    return [
+      `${payload.file_event_type || 'changed'} ${payload.relative_path || event.window_title || 'file'}`,
+      payload.language && `lang=${payload.language}`,
+      payload.file_size != null && `${payload.file_size} bytes`,
+      payload.content_status && `content=${payload.content_status}`,
+      payload.content_redacted && 'redacted',
+      payload.content_reason && `reason=${payload.content_reason}`,
+      content && `content: ${content}${payload.content.length > 700 ? '…' : ''}`,
+    ].filter(Boolean).join(' · ');
+  }
   if (event.event_type === 'typed_chunk') return [payload.note || 'typed chunk', location && `where typed: ${location}`, payload.reason && `reason=${payload.reason}`, payload.key_count != null && `${payload.key_count} keys`, payload.duration_seconds != null && `${payload.duration_seconds}s`, payload.typed_text].filter(Boolean).join(' · ');
   if (event.event_type === 'shortcut') return [payload.note || 'shortcut', location && `where typed: ${location}`, payload.shortcut, payload.keys_json].filter(Boolean).join(' · ');
   if (event.event_type === 'activity_session') return [payload.summary || 'activity session', payload.field_hints?.length && `fields=${payload.field_hints.join(', ')}`, payload.typed_text, payload.url || event.url].filter(Boolean).join(' · ');

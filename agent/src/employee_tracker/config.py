@@ -45,6 +45,10 @@ class Settings:
     enable_keyboard_chunks: bool
     keyboard_idle_seconds: float
     keyboard_max_chunk_seconds: float
+    enable_file_content: bool
+    file_content_max_bytes: int
+    enable_process_cwd_roots: bool
+    max_dynamic_file_roots: int
     app_name: str
     username: str
 
@@ -80,6 +84,10 @@ def load_settings() -> Settings:
         enable_keyboard_chunks=os.environ.get('EMPLOYEE_TRACKER_ENABLE_KEYBOARD_CHUNKS', '0') in {'1', 'true', 'True', 'yes', 'YES'},
         keyboard_idle_seconds=float(os.environ.get('EMPLOYEE_TRACKER_KEYBOARD_IDLE_SECONDS', '2.5')),
         keyboard_max_chunk_seconds=float(os.environ.get('EMPLOYEE_TRACKER_KEYBOARD_MAX_CHUNK_SECONDS', '30')),
+        enable_file_content=os.environ.get('EMPLOYEE_TRACKER_ENABLE_FILE_CONTENT', '1') in {'1', 'true', 'True', 'yes', 'YES'},
+        file_content_max_bytes=int(os.environ.get('EMPLOYEE_TRACKER_FILE_CONTENT_MAX_BYTES', '65536')),
+        enable_process_cwd_roots=os.environ.get('EMPLOYEE_TRACKER_ENABLE_PROCESS_CWD_ROOTS', '1') in {'1', 'true', 'True', 'yes', 'YES'},
+        max_dynamic_file_roots=int(os.environ.get('EMPLOYEE_TRACKER_MAX_DYNAMIC_FILE_ROOTS', '8')),
         app_name=os.environ.get('EMPLOYEE_TRACKER_APP_NAME', 'employee-tracker'),
         username=os.environ.get('EMPLOYEE_TRACKER_USERNAME', os.environ.get('USER', 'unknown')),
     )

@@ -210,7 +210,7 @@ from .system import (
     summarize_current_open_state,
     summarize_warp_activity,
 )
-from .workspace import scan_workspace
+from .workspace import capture_file_content, scan_workspace
 
 
 class ActivityCollector:
@@ -231,6 +231,10 @@ class ActivityCollector:
         keyboard_max_chunk_seconds: float = 30.0,
         screenshot_activity_idle_seconds: int = 300,
         screenshot_similarity_threshold: float = 0.985,
+        enable_file_content: bool = False,
+        file_content_max_bytes: int = 65536,
+        enable_process_cwd_roots: bool = True,
+        max_dynamic_file_roots: int = 8,
     ) -> None:
         self.db_path = db_path
         self.screenshot_dir = screenshot_dir
@@ -241,6 +245,10 @@ class ActivityCollector:
         self.screenshot_interval_seconds = screenshot_interval_seconds
         self.screenshot_activity_idle_seconds = screenshot_activity_idle_seconds
         self.screenshot_similarity_threshold = screenshot_similarity_threshold
+        self.enable_file_content = enable_file_content
+        self.file_content_max_bytes = file_content_max_bytes
+        self.enable_process_cwd_roots = enable_process_cwd_roots
+        self.max_dynamic_file_roots = max_dynamic_file_roots
         self.file_scan_interval_seconds = file_scan_interval_seconds
         self.process_scan_interval_seconds = process_scan_interval_seconds
         self.enable_screenshots = enable_screenshots
@@ -280,11 +288,107 @@ class ActivityCollector:
             state[(workspace_root, row['relative_path'])] = dict(row)
         return state
 
-    def _record_workspace_snapshot(self, connection, captured_at: str, host: str) -> None:
-        for file_root in self.file_roots:
-            self._record_file_root_snapshot(connection, captured_at, host, file_root)
+    def _workspace_event_payload(self, snapshot, *, event_type: str, captured_at: str, host: str, workspace_root: str, previous: dict[str, object] | None = None, note: str | None = None) -> dict[str, object]:
+        row: dict[str, object] = {
+            'captured_at': captured_at,
+            'username': self.username,
+            'host': host,
+            'workspace_root': workspace_root,
+            'absolute_path': snapshot.absolute_path,
+            'relative_path': snapshot.relative_path,
+            'event_type': event_type,
+            'previous_size': previous.get('file_size') if previous else None,
+            'previous_line_count': previous.get('line_count') if previous else None,
+            'previous_sha256': previous.get('sha256') if previous else None,
+            'file_size': snapshot.file_size,
+            'line_count': snapshot.line_count,
+            'sha256': snapshot.sha256,
+            'language': snapshot.language,
+            'note': note,
+        }
+        if self.enable_file_content and event_type in {'created', 'modified'}:
+            capture = capture_file_content(Path(snapshot.absolute_path), max_bytes=self.file_content_max_bytes)
+            row.update({
+                'content_status': capture.status,
+                'content_encoding': capture.encoding,
+                'content_text': capture.content,
+                'content_truncated': capture.truncated,
+                'content_redacted': capture.redacted,
+                'content_bytes_read': capture.bytes_read,
+                'content_reason': capture.reason,
+            })
+        return row
 
-    def _record_file_root_snapshot(self, connection, captured_at: str, host: str, file_root: Path) -> None:
+    def _file_change_rich_event(self, row: dict[str, object]) -> dict[str, object]:
+        event = {
+            'captured_at': row.get('captured_at'),
+            'event_type': 'file_change',
+            'app_name': 'filesystem',
+            'window_title': row.get('relative_path'),
+            'workspace_root': row.get('workspace_root'),
+            'absolute_path': row.get('absolute_path'),
+            'relative_path': row.get('relative_path'),
+            'file_event_type': row.get('event_type'),
+            'previous_size': row.get('previous_size'),
+            'previous_line_count': row.get('previous_line_count'),
+            'previous_sha256': row.get('previous_sha256'),
+            'file_size': row.get('file_size'),
+            'line_count': row.get('line_count'),
+            'sha256': row.get('sha256'),
+            'language': row.get('language'),
+            'note': row.get('note'),
+            'content_status': row.get('content_status'),
+            'content_encoding': row.get('content_encoding'),
+            'content': row.get('content_text'),
+            'content_truncated': row.get('content_truncated'),
+            'content_redacted': row.get('content_redacted'),
+            'content_bytes_read': row.get('content_bytes_read'),
+            'content_reason': row.get('content_reason'),
+            'source': 'workspace_file_scanner',
+        }
+        return {key: value for key, value in event.items() if value is not None}
+
+    def _is_candidate_working_root(self, path: Path) -> bool:
+        try:
+            resolved = path.expanduser().resolve()
+            home = Path.home().resolve()
+            resolved.relative_to(home)
+        except Exception:
+            return False
+        excluded_parts = {'.git', 'node_modules', '.cache', '.config', '.local', '.var', '__pycache__', 'dist', 'build'}
+        return not any(part in excluded_parts for part in resolved.parts)
+
+    def _dynamic_file_roots(self, current_processes: list[object]) -> tuple[Path, ...]:
+        if not self.enable_process_cwd_roots:
+            return ()
+        interesting_names = {'code', 'cursor', 'codium', 'python', 'python3', 'node', 'npm', 'pnpm', 'yarn', 'git', 'bash', 'zsh', 'fish', 'sh', 'warp-terminal'}
+        roots: list[Path] = []
+        seen = {str(root.resolve()) for root in self.file_roots if root.exists()}
+        for process in current_processes:
+            cwd = getattr(process, 'cwd', None)
+            name = (getattr(process, 'process_name', None) or '').lower()
+            if not cwd or (name and name not in interesting_names and not any(token in name for token in ('code', 'cursor', 'terminal'))):
+                continue
+            candidate = Path(str(cwd))
+            if not candidate.exists() or not candidate.is_dir() or not self._is_candidate_working_root(candidate):
+                continue
+            key = str(candidate.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+            roots.append(candidate)
+            if len(roots) >= self.max_dynamic_file_roots:
+                break
+        return tuple(roots)
+
+    def _record_workspace_snapshot(self, connection, captured_at: str, host: str, current_processes: list[object] | None = None) -> list[dict[str, object]]:
+        roots = tuple(dict.fromkeys((*self.file_roots, *self._dynamic_file_roots(current_processes or []))))
+        events: list[dict[str, object]] = []
+        for file_root in roots:
+            events.extend(self._record_file_root_snapshot(connection, captured_at, host, file_root))
+        return events
+
+    def _record_file_root_snapshot(self, connection, captured_at: str, host: str, file_root: Path) -> list[dict[str, object]]:
         root = file_root.resolve()
         workspace_root = str(root)
         previous_by_relative_path = {
@@ -293,6 +397,7 @@ class ActivityCollector:
         snapshots = scan_workspace(root, previous_state=previous_by_relative_path)
         current_paths: set[str] = set()
         baseline_mode = not any(key[0] == workspace_root for key in self._file_state)
+        events: list[dict[str, object]] = []
 
         for snapshot in snapshots:
             state_key = (workspace_root, snapshot.relative_path)
@@ -301,26 +406,18 @@ class ActivityCollector:
             if previous is None:
                 event_type = 'baseline' if baseline_mode else 'created'
                 note = 'initial file inventory' if baseline_mode else 'file added to tracked root'
-                insert_file_event(
-                    connection,
-                    {
-                        'captured_at': captured_at,
-                        'username': self.username,
-                        'host': host,
-                        'workspace_root': workspace_root,
-                        'absolute_path': snapshot.absolute_path,
-                        'relative_path': snapshot.relative_path,
-                        'event_type': event_type,
-                        'previous_size': None,
-                        'previous_line_count': None,
-                        'previous_sha256': None,
-                        'file_size': snapshot.file_size,
-                        'line_count': snapshot.line_count,
-                        'sha256': snapshot.sha256,
-                        'language': snapshot.language,
-                        'note': note,
-                    },
+                row = self._workspace_event_payload(
+                    snapshot,
+                    event_type=event_type,
+                    captured_at=captured_at,
+                    host=host,
+                    workspace_root=workspace_root,
+                    previous=None,
+                    note=note,
                 )
+                insert_file_event(connection, row)
+                if event_type != 'baseline':
+                    events.append(row)
             else:
                 previous_size = previous.get('file_size')
                 previous_line_count = previous.get('line_count')
@@ -344,26 +441,17 @@ class ActivityCollector:
                         note_parts.append(f'size delta {size_delta:+d} bytes')
                     if line_delta is not None:
                         note_parts.append(f'line delta {line_delta:+d}')
-                    insert_file_event(
-                        connection,
-                        {
-                            'captured_at': captured_at,
-                            'username': self.username,
-                            'host': host,
-                            'workspace_root': workspace_root,
-                            'absolute_path': snapshot.absolute_path,
-                            'relative_path': snapshot.relative_path,
-                            'event_type': 'modified',
-                            'previous_size': previous_size,
-                            'previous_line_count': previous_line_count,
-                            'previous_sha256': previous_sha256,
-                            'file_size': current_size,
-                            'line_count': current_line_count,
-                            'sha256': current_sha256,
-                            'language': snapshot.language,
-                            'note': '; '.join(note_parts),
-                        },
+                    row = self._workspace_event_payload(
+                        snapshot,
+                        event_type='modified',
+                        captured_at=captured_at,
+                        host=host,
+                        workspace_root=workspace_root,
+                        previous=previous,
+                        note='; '.join(note_parts),
                     )
+                    insert_file_event(connection, row)
+                    events.append(row)
 
             upsert_file_state(
                 connection,
@@ -399,28 +487,29 @@ class ActivityCollector:
         for state_key in deleted_keys:
             _, relative_path = state_key
             previous = self._file_state[state_key]
-            insert_file_event(
-                connection,
-                {
-                    'captured_at': captured_at,
-                    'username': self.username,
-                    'host': host,
-                    'workspace_root': workspace_root,
-                    'absolute_path': previous['absolute_path'],
-                    'relative_path': relative_path,
-                    'event_type': 'deleted',
-                    'previous_size': previous.get('file_size'),
-                    'previous_line_count': previous.get('line_count'),
-                    'previous_sha256': previous.get('sha256'),
-                    'file_size': None,
-                    'line_count': None,
-                    'sha256': None,
-                    'language': previous.get('language'),
-                    'note': 'file removed from tracked root',
-                },
-            )
+            row = {
+                'captured_at': captured_at,
+                'username': self.username,
+                'host': host,
+                'workspace_root': workspace_root,
+                'absolute_path': previous['absolute_path'],
+                'relative_path': relative_path,
+                'event_type': 'deleted',
+                'previous_size': previous.get('file_size'),
+                'previous_line_count': previous.get('line_count'),
+                'previous_sha256': previous.get('sha256'),
+                'file_size': None,
+                'line_count': None,
+                'sha256': None,
+                'language': previous.get('language'),
+                'note': 'file removed from tracked root',
+            }
+            insert_file_event(connection, row)
+            events.append(row)
             mark_file_deleted(connection, workspace_root, relative_path, captured_at)
             del self._file_state[state_key]
+
+        return [self._file_change_rich_event(row) for row in events]
 
     def _record_process_snapshot(self, connection, captured_at: str, host: str) -> list[object]:
         current_processes = process_map_by_pid(list_processes())
@@ -1042,9 +1131,7 @@ class ActivityCollector:
         now = time.time()
         captured_at = datetime.now(timezone.utc).isoformat()
 
-        if (now - self._last_file_scan_at) >= self.file_scan_interval_seconds:
-            self._record_workspace_snapshot(connection, captured_at, host)
-            self._last_file_scan_at = now
+        file_change_events: list[dict[str, object]] = []
 
         self._browser_bridge.ingest_gnome_state_file()
         current_processes: list[object] = list(self._process_state.values())
@@ -1052,6 +1139,10 @@ class ActivityCollector:
             current_processes = self._record_process_snapshot(connection, captured_at, host)
             self._record_peripheral_snapshots(connection, captured_at, host)
             self._last_process_scan_at = now
+
+        if (now - self._last_file_scan_at) >= self.file_scan_interval_seconds:
+            file_change_events = self._record_workspace_snapshot(connection, captured_at, host, current_processes)
+            self._last_file_scan_at = now
 
         windows = self._record_window_snapshot(connection, captured_at, host)
         self._record_warp_activity(connection, captured_at, host, current_processes, windows)
@@ -1212,6 +1303,7 @@ class ActivityCollector:
             + screenshot_events
             + [{**row, 'event_type': 'browser_compliance'} for row in browser_compliance_events]
             + [{**row, 'event_type': 'audio_output'} for row in audio_outputs]
+            + file_change_events
         )
 
         activity_payload = {
@@ -1240,6 +1332,7 @@ class ActivityCollector:
                 'screenshot_events': screenshot_events[:20],
                 'browser_compliance_events': browser_compliance_events[:80],
                 'audio_outputs': audio_outputs[:80],
+                'file_changes': file_change_events[:120],
             },
             'rich_events': rich_events[:250],
         }
