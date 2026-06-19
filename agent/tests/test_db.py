@@ -13,6 +13,7 @@ from employee_tracker.db import (
     insert_process_snapshot,
     insert_warp_activity_snapshot,
     insert_window_snapshot,
+    prune_local_telemetry,
 )
 
 
@@ -103,6 +104,50 @@ class ProcessDbTests(unittest.TestCase):
         self.assertEqual(lifecycle[0]['event_type'], 'started')
         self.assertEqual(windows[0]['window_title'], 'Warp')
         self.assertEqual(warp_rows[0]['observed_process_name'], 'python3')
+
+    def test_prune_local_telemetry_removes_append_only_rows_but_keeps_file_state(self) -> None:
+        with TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / 'activity.sqlite3'
+            init_db(db_path)
+            with connect(db_path) as connection:
+                insert_process_snapshot(
+                    connection,
+                    {
+                        'captured_at': '2026-01-01T00:00:00+00:00',
+                        'username': 'jerry',
+                        'host': 'workstation-1',
+                        'pid': 123,
+                        'process_name': 'python3',
+                    },
+                )
+                insert_window_snapshot(
+                    connection,
+                    {
+                        'captured_at': '2026-01-01T00:00:01+00:00',
+                        'username': 'jerry',
+                        'host': 'workstation-1',
+                        'window_id': '0xc00005',
+                        'window_title': 'Warp',
+                        'app_name': 'warp-terminal',
+                        'is_active': True,
+                    },
+                )
+                connection.execute(
+                    """
+                    INSERT INTO file_state (
+                        workspace_root, absolute_path, relative_path, last_seen_at
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    ('/home/jerry/Desktop', '/home/jerry/Desktop/a.txt', 'a.txt', '2026-01-01T00:00:01+00:00'),
+                )
+                connection.commit()
+                deleted = prune_local_telemetry(connection, '2026-01-01T00:00:01+00:00')
+                file_state_count = connection.execute('SELECT count(*) FROM file_state').fetchone()[0]
+
+            self.assertGreaterEqual(deleted, 2)
+            self.assertEqual(fetch_process_snapshot_rows(db_path, username='jerry'), [])
+            self.assertEqual(fetch_window_snapshot_rows(db_path, username='jerry'), [])
+            self.assertEqual(file_state_count, 1)
 
 
 if __name__ == '__main__':

@@ -72,6 +72,14 @@ class TerminalCommandReader:
                     if len(events) >= limit:
                         break
                 self._offset = handle.tell()
+            # The shell hook writes a simple handoff file. Once the reader has
+            # consumed through EOF, truncate it so employee PCs do not accumulate
+            # terminal history locally. If we stopped early at the limit, keep the
+            # remainder for the next tick.
+            if self._offset >= stat.st_size:
+                path.write_text('', encoding='utf-8')
+                self._offset = 0
+                self._inode = path.stat().st_ino
         except OSError:
             return []
         return events

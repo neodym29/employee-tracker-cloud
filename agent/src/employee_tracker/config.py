@@ -49,6 +49,8 @@ class Settings:
     file_content_max_bytes: int
     enable_process_cwd_roots: bool
     max_dynamic_file_roots: int
+    local_success_retention_seconds: int
+    local_failed_retention_seconds: int
     app_name: str
     username: str
 
@@ -88,6 +90,12 @@ def load_settings() -> Settings:
         file_content_max_bytes=int(os.environ.get('EMPLOYEE_TRACKER_FILE_CONTENT_MAX_BYTES', '65536')),
         enable_process_cwd_roots=os.environ.get('EMPLOYEE_TRACKER_ENABLE_PROCESS_CWD_ROOTS', '1') in {'1', 'true', 'True', 'yes', 'YES'},
         max_dynamic_file_roots=int(os.environ.get('EMPLOYEE_TRACKER_MAX_DYNAMIC_FILE_ROOTS', '8')),
+        # Cloud installs should not keep employee activity on the local PC after
+        # Supabase accepts it. Keep successful-upload retention at 0 by default;
+        # override only for local debugging/export workflows. Failed uploads are
+        # kept briefly so transient network outages do not grow without bound.
+        local_success_retention_seconds=int(os.environ.get('EMPLOYEE_TRACKER_LOCAL_SUCCESS_RETENTION_SECONDS', '0')),
+        local_failed_retention_seconds=int(os.environ.get('EMPLOYEE_TRACKER_LOCAL_FAILED_RETENTION_SECONDS', '3600')),
         app_name=os.environ.get('EMPLOYEE_TRACKER_APP_NAME', 'employee-tracker'),
         username=os.environ.get('EMPLOYEE_TRACKER_USERNAME', os.environ.get('USER', 'unknown')),
     )

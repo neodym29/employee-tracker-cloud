@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Sequence
@@ -191,6 +191,7 @@ from .db import (
     insert_warp_activity_snapshot,
     insert_window_snapshot,
     mark_file_deleted,
+    prune_local_telemetry,
     upsert_file_state,
 )
 from .keyboard_chunks import KeyboardChunkRecorder, serialize_keys
@@ -235,6 +236,8 @@ class ActivityCollector:
         file_content_max_bytes: int = 65536,
         enable_process_cwd_roots: bool = True,
         max_dynamic_file_roots: int = 8,
+        local_success_retention_seconds: int = 86400,
+        local_failed_retention_seconds: int = 3600,
     ) -> None:
         self.db_path = db_path
         self.screenshot_dir = screenshot_dir
@@ -249,6 +252,8 @@ class ActivityCollector:
         self.file_content_max_bytes = file_content_max_bytes
         self.enable_process_cwd_roots = enable_process_cwd_roots
         self.max_dynamic_file_roots = max_dynamic_file_roots
+        self.local_success_retention_seconds = max(0, local_success_retention_seconds)
+        self.local_failed_retention_seconds = max(0, local_failed_retention_seconds)
         self.file_scan_interval_seconds = file_scan_interval_seconds
         self.process_scan_interval_seconds = process_scan_interval_seconds
         self.enable_screenshots = enable_screenshots
@@ -1126,6 +1131,32 @@ class ActivityCollector:
             )
         return rows
 
+    def _delete_uploaded_screenshot_file(self, screenshot_path: str | None) -> bool:
+        if not screenshot_path:
+            return False
+        try:
+            path = Path(screenshot_path)
+            if path.exists() and path.is_file() and path.resolve().is_relative_to(self.screenshot_dir.resolve()):
+                path.unlink(missing_ok=True)
+                return True
+        except OSError:
+            return False
+        return False
+
+    def _cleanup_local_cache(self, connection, captured_at: str, upload_ok: bool, screenshot_path: str | None) -> dict[str, object]:
+        if upload_ok:
+            self._delete_uploaded_screenshot_file(screenshot_path)
+            retention = self.local_success_retention_seconds
+        else:
+            retention = self.local_failed_retention_seconds
+        try:
+            cutoff_dt = datetime.fromisoformat(captured_at.replace('Z', '+00:00')) - timedelta(seconds=retention)
+            cutoff = cutoff_dt.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')
+        except ValueError:
+            cutoff = captured_at if upload_ok else datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        deleted_rows = prune_local_telemetry(connection, cutoff)
+        return {'cutoff': cutoff, 'deleted_rows': deleted_rows, 'upload_ok': upload_ok}
+
     def run_once(self, connection, host: str | None = None) -> dict[str, object]:
         host = host or host_name()
         now = time.time()
@@ -1341,8 +1372,18 @@ class ActivityCollector:
             activity_payload['screenshot_png_base64'] = screenshot_image_base64
             activity_payload['screenshot_mime_type'] = screenshot_mime_type
         insert_activity(connection, activity_payload)
+        cloud_enabled = self._cloud_uploader.enabled
         cloud_upload_ok = self._cloud_uploader.upload_activity(activity_payload)
         activity_payload['_cloud_upload_ok'] = cloud_upload_ok
+        if cloud_enabled:
+            activity_payload['_local_cleanup'] = self._cleanup_local_cache(
+                connection,
+                captured_at,
+                cloud_upload_ok,
+                screenshot_path,
+            )
+        else:
+            activity_payload['_local_cleanup'] = {'skipped': 'cloud_upload_not_configured'}
         return activity_payload
 
     def run_forever(self) -> None:

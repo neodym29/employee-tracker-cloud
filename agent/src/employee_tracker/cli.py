@@ -308,6 +308,8 @@ def main(argv: list[str] | None = None) -> int:
             file_content_max_bytes=settings.file_content_max_bytes,
             enable_process_cwd_roots=settings.enable_process_cwd_roots,
             max_dynamic_file_roots=settings.max_dynamic_file_roots,
+            local_success_retention_seconds=settings.local_success_retention_seconds,
+            local_failed_retention_seconds=settings.local_failed_retention_seconds,
         )
         with connect(settings.db_path) as connection:
             payload = collector.run_once(connection)
@@ -339,6 +341,8 @@ def main(argv: list[str] | None = None) -> int:
             file_content_max_bytes=settings.file_content_max_bytes,
             enable_process_cwd_roots=settings.enable_process_cwd_roots,
             max_dynamic_file_roots=settings.max_dynamic_file_roots,
+            local_success_retention_seconds=settings.local_success_retention_seconds,
+            local_failed_retention_seconds=settings.local_failed_retention_seconds,
         )
         collector.run_forever()
         return 0

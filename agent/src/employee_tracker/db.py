@@ -6,6 +6,26 @@ import sqlite3
 from typing import Any
 
 
+LOCAL_TELEMETRY_TABLES = (
+    'activity_snapshots',
+    'screenshot_events',
+    'window_snapshots',
+    'warp_activity_snapshots',
+    'current_app_snapshots',
+    'current_subwindow_snapshots',
+    'file_activity_events',
+    'process_snapshots',
+    'process_lifecycle_events',
+    'input_click_events',
+    'window_focus_events',
+    'audio_output_snapshots',
+    'peripheral_snapshots',
+    'browser_compliance_events',
+    'keystroke_events',
+)
+
+
+
 SCHEMA = """
 PRAGMA journal_mode=WAL;
 
@@ -392,6 +412,25 @@ def init_db(db_path: Path) -> None:
         _migrate_keystroke_schema(connection)
         _migrate_file_activity_schema(connection)
         _migrate_audio_output_schema(connection)
+
+
+def prune_local_telemetry(connection: sqlite3.Connection, captured_at_cutoff: str) -> int:
+    """Delete locally cached telemetry rows at or before the cutoff.
+
+    Cloud mode uses SQLite only as a tiny transient staging/cache layer. Keep
+    file_state because it is the dedupe baseline, but purge every append-only
+    telemetry table once data has been accepted by Supabase.
+    """
+    deleted = 0
+    for table in LOCAL_TELEMETRY_TABLES:
+        cursor = connection.execute(f'DELETE FROM {table} WHERE captured_at <= ?', (captured_at_cutoff,))
+        deleted += cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
+    connection.commit()
+    try:
+        connection.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+    except sqlite3.DatabaseError:
+        pass
+    return deleted
 
 
 def _migrate_keystroke_schema(connection: sqlite3.Connection) -> None:
