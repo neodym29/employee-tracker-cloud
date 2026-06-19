@@ -17,6 +17,7 @@ for (const expected of [
   "'audio_output'",
   "'file_change'",
   "'clipboard_change'",
+  "'auto_update_status'",
   "'app_open'",
 ]) {
   assert.match(collector, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `collector should upload ${expected}`);
@@ -36,7 +37,7 @@ for (const expected of ['richEventRows', 'body.rich_events', 'event.event_type',
 for (const expected of ['Activity logs', 'Currently open tabs', 'All event types', 'Browser search and normal text fields log exact typed text']) {
   assert.match(dashboard, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `dashboard should show ${expected}`);
 }
-for (const expected of ['input_click', 'activity_session', 'audio_output', 'app_open', 'file_change', 'clipboard_change', 'Clipboard change', 'content_status', 'content:']) {
+for (const expected of ['input_click', 'activity_session', 'audio_output', 'app_open', 'file_change', 'clipboard_change', 'Clipboard change', 'auto_update_status', 'Auto-update', 'content_status', 'content:']) {
   assert.match(dashboard, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `dashboard activity log filter/table should support ${expected}`);
 }
 assert.match(dashboard, /currentOpenTabs/, 'dashboard should support browser_tab rows in the current open tabs section');

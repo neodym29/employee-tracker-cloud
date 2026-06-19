@@ -22,6 +22,7 @@ const typeLabels: Record<string, string> = {
   keyboard_status: 'Keyboard status',
   file_change: 'File change',
   clipboard_change: 'Clipboard change',
+  auto_update_status: 'Auto-update',
 };
 
 type DashboardData = {
@@ -145,6 +146,7 @@ function eventSummary(event: any): string {
   if (event.event_type === 'browser_compliance') return [payload.note || 'Browser is open but extension telemetry is missing', payload.status && `status=${payload.status}`, payload.severity && `severity=${payload.severity}`, payload.browser_name || event.app_name].filter(Boolean).join(' · ');
   if (event.event_type === 'typing_activity') return [payload.note || 'typing activity', payload.field_hint && `field=${payload.field_hint}`, payload.key_count != null && `${payload.key_count} input events`, payload.text_length != null && `${payload.text_length} chars`, payload.word_count != null && `${payload.word_count} words`, payload.typed_text, payload.url || event.url].filter(Boolean).join(' · ');
   if (event.event_type === 'keyboard_status') return [payload.status || 'keyboard status', payload.reason || payload.note, payload.device_count != null && `${payload.device_count} readable keyboard devices`, payload.running === false && 'not listening'].filter(Boolean).join(' · ');
+  if (event.event_type === 'auto_update_status') return [payload.status || 'auto-update', payload.current_version && `current=${payload.current_version}`, payload.latest_version && `latest=${payload.latest_version}`, payload.method && `method=${payload.method}`, payload.systemd_run_failed && 'systemd-run failed', payload.systemd_run_stderr || payload.systemd_run_error || payload.error].filter(Boolean).join(' · ');
   if (event.event_type === 'clipboard_change') {
     const content = typeof payload.content === 'string' ? payload.content.slice(0, 500) : '';
     return [

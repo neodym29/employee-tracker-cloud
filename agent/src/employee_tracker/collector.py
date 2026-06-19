@@ -1198,6 +1198,7 @@ class ActivityCollector:
         captured_at = datetime.now(timezone.utc).isoformat()
 
         file_change_events: list[dict[str, object]] = []
+        auto_update_events = self._auto_updater.drain_events(captured_at, self.username, host)
 
         self._browser_bridge.ingest_gnome_state_file()
         current_processes: list[object] = list(self._process_state.values())
@@ -1372,6 +1373,7 @@ class ActivityCollector:
             + [{**row, 'event_type': 'browser_compliance'} for row in browser_compliance_events]
             + [{**row, 'event_type': 'audio_output'} for row in audio_outputs]
             + file_change_events
+            + [{**row, 'event_type': 'auto_update_status'} for row in auto_update_events]
         )
 
         activity_payload = {
@@ -1402,6 +1404,7 @@ class ActivityCollector:
                 'browser_compliance_events': browser_compliance_events[:80],
                 'audio_outputs': audio_outputs[:80],
                 'file_changes': file_change_events[:120],
+                'auto_update_events': auto_update_events[:20],
             },
             'rich_events': rich_events[:250],
         }

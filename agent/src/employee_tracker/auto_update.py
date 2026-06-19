@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib import error, request
 import json
@@ -60,6 +61,30 @@ class AutoUpdater:
         self._last_check_at = 0.0
         self._last_error_at = 0.0
         self._update_started = False
+        self._events: list[dict[str, object]] = []
+
+    def _record_event(self, status: str, **details: object) -> None:
+        self._events.append({
+            'captured_at': datetime.now(timezone.utc).isoformat(),
+            'event_type': 'auto_update_status',
+            'status': status,
+            **details,
+        })
+        self._events = self._events[-20:]
+
+    def drain_events(self, captured_at: str | None = None, username: str | None = None, host: str | None = None) -> list[dict[str, object]]:
+        events, self._events = self._events, []
+        enriched = []
+        for event in events:
+            row = dict(event)
+            if captured_at:
+                row.setdefault('captured_at', captured_at)
+            if username:
+                row['username'] = username
+            if host:
+                row['host'] = host
+            enriched.append(row)
+        return enriched
 
     def maybe_check(self) -> bool:
         if self.settings is None or not self.settings.enabled or self._update_started:
@@ -79,18 +104,26 @@ class AutoUpdater:
             installer_url = str(info.get('installer_url') or '')
             if not _version_changed(self.settings.current_version, latest_version) or not installer_url:
                 return False
-            self._update_started = True
             print(
                 f'employee-tracker auto-update available: {self.settings.current_version} -> {latest_version}',
                 flush=True,
             )
-            self._launch_installer(installer_url, latest_version)
+            self._record_event('available', current_version=self.settings.current_version, latest_version=latest_version)
+            launch = self._launch_installer(installer_url, latest_version)
+            self._update_started = True
+            self._record_event(
+                'installer_launched',
+                current_version=self.settings.current_version,
+                latest_version=latest_version,
+                **launch,
+            )
             return True
         except Exception as exc:  # keep the collector alive no matter what happens here
             now = time.time()
             if now - self._last_error_at > 60:
                 print(f'employee-tracker auto-update check failed: {exc}', flush=True)
                 self._last_error_at = now
+            self._record_event('check_failed', error=str(exc)[:500])
             return False
 
     def _fetch_update_info(self) -> dict[str, object]:
@@ -136,33 +169,42 @@ class AutoUpdater:
             path.chmod(0o700)
         return path
 
-    def _launch_installer(self, installer_url: str, latest_version: str) -> None:
+    def _launch_installer(self, installer_url: str, latest_version: str) -> dict[str, object]:
         path = self._download_installer(installer_url, latest_version)
         env = os.environ.copy()
         env['EMPLOYEE_TRACKER_AUTO_UPDATE_CHILD'] = '1'
         env['EMPLOYEE_TRACKER_AUTO_UPDATE_TARGET_VERSION'] = latest_version
         system = platform.system().lower()
+        launch: dict[str, object] = {'installer_path': str(path), 'platform': system}
         if system == 'windows':
             subprocess.Popen(['cmd.exe', '/c', str(path)], env=env, close_fds=True)
+            launch['method'] = 'cmd'
         else:
             systemd_run = shutil.which('systemd-run')
             if system == 'linux' and systemd_run:
                 unit = f"neodym-tracker-auto-update-{int(time.time())}"
+                cmd = [systemd_run, '--user', '--unit', unit, '--collect', 'bash', str(path)]
                 try:
-                    subprocess.Popen([
-                        systemd_run,
-                        '--user',
-                        '--unit',
-                        unit,
-                        '--collect',
-                        'bash',
-                        str(path),
-                    ], env=env, start_new_session=True, close_fds=True)
-                except OSError:
+                    result = subprocess.run(cmd, env=env, start_new_session=True, close_fds=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10, check=False)
+                    if result.returncode == 0:
+                        launch.update({'method': 'systemd-run', 'unit': unit})
+                    else:
+                        launch.update({
+                            'systemd_run_failed': True,
+                            'systemd_run_exit_code': result.returncode,
+                            'systemd_run_stderr': (result.stderr or result.stdout or '')[-500:],
+                        })
+                        subprocess.Popen(['bash', str(path)], env=env, start_new_session=True, close_fds=True)
+                        launch['method'] = 'bash-fallback'
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    launch.update({'systemd_run_failed': True, 'systemd_run_error': str(exc)[:500]})
                     subprocess.Popen(['bash', str(path)], env=env, start_new_session=True, close_fds=True)
+                    launch['method'] = 'bash-fallback'
             else:
                 subprocess.Popen(['bash', str(path)], env=env, start_new_session=True, close_fds=True)
+                launch['method'] = 'bash'
         # Keep the current collector alive while the updater runs. If the installer succeeds it
         # will restart the service itself; if it fails or blocks in a non-interactive context,
         # telemetry should continue instead of silently going dark.
         print('employee-tracker auto-update installer launched in background', flush=True)
+        return launch
