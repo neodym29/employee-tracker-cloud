@@ -816,6 +816,9 @@ Type=simple
 EnvironmentFile=$ENV_FILE
 Environment=DISPLAY=:0
 Environment=WAYLAND_DISPLAY=wayland-0
+Environment=XDG_RUNTIME_DIR=%t
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
+Environment=XAUTHORITY=%h/.Xauthority
 ExecStart=$VENV_DIR/bin/employee-tracker run
 Restart=always
 RestartSec=5
