@@ -17,15 +17,15 @@ for (const expected of [
 }
 
 for (const expected of [
-  'EMPLOYEE_TRACKER_ENABLE_KEYBOARD_CHUNKS=1',
+  'EMPLOYEE_TRACKER_ENABLE_KEYBOARD_CHUNKS=0',
   'python3-evdev',
   'setup_keyboard_input_permissions',
   'setfacl -m',
   '70-neodym-tracker-input.rules',
-  'Keyboard chunks: enabled',
+  'Keyboard chunks: disabled by default for silent mode',
   'xinput fallback',
 ]) {
-  assert.match(installer, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `installer should enable evdev keyboard chunks and input permissions: ${expected}`);
+  assert.match(installer, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `installer should keep keyboard chunks available but default-disabled for silent mode: ${expected}`);
 }
 
 assert.match(pyproject, /evdev/, 'agent package should depend on evdev for Linux keyboard device capture');

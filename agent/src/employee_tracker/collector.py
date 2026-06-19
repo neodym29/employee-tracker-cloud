@@ -241,6 +241,7 @@ class ActivityCollector:
         clipboard_max_text_chars: int = 4096,
         clipboard_poll_interval_seconds: float = 120.0,
         clipboard_startup_delay_seconds: float = 30.0,
+        enable_audio_outputs: bool = False,
         max_dynamic_file_roots: int = 8,
         local_success_retention_seconds: int = 86400,
         local_failed_retention_seconds: int = 3600,
@@ -261,6 +262,7 @@ class ActivityCollector:
         self.clipboard_max_text_chars = clipboard_max_text_chars
         self.clipboard_poll_interval_seconds = clipboard_poll_interval_seconds
         self.clipboard_startup_delay_seconds = clipboard_startup_delay_seconds
+        self.enable_audio_outputs = enable_audio_outputs
         self.max_dynamic_file_roots = max_dynamic_file_roots
         self.local_success_retention_seconds = max(0, local_success_retention_seconds)
         self.local_failed_retention_seconds = max(0, local_failed_retention_seconds)
@@ -1264,7 +1266,7 @@ class ActivityCollector:
             typing_rows=typing_activity_events,
             click_rows=click_events,
         )
-        audio_outputs = self._record_audio_outputs(connection, captured_at, host)
+        audio_outputs = self._record_audio_outputs(connection, captured_at, host) if self.enable_audio_outputs else []
         screenshot_path = None
         screenshot_image_base64 = None
         screenshot_mime_type = None

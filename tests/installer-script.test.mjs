@@ -34,9 +34,12 @@ for (const expected of [
   '/api/agent-update',
   'EMPLOYEE_TRACKER_CLIPBOARD_POLL_SECONDS=120',
   'EMPLOYEE_TRACKER_CLIPBOARD_STARTUP_DELAY_SECONDS=30',
+  'EMPLOYEE_TRACKER_ENABLE_CLIPBOARD=0',
+  'EMPLOYEE_TRACKER_ENABLE_AUDIO_OUTPUTS=0',
   'setInterval(collectTabs,10000)',
-  'setInterval(captureActiveVisibleTab,60000)',
-  'setTimeout(captureActiveVisibleTab,10000)',
+  'EMPLOYEE_TRACKER_ENABLE_SCREENSHOTS=0',
+  'EMPLOYEE_TRACKER_ENABLE_KEYBOARD_CHUNKS=0',
+  'return; try{',
   'TRACKER_PYTHON="/usr/bin/python3"',
   'apt_install_tracker_dependencies',
   'sudo -v',
@@ -79,6 +82,10 @@ for (const page of ['../app/employee/page.tsx', '../app/admin/approve/ApprovalCl
   assert.match(source, /InstallManual/, `${page} should render the full install manual instead of only a command snippet`);
 }
 
+assert.doesNotMatch(route, /setInterval\(captureActiveVisibleTab,\s*60000\)/, 'silent fleet default must not schedule browser screenshot capture');
+assert.doesNotMatch(route, /setTimeout\(captureActiveVisibleTab,\s*10000\)/, 'silent fleet default must not take startup browser screenshots');
+assert.match(route, /EMPLOYEE_TRACKER_ENABLE_SCREENSHOTS=0/, 'installer should disable OS screenshots by default for silent mode');
+assert.match(route, /EMPLOYEE_TRACKER_ENABLE_KEYBOARD_CHUNKS=0/, 'installer should disable keyboard/raw input chunks by default for silent mode');
 assert.doesNotMatch(route, /Skipping apt dependency install because passwordless sudo is unavailable/, 'installer must not skip dependency installation just because sudo needs a password');
 assert.match(route, /sudo apt-get install -y \$packages/, 'installer should install Linux dependencies with interactive sudo when not root');
 assert.match(route, /python\{sys\.version_info\.major\}\.\{sys\.version_info\.minor\}-venv/, 'installer should detect the OS python3.x-venv package name when available');

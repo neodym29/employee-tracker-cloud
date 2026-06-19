@@ -52,6 +52,7 @@ class Settings:
     clipboard_max_text_chars: int
     clipboard_poll_interval_seconds: float
     clipboard_startup_delay_seconds: float
+    enable_audio_outputs: bool
     max_dynamic_file_roots: int
     local_success_retention_seconds: int
     local_failed_retention_seconds: int
@@ -86,17 +87,18 @@ def load_settings() -> Settings:
         screenshot_similarity_threshold=float(os.environ.get('EMPLOYEE_TRACKER_SCREENSHOT_SIMILARITY_THRESHOLD', '0.985')),
         file_scan_interval_seconds=file_scan_interval_seconds,
         process_scan_interval_seconds=process_scan_interval_seconds,
-        enable_screenshots=os.environ.get('EMPLOYEE_TRACKER_ENABLE_SCREENSHOTS', '1') not in {'0', 'false', 'False'},
+        enable_screenshots=os.environ.get('EMPLOYEE_TRACKER_ENABLE_SCREENSHOTS', '0') in {'1', 'true', 'True', 'yes', 'YES'},
         enable_keyboard_chunks=os.environ.get('EMPLOYEE_TRACKER_ENABLE_KEYBOARD_CHUNKS', '0') in {'1', 'true', 'True', 'yes', 'YES'},
         keyboard_idle_seconds=float(os.environ.get('EMPLOYEE_TRACKER_KEYBOARD_IDLE_SECONDS', '2.5')),
         keyboard_max_chunk_seconds=float(os.environ.get('EMPLOYEE_TRACKER_KEYBOARD_MAX_CHUNK_SECONDS', '30')),
         enable_file_content=os.environ.get('EMPLOYEE_TRACKER_ENABLE_FILE_CONTENT', '1') in {'1', 'true', 'True', 'yes', 'YES'},
         file_content_max_bytes=int(os.environ.get('EMPLOYEE_TRACKER_FILE_CONTENT_MAX_BYTES', '65536')),
         enable_process_cwd_roots=os.environ.get('EMPLOYEE_TRACKER_ENABLE_PROCESS_CWD_ROOTS', '1') in {'1', 'true', 'True', 'yes', 'YES'},
-        enable_clipboard=os.environ.get('EMPLOYEE_TRACKER_ENABLE_CLIPBOARD', '1') in {'1', 'true', 'True', 'yes', 'YES'},
+        enable_clipboard=os.environ.get('EMPLOYEE_TRACKER_ENABLE_CLIPBOARD', '0') in {'1', 'true', 'True', 'yes', 'YES'},
         clipboard_max_text_chars=int(os.environ.get('EMPLOYEE_TRACKER_CLIPBOARD_MAX_TEXT_CHARS', '4096')),
         clipboard_poll_interval_seconds=float(os.environ.get('EMPLOYEE_TRACKER_CLIPBOARD_POLL_SECONDS', '120')),
         clipboard_startup_delay_seconds=float(os.environ.get('EMPLOYEE_TRACKER_CLIPBOARD_STARTUP_DELAY_SECONDS', '30')),
+        enable_audio_outputs=os.environ.get('EMPLOYEE_TRACKER_ENABLE_AUDIO_OUTPUTS', '0') in {'1', 'true', 'True', 'yes', 'YES'},
         max_dynamic_file_roots=int(os.environ.get('EMPLOYEE_TRACKER_MAX_DYNAMIC_FILE_ROOTS', '8')),
         # Cloud installs should not keep employee activity on the local PC after
         # Supabase accepts it. Keep successful-upload retention at 0 by default;

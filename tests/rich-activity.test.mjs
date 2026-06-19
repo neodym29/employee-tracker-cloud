@@ -24,7 +24,7 @@ for (const expected of [
   assert.match(collector, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `collector should upload ${expected}`);
 }
 
-for (const expected of ['neodym-typing', '/browser-typing', 'isSensitiveInput', 'typing_activity', 'typed_sample_redacted', 'el.isContentEditable', 'EMPLOYEE_TRACKER_ENABLE_CLIPBOARD=1', 'EMPLOYEE_TRACKER_CLIPBOARD_MAX_TEXT_CHARS=4096', 'xclip', 'xsel', 'wl-clipboard', 'XDG_RUNTIME_DIR=%t', 'DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus', 'XAUTHORITY=%h/.Xauthority']) {
+for (const expected of ['neodym-typing', '/browser-typing', 'isSensitiveInput', 'typing_activity', 'typed_sample_redacted', 'el.isContentEditable', 'EMPLOYEE_TRACKER_ENABLE_CLIPBOARD=0', 'EMPLOYEE_TRACKER_CLIPBOARD_MAX_TEXT_CHARS=4096', 'xclip', 'xsel', 'wl-clipboard', 'XDG_RUNTIME_DIR=%t', 'DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus', 'XAUTHORITY=%h/.Xauthority']) {
   assert.match(installer, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `installer browser extension should support safe typing telemetry: ${expected}`);
 }
 for (const expected of ['chrome.scripting.executeScript', 'injectContentScriptIntoOpenTabs', '__neodymTrackerBridgeContentInjected']) {

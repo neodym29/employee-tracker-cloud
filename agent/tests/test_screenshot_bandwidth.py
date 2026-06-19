@@ -10,6 +10,9 @@ from employee_tracker.screenshots import screenshot_similarity
 class ScreenshotBandwidthPolicyTests(unittest.TestCase):
     def test_default_screenshot_policy_is_active_only_and_deduped(self):
         old = {key: os.environ.get(key) for key in (
+            'EMPLOYEE_TRACKER_ENABLE_SCREENSHOTS',
+            'EMPLOYEE_TRACKER_ENABLE_CLIPBOARD',
+            'EMPLOYEE_TRACKER_ENABLE_AUDIO_OUTPUTS',
             'EMPLOYEE_TRACKER_SCREENSHOT_SECONDS',
             'EMPLOYEE_TRACKER_SCREENSHOT_ACTIVE_IDLE_SECONDS',
             'EMPLOYEE_TRACKER_SCREENSHOT_SIMILARITY_THRESHOLD',
@@ -18,6 +21,9 @@ class ScreenshotBandwidthPolicyTests(unittest.TestCase):
             for key in old:
                 os.environ.pop(key, None)
             settings = load_settings()
+            self.assertFalse(settings.enable_screenshots)
+            self.assertFalse(settings.enable_clipboard)
+            self.assertFalse(settings.enable_audio_outputs)
             self.assertEqual(settings.screenshot_interval_seconds, 60)
             self.assertEqual(settings.screenshot_activity_idle_seconds, 300)
             self.assertEqual(settings.screenshot_similarity_threshold, 0.985)

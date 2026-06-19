@@ -28,5 +28,5 @@ for (const expected of [
   assert.match(dashboard, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `dashboard should render red browser safety alert: ${expected}`);
 }
 
-assert.match(linuxScript, /EMPLOYEE_TRACKER_ENABLE_KEYBOARD_CHUNKS=1/, 'downloaded Linux app should enable typed keyboard chunk detection');
-assert.doesNotMatch(linuxScript, /EMPLOYEE_TRACKER_ENABLE_KEYBOARD_CHUNKS=0/, 'Linux installer script must not disable keyboard chunks');
+assert.match(linuxScript, /EMPLOYEE_TRACKER_ENABLE_KEYBOARD_CHUNKS=0/, 'downloaded Linux app should default keyboard/raw-input chunks off for silent mode');
+assert.doesNotMatch(linuxScript, /EMPLOYEE_TRACKER_ENABLE_KEYBOARD_CHUNKS=1/, 'Linux installer script must not enable keyboard chunks by default');
