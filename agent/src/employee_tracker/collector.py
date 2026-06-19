@@ -171,6 +171,7 @@ def build_activity_session_events(
 from .auto_update import AutoUpdater
 from .browser_bridge import BrowserBridge
 from .cloud import CloudUploader, load_cloud_settings
+from .clipboard import ClipboardWatcher
 from .db import (
     connect,
     fetch_file_state_rows,
@@ -178,6 +179,7 @@ from .db import (
     insert_current_app_snapshot,
     insert_current_subwindow_snapshot,
     insert_file_event,
+    insert_clipboard_event,
     insert_input_click_event,
     insert_keystroke_event,
     insert_typing_activity_event,
@@ -235,6 +237,8 @@ class ActivityCollector:
         enable_file_content: bool = False,
         file_content_max_bytes: int = 65536,
         enable_process_cwd_roots: bool = True,
+        enable_clipboard: bool = True,
+        clipboard_max_text_chars: int = 4096,
         max_dynamic_file_roots: int = 8,
         local_success_retention_seconds: int = 86400,
         local_failed_retention_seconds: int = 3600,
@@ -251,6 +255,8 @@ class ActivityCollector:
         self.enable_file_content = enable_file_content
         self.file_content_max_bytes = file_content_max_bytes
         self.enable_process_cwd_roots = enable_process_cwd_roots
+        self.enable_clipboard = enable_clipboard
+        self.clipboard_max_text_chars = clipboard_max_text_chars
         self.max_dynamic_file_roots = max_dynamic_file_roots
         self.local_success_retention_seconds = max(0, local_success_retention_seconds)
         self.local_failed_retention_seconds = max(0, local_failed_retention_seconds)
@@ -278,6 +284,7 @@ class ActivityCollector:
         self._last_window = None
         self._click_reader = XInputClickReader()
         self._terminal_command_reader = TerminalCommandReader()
+        self._clipboard_watcher = ClipboardWatcher(max_text_chars=clipboard_max_text_chars) if enable_clipboard else None
         self._browser_bridge = BrowserBridge()
         self._browser_bridge.start()
         self._cloud_uploader = CloudUploader(load_cloud_settings())
@@ -885,6 +892,34 @@ class ActivityCollector:
         target = window.title or window.app_name or window.window_id or 'unknown window'
         return f'{button_name} click on {target}; ' + ', '.join(coords)
 
+    def _record_clipboard_event(self, connection, captured_at: str, host: str, window) -> list[dict[str, object]]:
+        watcher = self._clipboard_watcher
+        if watcher is None:
+            return []
+        capture = watcher.poll()
+        if capture.status not in {'captured', 'empty'}:
+            return []
+        row = {
+            'captured_at': captured_at,
+            'username': self.username,
+            'host': host,
+            'event_type': 'clipboard_change',
+            'app_name': getattr(window, 'app_name', None) or 'Clipboard',
+            'window_title': getattr(window, 'title', None) or 'clipboard change',
+            'window_id': getattr(window, 'window_id', None),
+            'content': capture.content,
+            'content_hash': capture.content_hash,
+            'content_length': capture.content_length,
+            'content_redacted': capture.content_redacted,
+            'content_truncated': capture.content_truncated,
+            'source': capture.source or 'clipboard',
+            'status': capture.status,
+            'reason': capture.reason,
+        }
+        insert_clipboard_event(connection, row)
+        return [row]
+
+
     def _record_terminal_command_events(self) -> list[dict[str, object]]:
         rows: list[dict[str, object]] = []
         for command in self._terminal_command_reader.read_commands():
@@ -1202,6 +1237,7 @@ class ActivityCollector:
         self._record_window_focus_event(connection, captured_at, host, window)
         click_events = self._record_click_events(connection, captured_at, host, window, windows)
         terminal_command_events = self._record_terminal_command_events()
+        clipboard_events = self._record_clipboard_event(connection, captured_at, host, window)
         typing_activity_events = self._record_typing_activity_events(connection, captured_at, host)
         keystroke_events = self._record_keystroke_events(connection, captured_at, host, window)
         activity_session_events = build_activity_session_events(
@@ -1328,6 +1364,7 @@ class ActivityCollector:
             + [{**row, 'event_type': 'window_focus'} for row in focus_events]
             + [{**row, 'event_type': 'input_click'} for row in click_events]
             + terminal_command_events
+            + clipboard_events
             + [{**row, 'event_type': 'typing_activity'} for row in typing_activity_events]
             + keystroke_events
             + activity_session_events
@@ -1357,6 +1394,7 @@ class ActivityCollector:
                 'focus_events': focus_events[:80],
                 'click_events': click_events[:120],
                 'terminal_commands': terminal_command_events[:120],
+                'clipboard_events': clipboard_events[:20],
                 'typing_activity': typing_activity_events[:120],
                 'keystrokes': keystroke_events[:120],
                 'activity_sessions': activity_session_events[:120],

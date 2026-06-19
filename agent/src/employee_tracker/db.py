@@ -355,6 +355,28 @@ CREATE TABLE IF NOT EXISTS keystroke_events (
 
 CREATE INDEX IF NOT EXISTS idx_keystroke_events_user_time
     ON keystroke_events(username, captured_at DESC);
+
+
+CREATE TABLE IF NOT EXISTS clipboard_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    captured_at TEXT NOT NULL,
+    username TEXT NOT NULL,
+    host TEXT NOT NULL,
+    app_name TEXT,
+    window_title TEXT,
+    window_id TEXT,
+    content_text TEXT,
+    content_hash TEXT,
+    content_length INTEGER,
+    content_redacted INTEGER NOT NULL DEFAULT 0,
+    content_truncated INTEGER NOT NULL DEFAULT 0,
+    source TEXT,
+    status TEXT,
+    reason TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_clipboard_events_user_time
+    ON clipboard_events(username, captured_at DESC);
 """
 
 
@@ -754,6 +776,26 @@ def insert_keystroke_event(connection: sqlite3.Connection, row: dict[str, Any]) 
             row.get('key_count'), row.get('source'), row.get('note'),
             row.get('keys_json'), row.get('duration_seconds'), row.get('reason'),
             row.get('shortcut'),
+        ),
+    )
+    connection.commit()
+
+
+def insert_clipboard_event(connection: sqlite3.Connection, row: dict[str, Any]) -> None:
+    connection.execute(
+        """
+        INSERT INTO clipboard_events (
+            captured_at, username, host, app_name, window_title, window_id,
+            content_text, content_hash, content_length, content_redacted,
+            content_truncated, source, status, reason
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            row['captured_at'], row['username'], row['host'], row.get('app_name'),
+            row.get('window_title'), row.get('window_id'), row.get('content'),
+            row.get('content_hash'), row.get('content_length'),
+            int(bool(row.get('content_redacted'))), int(bool(row.get('content_truncated'))),
+            row.get('source'), row.get('status'), row.get('reason'),
         ),
     )
     connection.commit()

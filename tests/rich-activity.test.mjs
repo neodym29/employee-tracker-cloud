@@ -16,12 +16,13 @@ for (const expected of [
   "'browser_tab'",
   "'audio_output'",
   "'file_change'",
+  "'clipboard_change'",
   "'app_open'",
 ]) {
   assert.match(collector, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `collector should upload ${expected}`);
 }
 
-for (const expected of ['neodym-typing', '/browser-typing', 'isSensitiveInput', 'typing_activity', 'typed_sample_redacted', 'el.isContentEditable']) {
+for (const expected of ['neodym-typing', '/browser-typing', 'isSensitiveInput', 'typing_activity', 'typed_sample_redacted', 'el.isContentEditable', 'EMPLOYEE_TRACKER_ENABLE_CLIPBOARD=1', 'EMPLOYEE_TRACKER_CLIPBOARD_MAX_TEXT_CHARS=4096']) {
   assert.match(installer, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `installer browser extension should support safe typing telemetry: ${expected}`);
 }
 for (const expected of ['chrome.scripting.executeScript', 'injectContentScriptIntoOpenTabs', '__neodymTrackerBridgeContentInjected']) {
@@ -35,7 +36,7 @@ for (const expected of ['richEventRows', 'body.rich_events', 'event.event_type',
 for (const expected of ['Activity logs', 'Currently open tabs', 'All event types', 'Browser search and normal text fields log exact typed text']) {
   assert.match(dashboard, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `dashboard should show ${expected}`);
 }
-for (const expected of ['input_click', 'activity_session', 'audio_output', 'app_open', 'file_change', 'content_status', 'content:']) {
+for (const expected of ['input_click', 'activity_session', 'audio_output', 'app_open', 'file_change', 'clipboard_change', 'Clipboard change', 'content_status', 'content:']) {
   assert.match(dashboard, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `dashboard activity log filter/table should support ${expected}`);
 }
 assert.match(dashboard, /currentOpenTabs/, 'dashboard should support browser_tab rows in the current open tabs section');
