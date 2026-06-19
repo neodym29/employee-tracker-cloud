@@ -285,6 +285,7 @@ class ActivityCollector:
         self._click_reader = XInputClickReader()
         self._terminal_command_reader = TerminalCommandReader()
         self._clipboard_watcher = ClipboardWatcher(max_text_chars=clipboard_max_text_chars) if enable_clipboard else None
+        self._last_clipboard_status_key: tuple[str, str | None, str | None] | None = None
         self._browser_bridge = BrowserBridge()
         self._browser_bridge.start()
         self._cloud_uploader = CloudUploader(load_cloud_settings())
@@ -897,13 +898,22 @@ class ActivityCollector:
         if watcher is None:
             return []
         capture = watcher.poll()
-        if capture.status not in {'captured', 'empty'}:
+        if capture.status == 'unchanged':
             return []
+        is_status_only = capture.status not in {'captured', 'empty'}
+        event_type = 'clipboard_status' if is_status_only else 'clipboard_change'
+        status_key = (capture.status, capture.source, capture.reason)
+        if is_status_only and status_key == self._last_clipboard_status_key:
+            return []
+        if not is_status_only:
+            self._last_clipboard_status_key = None
+        else:
+            self._last_clipboard_status_key = status_key
         row = {
             'captured_at': captured_at,
             'username': self.username,
             'host': host,
-            'event_type': 'clipboard_change',
+            'event_type': event_type,
             'app_name': getattr(window, 'app_name', None) or 'Clipboard',
             'window_title': getattr(window, 'title', None) or 'clipboard change',
             'window_id': getattr(window, 'window_id', None),

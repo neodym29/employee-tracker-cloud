@@ -27,6 +27,33 @@ class ClipboardTelemetryTests(unittest.TestCase):
         self.assertEqual(first.content, 'ssh ubuntu@server.example.com')
         self.assertEqual(second.status, 'unchanged')
 
+    def test_collector_uploads_clipboard_status_when_reader_unavailable(self) -> None:
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            db_path = base / 'activity.sqlite3'
+            init_db(db_path)
+            collector = ActivityCollector(
+                db_path=db_path,
+                screenshot_dir=base / 'screenshots',
+                workspace_dir=base / 'workspace',
+                file_roots=(base / 'workspace',),
+                username='jerry',
+                enable_screenshots=False,
+                enable_keyboard_chunks=False,
+                enable_file_content=False,
+                enable_process_cwd_roots=False,
+                enable_clipboard=True,
+                file_scan_interval_seconds=999999999,
+                process_scan_interval_seconds=999999999,
+            )
+            collector._clipboard_watcher = ClipboardWatcher(command_runner=lambda _cmd: None)
+            with connect(db_path) as connection:
+                events = collector._record_clipboard_event(connection, '2026-06-19T00:00:00+00:00', 'host', SimpleNamespace(window_id='w1', title='Terminal', app_name='Terminal'))
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]['event_type'], 'clipboard_status')
+            self.assertEqual(events[0]['status'], 'unavailable')
+            self.assertEqual(events[0]['reason'], 'no_clipboard_reader_available')
+
     def test_collector_persists_and_uploads_clipboard_change(self) -> None:
         with TemporaryDirectory() as tmp:
             base = Path(tmp)

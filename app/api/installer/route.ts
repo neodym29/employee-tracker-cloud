@@ -292,7 +292,7 @@ apt_install_tracker_dependencies() {
     apt-get update
   fi
 
-  local packages="python3 python3-venv python3-pip python3-evdev curl ca-certificates openssl acl x11-utils x11-xserver-utils xinput xprintidle usbutils pulseaudio-utils playerctl ffmpeg gjs grim maim scrot"
+  local packages="python3 python3-venv python3-pip python3-evdev curl ca-certificates openssl acl x11-utils x11-xserver-utils xinput xprintidle xclip xsel wl-clipboard usbutils pulseaudio-utils playerctl ffmpeg gjs grim maim scrot"
   local python_minor=""
   if [ -x "$TRACKER_PYTHON" ]; then
     python_minor="$($TRACKER_PYTHON - <<'PY' 2>/dev/null || true
