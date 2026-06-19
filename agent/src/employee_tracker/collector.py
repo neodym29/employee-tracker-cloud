@@ -239,6 +239,8 @@ class ActivityCollector:
         enable_process_cwd_roots: bool = True,
         enable_clipboard: bool = True,
         clipboard_max_text_chars: int = 4096,
+        clipboard_poll_interval_seconds: float = 120.0,
+        clipboard_startup_delay_seconds: float = 30.0,
         max_dynamic_file_roots: int = 8,
         local_success_retention_seconds: int = 86400,
         local_failed_retention_seconds: int = 3600,
@@ -257,6 +259,8 @@ class ActivityCollector:
         self.enable_process_cwd_roots = enable_process_cwd_roots
         self.enable_clipboard = enable_clipboard
         self.clipboard_max_text_chars = clipboard_max_text_chars
+        self.clipboard_poll_interval_seconds = clipboard_poll_interval_seconds
+        self.clipboard_startup_delay_seconds = clipboard_startup_delay_seconds
         self.max_dynamic_file_roots = max_dynamic_file_roots
         self.local_success_retention_seconds = max(0, local_success_retention_seconds)
         self.local_failed_retention_seconds = max(0, local_failed_retention_seconds)
@@ -284,7 +288,11 @@ class ActivityCollector:
         self._last_window = None
         self._click_reader = XInputClickReader()
         self._terminal_command_reader = TerminalCommandReader()
-        self._clipboard_watcher = ClipboardWatcher(max_text_chars=clipboard_max_text_chars) if enable_clipboard else None
+        self._clipboard_watcher = ClipboardWatcher(
+            max_text_chars=clipboard_max_text_chars,
+            min_poll_interval_seconds=clipboard_poll_interval_seconds,
+            startup_delay_seconds=clipboard_startup_delay_seconds,
+        ) if enable_clipboard else None
         self._last_clipboard_status_key: tuple[str, str | None, str | None] | None = None
         self._browser_bridge = BrowserBridge()
         self._browser_bridge.start()
@@ -898,7 +906,7 @@ class ActivityCollector:
         if watcher is None:
             return []
         capture = watcher.poll()
-        if capture.status == 'unchanged':
+        if capture.status in {'unchanged', 'deferred'}:
             return []
         is_status_only = capture.status not in {'captured', 'empty'}
         event_type = 'clipboard_status' if is_status_only else 'clipboard_change'

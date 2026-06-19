@@ -7,6 +7,7 @@ import platform
 import re
 import shutil
 import subprocess
+import time
 from typing import Callable
 
 SECRET_VALUE_PATTERN = re.compile(
@@ -106,12 +107,31 @@ def read_clipboard_text(command_runner: Callable[[list[str]], str | None] | None
 
 
 class ClipboardWatcher:
-    def __init__(self, *, max_text_chars: int = 4096, command_runner: Callable[[list[str]], str | None] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        max_text_chars: int = 4096,
+        command_runner: Callable[[list[str]], str | None] | None = None,
+        min_poll_interval_seconds: float = 120.0,
+        startup_delay_seconds: float = 30.0,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
         self.max_text_chars = max(128, max_text_chars)
         self.command_runner = command_runner
+        self.min_poll_interval_seconds = max(0.0, min_poll_interval_seconds)
+        self.startup_delay_seconds = max(0.0, startup_delay_seconds)
+        self.clock = clock or time.monotonic
+        self._started_at = self.clock()
+        self._last_poll_at: float | None = None
         self._last_hash: str | None = None
 
     def poll(self) -> ClipboardCapture:
+        now = self.clock()
+        if now - self._started_at < self.startup_delay_seconds:
+            return ClipboardCapture(status='deferred', reason='startup_delay')
+        if self._last_poll_at is not None and now - self._last_poll_at < self.min_poll_interval_seconds:
+            return ClipboardCapture(status='deferred', reason='poll_interval')
+        self._last_poll_at = now
         text, source, reason = read_clipboard_text(self.command_runner)
         if text is None:
             return ClipboardCapture(status='unavailable', source=source, reason=reason)

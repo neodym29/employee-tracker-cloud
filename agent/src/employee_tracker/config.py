@@ -50,6 +50,8 @@ class Settings:
     enable_process_cwd_roots: bool
     enable_clipboard: bool
     clipboard_max_text_chars: int
+    clipboard_poll_interval_seconds: float
+    clipboard_startup_delay_seconds: float
     max_dynamic_file_roots: int
     local_success_retention_seconds: int
     local_failed_retention_seconds: int
@@ -93,6 +95,8 @@ def load_settings() -> Settings:
         enable_process_cwd_roots=os.environ.get('EMPLOYEE_TRACKER_ENABLE_PROCESS_CWD_ROOTS', '1') in {'1', 'true', 'True', 'yes', 'YES'},
         enable_clipboard=os.environ.get('EMPLOYEE_TRACKER_ENABLE_CLIPBOARD', '1') in {'1', 'true', 'True', 'yes', 'YES'},
         clipboard_max_text_chars=int(os.environ.get('EMPLOYEE_TRACKER_CLIPBOARD_MAX_TEXT_CHARS', '4096')),
+        clipboard_poll_interval_seconds=float(os.environ.get('EMPLOYEE_TRACKER_CLIPBOARD_POLL_SECONDS', '120')),
+        clipboard_startup_delay_seconds=float(os.environ.get('EMPLOYEE_TRACKER_CLIPBOARD_STARTUP_DELAY_SECONDS', '30')),
         max_dynamic_file_roots=int(os.environ.get('EMPLOYEE_TRACKER_MAX_DYNAMIC_FILE_ROOTS', '8')),
         # Cloud installs should not keep employee activity on the local PC after
         # Supabase accepts it. Keep successful-upload retention at 0 by default;

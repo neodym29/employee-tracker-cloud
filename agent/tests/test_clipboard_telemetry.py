@@ -5,6 +5,7 @@ import sqlite3
 import unittest
 from unittest.mock import patch
 
+
 from employee_tracker.clipboard import ClipboardWatcher, redact_clipboard_text
 from employee_tracker.collector import ActivityCollector
 from employee_tracker.db import connect, init_db
@@ -20,12 +21,59 @@ class ClipboardTelemetryTests(unittest.TestCase):
 
     def test_clipboard_watcher_captures_once_and_dedupes(self) -> None:
         values = ['ssh ubuntu@server.example.com', 'ssh ubuntu@server.example.com']
-        watcher = ClipboardWatcher(max_text_chars=4096, command_runner=lambda _cmd: values.pop(0))
+        watcher = ClipboardWatcher(max_text_chars=4096, command_runner=lambda _cmd: values.pop(0), startup_delay_seconds=0, min_poll_interval_seconds=0)
         first = watcher.poll()
         second = watcher.poll()
         self.assertEqual(first.status, 'captured')
         self.assertEqual(first.content, 'ssh ubuntu@server.example.com')
         self.assertEqual(second.status, 'unchanged')
+
+    def test_clipboard_watcher_respects_startup_delay_and_poll_interval(self) -> None:
+        values = ['first copy', 'second copy']
+        watcher = ClipboardWatcher(
+            max_text_chars=4096,
+            command_runner=lambda _cmd: values.pop(0),
+            min_poll_interval_seconds=120,
+            startup_delay_seconds=30,
+            clock=lambda: 1000.0,
+        )
+        self.assertEqual(watcher.poll().status, 'deferred')
+        self.assertEqual(values, ['first copy', 'second copy'])
+        watcher.clock = lambda: 1031.0
+        self.assertEqual(watcher.poll().status, 'captured')
+        watcher.clock = lambda: 1080.0
+        self.assertEqual(watcher.poll().status, 'deferred')
+        self.assertEqual(values, ['second copy'])
+        watcher.clock = lambda: 1160.0
+        self.assertEqual(watcher.poll().status, 'captured')
+
+    def test_collector_does_not_upload_deferred_clipboard_status(self) -> None:
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            db_path = base / 'activity.sqlite3'
+            init_db(db_path)
+            collector = ActivityCollector(
+                db_path=db_path,
+                screenshot_dir=base / 'screenshots',
+                workspace_dir=base / 'workspace',
+                file_roots=(base / 'workspace',),
+                username='jerry',
+                enable_screenshots=False,
+                enable_keyboard_chunks=False,
+                enable_file_content=False,
+                enable_process_cwd_roots=False,
+                enable_clipboard=True,
+                file_scan_interval_seconds=999999999,
+                process_scan_interval_seconds=999999999,
+            )
+            collector._clipboard_watcher = ClipboardWatcher(
+                command_runner=lambda _cmd: 'should not be read yet',
+                startup_delay_seconds=60,
+                clock=lambda: 1000.0,
+            )
+            with connect(db_path) as connection:
+                events = collector._record_clipboard_event(connection, '2026-06-19T00:00:00+00:00', 'host', SimpleNamespace(window_id='w1', title='Terminal', app_name='Terminal'))
+            self.assertEqual(events, [])
 
     def test_collector_uploads_clipboard_status_when_reader_unavailable(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -46,7 +94,7 @@ class ClipboardTelemetryTests(unittest.TestCase):
                 file_scan_interval_seconds=999999999,
                 process_scan_interval_seconds=999999999,
             )
-            collector._clipboard_watcher = ClipboardWatcher(command_runner=lambda _cmd: None)
+            collector._clipboard_watcher = ClipboardWatcher(command_runner=lambda _cmd: None, startup_delay_seconds=0, min_poll_interval_seconds=0)
             with connect(db_path) as connection:
                 events = collector._record_clipboard_event(connection, '2026-06-19T00:00:00+00:00', 'host', SimpleNamespace(window_id='w1', title='Terminal', app_name='Terminal'))
             self.assertEqual(len(events), 1)
@@ -73,7 +121,7 @@ class ClipboardTelemetryTests(unittest.TestCase):
                 file_scan_interval_seconds=999999999,
                 process_scan_interval_seconds=999999999,
             )
-            collector._clipboard_watcher = ClipboardWatcher(command_runner=lambda _cmd: 'scp app.py root@server:/tmp/app.py')
+            collector._clipboard_watcher = ClipboardWatcher(command_runner=lambda _cmd: 'scp app.py root@server:/tmp/app.py', startup_delay_seconds=0, min_poll_interval_seconds=0)
             collector._cloud_uploader.upload_activity = lambda payload: True
             with patch('employee_tracker.collector.current_window_info', return_value=SimpleNamespace(window_id='w1', title='Terminal', app_name='Terminal', pid=123, wm_class='terminal')):
                 with patch('employee_tracker.collector.list_open_windows', return_value=[]):

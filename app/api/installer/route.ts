@@ -72,7 +72,7 @@ chrome.tabs.onActivated.addListener(()=>{collectTabs();captureActiveVisibleTab()
 async function injectContentScriptIntoOpenTabs(){if(!chrome.scripting||!chrome.scripting.executeScript)return; try{const tabs=await chrome.tabs.query({}); await Promise.allSettled((tabs||[]).filter((tab)=>tab.id&&tab.url&&/^(https?|file):/i.test(tab.url)).map((tab)=>chrome.scripting.executeScript({target:{tabId:tab.id,allFrames:true},files:['content.js']}))); await collectTabs();}catch(error){}}
 chrome.runtime.onStartup.addListener(injectContentScriptIntoOpenTabs); chrome.runtime.onInstalled.addListener(injectContentScriptIntoOpenTabs);
 chrome.runtime.onMessage.addListener((message,sender)=>{if(!message||(message.type!=='neodym-click'&&message.type!=='neodym-typing'))return; const tab=sender.tab||{}; if(message.type==='neodym-typing'){post('/browser-typing',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,tagName:message.tagName,inputType:message.inputType,fieldHint:message.fieldHint,keyCount:message.keyCount,textLength:message.textLength,wordCount:message.wordCount,typed_sample_redacted:message.typed_sample_redacted,activityType:'typing_activity',sensitive:Boolean(message.sensitive),capturedAt:new Date().toISOString()}); return;} post('/browser-click',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,audible:Boolean(tab.audible),muted:Boolean(tab.mutedInfo&&tab.mutedInfo.muted),targetText:message.targetText,tagName:message.tagName,role:message.role,ariaLabel:message.ariaLabel,elementId:message.elementId,className:message.className,href:message.href,x:message.x,y:message.y,capturedAt:new Date().toISOString()});});
-setInterval(collectTabs,2000); setInterval(captureActiveVisibleTab,15000); injectContentScriptIntoOpenTabs(); captureActiveVisibleTab();
+setInterval(collectTabs,10000); setInterval(captureActiveVisibleTab,60000); injectContentScriptIntoOpenTabs(); setTimeout(captureActiveVisibleTab,10000);
 `;
 
 const firefoxExtensionBackground = `const BRIDGE = 'http://127.0.0.1:8766';
@@ -84,7 +84,7 @@ async function collectTabs(){const tabs=await tabsQuery({}); await post('/browse
 async function captureActiveVisibleTab(){try{const tabs=await tabsQuery({active:true,lastFocusedWindow:true}); const tab=tabs&&tabs[0]; if(!tab||!tab.id||!tab.windowId||!tab.url||!/^(https?|file):/i.test(tab.url))return; const result=api.tabs.captureVisibleTab(tab.windowId,{format:'jpeg',quality:60}); const dataUrl=result&&typeof result.then==='function'?await result:await new Promise((resolve)=>api.tabs.captureVisibleTab(tab.windowId,{format:'jpeg',quality:60},resolve)); await post('/browser-screenshot',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,dataUrl:dataUrl,capturedAt:new Date().toISOString()});}catch(error){}}
 api.tabs.onActivated.addListener(()=>{collectTabs();captureActiveVisibleTab();}); api.tabs.onUpdated.addListener(collectTabs); api.windows.onFocusChanged.addListener(()=>{collectTabs();captureActiveVisibleTab();}); api.tabs.onRemoved.addListener(collectTabs);
 api.runtime.onMessage.addListener((message,sender)=>{if(!message||(message.type!=='neodym-click'&&message.type!=='neodym-typing'))return; const tab=sender.tab||{}; if(message.type==='neodym-typing'){post('/browser-typing',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,tagName:message.tagName,inputType:message.inputType,fieldHint:message.fieldHint,keyCount:message.keyCount,textLength:message.textLength,wordCount:message.wordCount,typed_sample_redacted:message.typed_sample_redacted,activityType:'typing_activity',sensitive:Boolean(message.sensitive),capturedAt:new Date().toISOString()}); return;} post('/browser-click',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,audible:Boolean(tab.audible),muted:Boolean(tab.mutedInfo&&tab.mutedInfo.muted),targetText:message.targetText,tagName:message.tagName,role:message.role,ariaLabel:message.ariaLabel,elementId:message.elementId,className:message.className,href:message.href,x:message.x,y:message.y,capturedAt:new Date().toISOString()});});
-setInterval(collectTabs,2000); setInterval(captureActiveVisibleTab,15000); collectTabs(); captureActiveVisibleTab();
+setInterval(collectTabs,10000); setInterval(captureActiveVisibleTab,60000); collectTabs(); setTimeout(captureActiveVisibleTab,10000);
 `;
 
 const extensionContent = `if(!window.__neodymTrackerBridgeContentInjected){window.__neodymTrackerBridgeContentInjected=true;
@@ -526,10 +526,10 @@ chrome.runtime.onMessage.addListener((message, sender) => {
     capturedAt: new Date().toISOString(),
   });
 });
-setInterval(collectTabs, 2000);
-setInterval(captureActiveVisibleTab, 15000);
+setInterval(collectTabs, 10000);
+setInterval(captureActiveVisibleTab, 60000);
 injectContentScriptIntoOpenTabs();
-captureActiveVisibleTab();
+setTimeout(captureActiveVisibleTab, 10000);
 '''.strip() + chr(10), encoding='utf-8')
 
 (ext_dir / 'content.js').write_text(r'''
@@ -731,6 +731,8 @@ EMPLOYEE_TRACKER_FILE_CONTENT_MAX_BYTES=65536
 EMPLOYEE_TRACKER_ENABLE_PROCESS_CWD_ROOTS=1
 EMPLOYEE_TRACKER_ENABLE_CLIPBOARD=1
 EMPLOYEE_TRACKER_CLIPBOARD_MAX_TEXT_CHARS=4096
+EMPLOYEE_TRACKER_CLIPBOARD_POLL_SECONDS=120
+EMPLOYEE_TRACKER_CLIPBOARD_STARTUP_DELAY_SECONDS=30
 EMPLOYEE_TRACKER_MAX_DYNAMIC_FILE_ROOTS=8
 EMPLOYEE_TRACKER_LOCAL_SUCCESS_RETENTION_SECONDS=0
 EMPLOYEE_TRACKER_LOCAL_FAILED_RETENTION_SECONDS=3600
@@ -884,6 +886,8 @@ EMPLOYEE_TRACKER_FILE_CONTENT_MAX_BYTES=65536
 EMPLOYEE_TRACKER_ENABLE_PROCESS_CWD_ROOTS=1
 EMPLOYEE_TRACKER_ENABLE_CLIPBOARD=1
 EMPLOYEE_TRACKER_CLIPBOARD_MAX_TEXT_CHARS=4096
+EMPLOYEE_TRACKER_CLIPBOARD_POLL_SECONDS=120
+EMPLOYEE_TRACKER_CLIPBOARD_STARTUP_DELAY_SECONDS=30
 EMPLOYEE_TRACKER_MAX_DYNAMIC_FILE_ROOTS=8
 EMPLOYEE_TRACKER_LOCAL_SUCCESS_RETENTION_SECONDS=0
 EMPLOYEE_TRACKER_LOCAL_FAILED_RETENTION_SECONDS=3600
@@ -999,7 +1003,7 @@ async function collectTabs(){const tabs=await chrome.tabs.query({}); await post(
 async function captureActiveVisibleTab(){try{const tabs=await chrome.tabs.query({active:true,lastFocusedWindow:true}); const tab=tabs&&tabs[0]; if(!tab||!tab.id||!tab.windowId||!tab.url||!/^(https?|file):/i.test(tab.url))return; const dataUrl=await chrome.tabs.captureVisibleTab(tab.windowId,{format:'jpeg',quality:60}); await post('/browser-screenshot',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,dataUrl:dataUrl,capturedAt:new Date().toISOString()});}catch(error){}}
 chrome.tabs.onActivated.addListener(()=>{collectTabs();captureActiveVisibleTab();}); chrome.tabs.onUpdated.addListener(collectTabs); chrome.windows.onFocusChanged.addListener(()=>{collectTabs();captureActiveVisibleTab();}); async function injectContentScriptIntoOpenTabs(){if(!chrome.scripting||!chrome.scripting.executeScript)return; try{const tabs=await chrome.tabs.query({}); await Promise.allSettled((tabs||[]).filter((tab)=>tab.id&&tab.url&&/^(https?|file):/i.test(tab.url)).map((tab)=>chrome.scripting.executeScript({target:{tabId:tab.id,allFrames:true},files:['content.js']}))); await collectTabs();}catch(error){}} chrome.runtime.onStartup.addListener(injectContentScriptIntoOpenTabs); chrome.runtime.onInstalled.addListener(injectContentScriptIntoOpenTabs);
 chrome.runtime.onMessage.addListener((message,sender)=>{if(!message||(message.type!=='neodym-click'&&message.type!=='neodym-typing')) return; const tab=sender.tab||{}; if(message.type==='neodym-typing'){post('/browser-typing',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,tagName:message.tagName,inputType:message.inputType,fieldHint:message.fieldHint,keyCount:message.keyCount,textLength:message.textLength,wordCount:message.wordCount,typed_sample_redacted:message.typed_sample_redacted,activityType:'typing_activity',sensitive:Boolean(message.sensitive),capturedAt:new Date().toISOString()}); return;} post('/browser-click',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,targetText:message.targetText,tagName:message.tagName,role:message.role,ariaLabel:message.ariaLabel,elementId:message.elementId,className:message.className,href:message.href,x:message.x,y:message.y,capturedAt:new Date().toISOString()});});
-setInterval(collectTabs,2000); setInterval(captureActiveVisibleTab,15000); injectContentScriptIntoOpenTabs(); captureActiveVisibleTab();
+setInterval(collectTabs,10000); setInterval(captureActiveVisibleTab,60000); injectContentScriptIntoOpenTabs(); setTimeout(captureActiveVisibleTab,10000);
 '@ | Set-Content -Encoding UTF8 (Join-Path $ExtDir 'background.js')
   @'
 if (!window.__neodymTrackerBridgeContentInjected) { window.__neodymTrackerBridgeContentInjected = true;
@@ -1073,6 +1077,8 @@ EMPLOYEE_TRACKER_FILE_CONTENT_MAX_BYTES=65536
 EMPLOYEE_TRACKER_ENABLE_PROCESS_CWD_ROOTS=1
 EMPLOYEE_TRACKER_ENABLE_CLIPBOARD=1
 EMPLOYEE_TRACKER_CLIPBOARD_MAX_TEXT_CHARS=4096
+EMPLOYEE_TRACKER_CLIPBOARD_POLL_SECONDS=120
+EMPLOYEE_TRACKER_CLIPBOARD_STARTUP_DELAY_SECONDS=30
 EMPLOYEE_TRACKER_MAX_DYNAMIC_FILE_ROOTS=8
 EMPLOYEE_TRACKER_LOCAL_SUCCESS_RETENTION_SECONDS=0
 EMPLOYEE_TRACKER_LOCAL_FAILED_RETENTION_SECONDS=3600
