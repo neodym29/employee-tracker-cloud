@@ -40,6 +40,11 @@ for (const expected of ['Activity logs', 'Currently open tabs', 'All event types
 for (const expected of ['input_click', 'activity_session', 'audio_output', 'app_open', 'file_change', 'clipboard_change', 'Clipboard change', 'auto_update_status', 'Auto-update', 'content_status', 'content:']) {
   assert.match(dashboard, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `dashboard activity log filter/table should support ${expected}`);
 }
+assert.match(dashboard, /const allEventTypes = \[/, 'dashboard event-type filter should use a fixed all-event-types catalog');
+assert.doesNotMatch(dashboard, /const eventTypes = useMemo\(\(\) => Array\.from\(new Set\(activityLogEvents\(data\.events\)/, 'dashboard event-type filter must not be derived dynamically from current logs');
+for (const expected of ['activity_snapshot', 'installer_smoke_test', 'terminal_command', 'browser_tab', 'input_click', 'activity_session', 'typing_activity', 'keyboard_status', 'screenshot_capture', 'file_change', 'clipboard_change', 'auto_update_status', 'app_open', 'browser_compliance', 'audio_output', 'process_lifecycle', 'peripheral_snapshot', 'window_focus', 'window_snapshot', 'current_app', 'current_subwindow']) {
+  assert.match(dashboard, new RegExp(`\\{ value: '${expected}'`), `fixed event-type catalog should include ${expected}`);
+}
 assert.match(dashboard, /currentOpenTabs/, 'dashboard should support browser_tab rows in the current open tabs section');
 
 for (const expected of ['_capture_windows', 'System.Windows.Forms', 'SystemInformation]::VirtualScreen', 'image/jpeg', 'CopyFromScreen']) {

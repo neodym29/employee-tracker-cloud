@@ -16,6 +16,12 @@ const typeLabels: Record<string, string> = {
   typed_chunk: 'Typed chunk',
   shortcut: 'Shortcut',
   window_focus: 'Focus change',
+  window_snapshot: 'Window snapshot',
+  current_app: 'Current app',
+  current_subwindow: 'Current subwindow',
+  process_lifecycle: 'Process lifecycle',
+  peripheral_snapshot: 'Peripheral snapshot',
+  content_status: 'Content status',
   audio_output: 'Audio',
   browser_compliance: 'Browser safety',
   typing_activity: 'Typing activity',
@@ -24,6 +30,34 @@ const typeLabels: Record<string, string> = {
   clipboard_change: 'Clipboard change',
   auto_update_status: 'Auto-update',
 };
+
+const allEventTypes = [
+  { value: 'activity_snapshot', label: typeLabels.activity_snapshot },
+  { value: 'installer_smoke_test', label: typeLabels.installer_smoke_test },
+  { value: 'auto_update_status', label: typeLabels.auto_update_status },
+  { value: 'terminal_command', label: typeLabels.terminal_command },
+  { value: 'browser_tab', label: typeLabels.browser_tab },
+  { value: 'browser_compliance', label: typeLabels.browser_compliance },
+  { value: 'input_click', label: typeLabels.input_click },
+  { value: 'activity_session', label: typeLabels.activity_session },
+  { value: 'typing_activity', label: typeLabels.typing_activity },
+  { value: 'typed_chunk', label: typeLabels.typed_chunk },
+  { value: 'shortcut', label: typeLabels.shortcut },
+  { value: 'keyboard_status', label: typeLabels.keyboard_status },
+  { value: 'clipboard_change', label: typeLabels.clipboard_change },
+  { value: 'file_change', label: typeLabels.file_change },
+  { value: 'screenshot_capture', label: typeLabels.screenshot_capture },
+  { value: 'audio_output', label: typeLabels.audio_output },
+  { value: 'app_open', label: typeLabels.app_open },
+  { value: 'app_subwindow', label: typeLabels.app_subwindow },
+  { value: 'window_focus', label: typeLabels.window_focus },
+  { value: 'window_snapshot', label: typeLabels.window_snapshot },
+  { value: 'current_app', label: typeLabels.current_app },
+  { value: 'current_subwindow', label: typeLabels.current_subwindow },
+  { value: 'process_lifecycle', label: typeLabels.process_lifecycle },
+  { value: 'peripheral_snapshot', label: typeLabels.peripheral_snapshot },
+  { value: 'content_status', label: typeLabels.content_status },
+] as const;
 
 type DashboardData = {
   companies: any[];
@@ -292,7 +326,6 @@ export default function DashboardClient({ data, configured, error, initialFilter
   const router = useRouter();
   const pathname = usePathname();
   const allUsers = useMemo(() => Array.from(new Set(data.devices.map(rowUser).filter(Boolean))).sort(), [data.devices]);
-  const eventTypes = useMemo(() => Array.from(new Set(activityLogEvents(data.events).map((event) => event.event_type).filter(Boolean))).sort(), [data.events]);
   const now = useMemo(() => new Date(), []);
   const [mode, setMode] = useState<'latest' | 'range'>(initialFilters.mode || 'latest');
   const [user, setUser] = useState(initialFilters.user || 'all');
@@ -384,7 +417,7 @@ export default function DashboardClient({ data, configured, error, initialFilter
               Event type
               <select className="filter-event-type" value={eventType} onChange={(event) => setEventType(event.target.value)}>
                 <option value="all">All event types</option>
-                {eventTypes.map((option) => <option value={option} key={option}>{typeLabels[option] || option}</option>)}
+                {allEventTypes.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
               </select>
             </label>
             <label>
