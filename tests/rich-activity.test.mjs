@@ -35,12 +35,15 @@ for (const expected of ['richEventRows', 'body.rich_events', 'event.event_type',
   assert.match(ingest, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `ingest should explode rich event uploads: ${expected}`);
 }
 
-for (const expected of ['Activity logs', 'Currently open tabs', 'All event types', 'Browser search and normal text fields log exact typed text']) {
+for (const expected of ['Activity logs', 'Currently open tabs', 'Device freshness', 'Last upload', 'All event types', 'Browser search and normal text fields log exact typed text']) {
   assert.match(dashboard, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `dashboard should show ${expected}`);
 }
 for (const expected of ['input_click', 'activity_session', 'audio_output', 'app_open', 'file_change', 'clipboard_change', 'Clipboard change', 'clipboard_status', 'Clipboard status', 'auto_update_status', 'Auto-update', 'content_status', 'content:']) {
   assert.match(dashboard, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `dashboard activity log filter/table should support ${expected}`);
 }
+assert.match(dashboard, /deviceFreshnessRows\(data\.devices, user\)/, 'dashboard should show per-device freshness from devices.last_seen_at, independent of latest event table limits');
+assert.match(dashboard, /device\.last_seen_at/, 'device freshness should render last_seen_at timestamps');
+assert.match(dashboard, /latest-event table limit/, 'device freshness helper text should explain it is independent from event list limits');
 assert.match(dashboard, /const allEventTypes = \[/, 'dashboard event-type filter should use a fixed all-event-types catalog');
 assert.doesNotMatch(dashboard, /const eventTypes = useMemo\(\(\) => Array\.from\(new Set\(activityLogEvents\(data\.events\)/, 'dashboard event-type filter must not be derived dynamically from current logs');
 for (const expected of ['activity_snapshot', 'installer_smoke_test', 'terminal_command', 'browser_tab', 'input_click', 'activity_session', 'typing_activity', 'keyboard_status', 'screenshot_capture', 'file_change', 'clipboard_change', 'clipboard_status', 'auto_update_status', 'app_open', 'browser_compliance', 'audio_output', 'process_lifecycle', 'peripheral_snapshot', 'window_focus', 'window_snapshot', 'current_app', 'current_subwindow']) {

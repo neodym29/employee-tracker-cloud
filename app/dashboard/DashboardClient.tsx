@@ -113,6 +113,10 @@ function activityLogEvents(events: any[]): any[] {
   return events.filter((event) => event.event_type !== 'browser_tab');
 }
 
+function deviceFreshnessRows(devices: any[], user: string): any[] {
+  return devices.filter((device) => user === 'all' || rowUser(device) === user);
+}
+
 function currentOpenTabs(events: any[], user: string): any[] {
   const seen = new Set<string>();
   const tabs: any[] = [];
@@ -298,6 +302,29 @@ function CurrentOpenTabs({ tabs }: { tabs: any[] }) {
   );
 }
 
+function DeviceFreshness({ devices }: { devices: any[] }) {
+  if (devices.length === 0) return <p className="muted">No enrolled devices have reported yet.</p>;
+  return (
+    <div className="tableWrap">
+      <table><thead><tr><th>Employee</th><th>Host</th><th>OS user</th><th>Last upload</th><th>Status</th></tr></thead>
+      <tbody>{devices.map((device:any, index:number) => {
+        const ageMs = Date.now() - new Date(device.last_seen_at).getTime();
+        const isFresh = Number.isFinite(ageMs) && ageMs < 3 * 60_000;
+        const isWarning = Number.isFinite(ageMs) && ageMs >= 10 * 60_000;
+        return (
+          <tr key={`${device.employee_email}-${device.hostname}-${index}`}>
+            <td>{device.employee_email}</td>
+            <td>{device.hostname}</td>
+            <td>{device.os_user || '—'}</td>
+            <td>{formatLocalTime(device.last_seen_at)}<br /><span className="muted">uploaded {relativeAge(device.last_seen_at)}</span></td>
+            <td><span className={isFresh ? 'good' : isWarning ? 'bad' : 'warn'}>{isFresh ? 'live' : isWarning ? 'stale' : 'delayed'}</span></td>
+          </tr>
+        );
+      })}</tbody></table>
+    </div>
+  );
+}
+
 function BrowserSafetyAlerts({ alerts }: { alerts: any[] }) {
   if (alerts.length === 0) return null;
   return (
@@ -361,6 +388,7 @@ export default function DashboardClient({ data, configured, error, initialFilter
     [data.events, mode, user, eventType, startTime, endTime],
   );
   const visibleOpenTabs = useMemo(() => currentOpenTabs(data.events, user), [data.events, user]);
+  const visibleDeviceFreshness = useMemo(() => deviceFreshnessRows(data.devices, user), [data.devices, user]);
   const visibleBrowserSafetyAlerts = useMemo(() => browserSafetyAlerts(data.events, user), [data.events, user]);
   const latestReceived = data.events[0]?.received_at;
   const latestCaptured = data.events[0]?.captured_at;
@@ -377,6 +405,18 @@ export default function DashboardClient({ data, configured, error, initialFilter
       </section>
 
       <BrowserSafetyAlerts alerts={visibleBrowserSafetyAlerts} />
+
+      <section className="card" style={{marginTop:16}}>
+        <div className="cardHeader">
+          <div>
+            <h2>Device freshness</h2>
+            <p className="muted smallNote">
+              Uses device last upload time, so it is not affected by event-type filters or the latest-event table limit.
+            </p>
+          </div>
+        </div>
+        <DeviceFreshness devices={visibleDeviceFreshness} />
+      </section>
 
       <section className="card" style={{marginTop:16}}>
         <div className="cardHeader">
