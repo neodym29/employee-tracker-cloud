@@ -189,13 +189,16 @@ from .db import (
     insert_peripheral_snapshot,
     insert_process_lifecycle_event,
     insert_process_snapshot,
+    insert_resource_usage_snapshot,
     insert_screenshot_event,
     insert_warp_activity_snapshot,
     insert_window_snapshot,
     mark_file_deleted,
     prune_local_telemetry,
+    enqueue_cloud_payload,
     upsert_file_state,
 )
+from .resources import collect_resource_usage
 from .keyboard_chunks import KeyboardChunkRecorder, serialize_keys
 from .screenshots import capture_screenshot_with_status, screenshot_similarity
 from .terminal_commands import TerminalCommandReader
@@ -1432,18 +1435,40 @@ class ActivityCollector:
             # Keep legacy key name for the server route, but send the actual MIME type.
             activity_payload['screenshot_png_base64'] = screenshot_image_base64
             activity_payload['screenshot_mime_type'] = screenshot_mime_type
+        resource_usage_event = collect_resource_usage(connection, username=self.username, host=host)
+        insert_resource_usage_snapshot(connection, resource_usage_event)
+        activity_payload['rich_events'] = (activity_payload.get('rich_events') or []) + [resource_usage_event]
+        activity_payload['rich_logs']['resource_usage'] = [resource_usage_event]
+
         insert_activity(connection, activity_payload)
         cloud_enabled = self._cloud_uploader.enabled
-        cloud_upload_ok = self._cloud_uploader.upload_activity(activity_payload)
-        activity_payload['_cloud_upload_ok'] = cloud_upload_ok
-        if cloud_enabled:
-            activity_payload['_local_cleanup'] = self._cleanup_local_cache(
+        if cloud_enabled and self._cloud_uploader.settings is not None:
+            enqueue_cloud_payload(
                 connection,
-                captured_at,
-                cloud_upload_ok,
-                screenshot_path,
+                activity_payload,
+                max_rows=self._cloud_uploader.settings.max_queue_rows,
+                max_bytes=self._cloud_uploader.settings.max_queue_bytes,
             )
+            drain_result = self._cloud_uploader.drain_queue(connection)
+            cloud_upload_ok = drain_result.uploaded > 0 and drain_result.failed == 0
+            activity_payload['_cloud_upload_ok'] = cloud_upload_ok
+            activity_payload['_cloud_queue_drain'] = {
+                'attempted': drain_result.attempted,
+                'uploaded': drain_result.uploaded,
+                'failed': drain_result.failed,
+                'remaining': drain_result.remaining,
+            }
+            if cloud_upload_ok:
+                activity_payload['_local_cleanup'] = self._cleanup_local_cache(
+                    connection,
+                    captured_at,
+                    True,
+                    screenshot_path,
+                )
+            else:
+                activity_payload['_local_cleanup'] = {'skipped': 'cloud_queue_not_fully_drained'}
         else:
+            activity_payload['_cloud_upload_ok'] = False
             activity_payload['_local_cleanup'] = {'skipped': 'cloud_upload_not_configured'}
         return activity_payload
 

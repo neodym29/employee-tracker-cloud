@@ -22,6 +22,7 @@ LOCAL_TELEMETRY_TABLES = (
     'peripheral_snapshots',
     'browser_compliance_events',
     'keystroke_events',
+    'resource_usage_snapshots',
 )
 
 
@@ -377,6 +378,44 @@ CREATE TABLE IF NOT EXISTS clipboard_events (
 
 CREATE INDEX IF NOT EXISTS idx_clipboard_events_user_time
     ON clipboard_events(username, captured_at DESC);
+
+CREATE TABLE IF NOT EXISTS cloud_upload_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    captured_at TEXT,
+    event_type TEXT,
+    payload_json TEXT NOT NULL,
+    payload_bytes INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_cloud_upload_queue_created
+    ON cloud_upload_queue(id ASC);
+
+CREATE TABLE IF NOT EXISTS cloud_upload_queue_drops (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    dropped_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reason TEXT NOT NULL,
+    dropped_rows INTEGER NOT NULL DEFAULT 0,
+    dropped_bytes INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS resource_usage_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    captured_at TEXT NOT NULL,
+    username TEXT NOT NULL,
+    host TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    process_rss_bytes INTEGER NOT NULL DEFAULT 0,
+    process_cpu_seconds REAL NOT NULL DEFAULT 0,
+    cloud_queue_pending_count INTEGER NOT NULL DEFAULT 0,
+    cloud_queue_pending_bytes INTEGER NOT NULL DEFAULT 0,
+    cloud_queue_dropped_count INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_resource_usage_user_time
+    ON resource_usage_snapshots(username, captured_at DESC);
 """
 
 
@@ -453,6 +492,113 @@ def prune_local_telemetry(connection: sqlite3.Connection, captured_at_cutoff: st
     except sqlite3.DatabaseError:
         pass
     return deleted
+
+
+def _record_cloud_queue_drop(connection: sqlite3.Connection, *, reason: str, dropped_rows: int, dropped_bytes: int) -> None:
+    if dropped_rows <= 0:
+        return
+    connection.execute(
+        """
+        INSERT INTO cloud_upload_queue_drops(reason, dropped_rows, dropped_bytes)
+        VALUES (?, ?, ?)
+        """,
+        (reason, dropped_rows, dropped_bytes),
+    )
+
+
+def _prune_cloud_queue(connection: sqlite3.Connection, *, max_rows: int | None = None, max_bytes: int | None = None) -> None:
+    max_rows = max_rows if max_rows and max_rows > 0 else None
+    max_bytes = max_bytes if max_bytes and max_bytes > 0 else None
+    if max_rows is not None:
+        count = int(connection.execute('SELECT COUNT(*) FROM cloud_upload_queue').fetchone()[0])
+        overflow = count - max_rows
+        if overflow > 0:
+            victims = connection.execute(
+                'SELECT id, payload_bytes FROM cloud_upload_queue ORDER BY id ASC LIMIT ?',
+                (overflow,),
+            ).fetchall()
+            dropped_bytes = sum(int(row['payload_bytes'] or 0) for row in victims)
+            connection.executemany('DELETE FROM cloud_upload_queue WHERE id = ?', [(row['id'],) for row in victims])
+            _record_cloud_queue_drop(connection, reason='max_rows_exceeded', dropped_rows=len(victims), dropped_bytes=dropped_bytes)
+    if max_bytes is not None:
+        total = int(connection.execute('SELECT COALESCE(SUM(payload_bytes), 0) FROM cloud_upload_queue').fetchone()[0])
+        dropped_rows = 0
+        dropped_bytes = 0
+        while total > max_bytes:
+            row = connection.execute('SELECT id, payload_bytes FROM cloud_upload_queue ORDER BY id ASC LIMIT 1').fetchone()
+            if row is None:
+                break
+            size = int(row['payload_bytes'] or 0)
+            connection.execute('DELETE FROM cloud_upload_queue WHERE id = ?', (row['id'],))
+            total -= size
+            dropped_rows += 1
+            dropped_bytes += size
+        _record_cloud_queue_drop(connection, reason='max_bytes_exceeded', dropped_rows=dropped_rows, dropped_bytes=dropped_bytes)
+
+
+def enqueue_cloud_payload(
+    connection: sqlite3.Connection,
+    payload: dict[str, Any],
+    *,
+    max_rows: int | None = None,
+    max_bytes: int | None = None,
+) -> int:
+    payload_json = json.dumps(payload, ensure_ascii=False, default=str)
+    payload_bytes = len(payload_json.encode('utf-8'))
+    cursor = connection.execute(
+        """
+        INSERT INTO cloud_upload_queue(captured_at, event_type, payload_json, payload_bytes)
+        VALUES (?, ?, ?, ?)
+        """,
+        (payload.get('captured_at'), payload.get('event_type'), payload_json, payload_bytes),
+    )
+    _prune_cloud_queue(connection, max_rows=max_rows, max_bytes=max_bytes)
+    connection.commit()
+    return int(cursor.lastrowid)
+
+
+def fetch_cloud_queue_batch(connection: sqlite3.Connection, *, limit: int) -> list[sqlite3.Row]:
+    return list(connection.execute('SELECT * FROM cloud_upload_queue ORDER BY id ASC LIMIT ?', (max(1, limit),)).fetchall())
+
+
+def mark_cloud_payload_uploaded(connection: sqlite3.Connection, queue_id: int) -> None:
+    connection.execute('DELETE FROM cloud_upload_queue WHERE id = ?', (queue_id,))
+    connection.commit()
+
+
+def cloud_queue_stats(connection: sqlite3.Connection) -> dict[str, int]:
+    row = connection.execute('SELECT COUNT(*) AS pending_count, COALESCE(SUM(payload_bytes), 0) AS pending_bytes FROM cloud_upload_queue').fetchone()
+    drops = connection.execute('SELECT COALESCE(SUM(dropped_rows), 0) AS dropped_count, COALESCE(SUM(dropped_bytes), 0) AS dropped_bytes FROM cloud_upload_queue_drops').fetchone()
+    return {
+        'pending_count': int(row['pending_count'] or 0),
+        'pending_bytes': int(row['pending_bytes'] or 0),
+        'dropped_count': int(drops['dropped_count'] or 0),
+        'dropped_bytes': int(drops['dropped_bytes'] or 0),
+    }
+
+
+def insert_resource_usage_snapshot(connection: sqlite3.Connection, row: dict[str, Any]) -> None:
+    connection.execute(
+        """
+        INSERT INTO resource_usage_snapshots(
+            captured_at, username, host, event_type, process_rss_bytes,
+            process_cpu_seconds, cloud_queue_pending_count, cloud_queue_pending_bytes,
+            cloud_queue_dropped_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            row['captured_at'],
+            row['username'],
+            row['host'],
+            row.get('event_type', 'tracker_resource_usage'),
+            int(row.get('process_rss_bytes') or 0),
+            float(row.get('process_cpu_seconds') or 0.0),
+            int(row.get('cloud_queue_pending_count') or 0),
+            int(row.get('cloud_queue_pending_bytes') or 0),
+            int(row.get('cloud_queue_dropped_count') or 0),
+        ),
+    )
+    connection.commit()
 
 
 def _migrate_keystroke_schema(connection: sqlite3.Connection) -> None:

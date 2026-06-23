@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from employee_tracker.collector import ActivityCollector
+from employee_tracker.cloud import CloudSettings
 from employee_tracker.config import load_settings
 from employee_tracker.db import connect, fetch_file_event_rows, init_db
 from employee_tracker.workspace import capture_file_content, scan_workspace
@@ -127,6 +128,18 @@ class FileTrackingTests(unittest.TestCase):
                 enable_process_cwd_roots=False,
             )
             uploaded = []
+            collector._cloud_uploader.settings = CloudSettings(
+                api_url='https://example.invalid/api/ingest',
+                token='token',
+                employee_email='jerry@example.com',
+                company_domain='example.com',
+                device_key='jerry@example.com:test-host:jerry',
+                upload_interval_seconds=0,
+                max_queue_batch_size=25,
+                queue_drain_pause_seconds=0.0,
+                max_queue_rows=100,
+                max_queue_bytes=10_000_000,
+            )
             collector._cloud_uploader.upload_activity = lambda payload: uploaded.append(payload) or True
 
             with connect(db_path) as connection:
