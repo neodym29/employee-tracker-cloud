@@ -76,6 +76,50 @@ type DashboardFilters = {
   endTime: string;
 };
 
+type DashboardCardId = 'browser_safety_alerts' | 'device_freshness' | 'current_open_tabs' | 'activity_logs';
+
+type DashboardCardDefinition = {
+  id: DashboardCardId;
+  title: string;
+  description: string;
+};
+
+const dashboardCardRegistry: DashboardCardDefinition[] = [
+  {
+    id: 'browser_safety_alerts',
+    title: 'Browser safety alerts',
+    description: 'Critical extension/compliance warnings.',
+  },
+  {
+    id: 'device_freshness',
+    title: 'Device freshness',
+    description: 'Last upload health for enrolled devices.',
+  },
+  {
+    id: 'current_open_tabs',
+    title: 'Currently open tabs',
+    description: 'Live browser tab snapshots.',
+  },
+  {
+    id: 'activity_logs',
+    title: 'Activity logs',
+    description: 'Raw activity feed with user/type/time filters.',
+  },
+];
+
+const defaultDashboardCards = dashboardCardRegistry.map((card) => card.id);
+
+function dashboardCardStorageKey(user: string): string {
+  return `neodym.dashboard.cards.${user || 'all'}`;
+}
+
+function validDashboardCards(value: unknown): DashboardCardId[] | null {
+  if (!Array.isArray(value)) return null;
+  const known = new Set(dashboardCardRegistry.map((card) => card.id));
+  const cards = value.filter((item): item is DashboardCardId => typeof item === 'string' && known.has(item as DashboardCardId));
+  return cards.length > 0 ? cards : null;
+}
+
 function eventTimestamp(event: any): string {
   return event.captured_at || event.received_at || '';
 }
@@ -352,6 +396,53 @@ function BrowserSafetyAlerts({ alerts }: { alerts: any[] }) {
   );
 }
 
+function CardVisibilityControls({ cards, onCardsChange }: { cards: DashboardCardId[]; onCardsChange: (cards: DashboardCardId[]) => void }) {
+  const selected = new Set(cards);
+
+  function toggleCard(cardId: DashboardCardId) {
+    if (selected.has(cardId)) {
+      const nextCards = cards.filter((id) => id !== cardId);
+      onCardsChange(nextCards.length > 0 ? nextCards : cards);
+      return;
+    }
+    onCardsChange([...cards, cardId]);
+  }
+
+  function moveCard(cardId: DashboardCardId, direction: -1 | 1) {
+    const index = cards.indexOf(cardId);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= cards.length) return;
+    const nextCards = [...cards];
+    [nextCards[index], nextCards[nextIndex]] = [nextCards[nextIndex], nextCards[index]];
+    onCardsChange(nextCards);
+  }
+
+  return (
+    <details className="dashboard-card-config" style={{ marginTop: 12 }}>
+      <summary>Customize cards for this user</summary>
+      <div className="cardConfigList">
+        {dashboardCardRegistry.map((card) => {
+          const enabled = selected.has(card.id);
+          const position = cards.indexOf(card.id);
+          return (
+            <div className="cardConfigRow" key={card.id}>
+              <label>
+                <input type="checkbox" checked={enabled} onChange={() => toggleCard(card.id)} />
+                <span><strong>{card.title}</strong><br /><span className="muted">{card.description}</span></span>
+              </label>
+              {enabled && <span className="cardConfigActions">
+                <button type="button" onClick={() => moveCard(card.id, -1)} disabled={position <= 0}>↑</button>
+                <button type="button" onClick={() => moveCard(card.id, 1)} disabled={position === -1 || position >= cards.length - 1}>↓</button>
+              </span>}
+            </div>
+          );
+        })}
+      </div>
+      <p className="muted smallNote">Saved locally per selected user. New dashboard card types can be added by registering them in the card registry, then enabled here.</p>
+    </details>
+  );
+}
+
 export default function DashboardClient({ data, configured, error, initialFilters }: { data: DashboardData; configured: boolean; error: string; initialFilters: DashboardFilters }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -362,6 +453,8 @@ export default function DashboardClient({ data, configured, error, initialFilter
   const [eventType, setEventType] = useState(initialFilters.eventType || 'all');
   const [startTime, setStartTime] = useState(initialFilters.startTime || toDateTimeLocalValue(new Date(now.getTime() - 60 * 60 * 1000)));
   const [endTime, setEndTime] = useState(initialFilters.endTime || toDateTimeLocalValue(now));
+  const [visibleCardIds, setVisibleCardIds] = useState<DashboardCardId[]>(defaultDashboardCards);
+  const [cardConfigLoadedFor, setCardConfigLoadedFor] = useState('');
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -383,6 +476,22 @@ export default function DashboardClient({ data, configured, error, initialFilter
     return () => window.clearInterval(interval);
   }, [router]);
 
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(dashboardCardStorageKey(user));
+      const parsed = stored ? validDashboardCards(JSON.parse(stored)) : null;
+      setVisibleCardIds(parsed || defaultDashboardCards);
+    } catch {
+      setVisibleCardIds(defaultDashboardCards);
+    }
+    setCardConfigLoadedFor(user);
+  }, [user]);
+
+  useEffect(() => {
+    if (cardConfigLoadedFor !== user) return;
+    window.localStorage.setItem(dashboardCardStorageKey(user), JSON.stringify(visibleCardIds));
+  }, [cardConfigLoadedFor, user, visibleCardIds]);
+
   const visibleEvents = useMemo(
     () => filteredEvents(activityLogEvents(data.events), mode, user, eventType, startTime, endTime),
     [data.events, mode, user, eventType, startTime, endTime],
@@ -394,6 +503,91 @@ export default function DashboardClient({ data, configured, error, initialFilter
   const latestCaptured = data.events[0]?.captured_at;
   const rangeDisabled = mode === 'latest';
 
+  function renderDashboardCard(cardId: DashboardCardId) {
+    if (cardId === 'browser_safety_alerts') return <BrowserSafetyAlerts key={cardId} alerts={visibleBrowserSafetyAlerts} />;
+    if (cardId === 'device_freshness') {
+      return (
+        <section className="card" style={{marginTop:16}} key={cardId} data-dashboard-card={cardId}>
+          <div className="cardHeader">
+            <div>
+              <h2>Device freshness</h2>
+              <p className="muted smallNote">
+                Uses device last upload time, so it is not affected by event-type filters or the latest-event table limit.
+              </p>
+            </div>
+          </div>
+          <DeviceFreshness devices={visibleDeviceFreshness} />
+        </section>
+      );
+    }
+    if (cardId === 'current_open_tabs') {
+      return (
+        <section className="card" style={{marginTop:16}} key={cardId} data-dashboard-card={cardId}>
+          <div className="cardHeader">
+            <div>
+              <h2>Currently open tabs</h2>
+              <p className="muted smallNote">
+                These are live browser state snapshots, so they are separated from the activity logs below.
+              </p>
+            </div>
+          </div>
+          <CurrentOpenTabs tabs={visibleOpenTabs} />
+        </section>
+      );
+    }
+    if (cardId === 'activity_logs') {
+      return (
+        <section className="card" style={{marginTop:16}} key={cardId} data-dashboard-card={cardId}>
+          <div className="cardHeader">
+            <div>
+              <h2>Activity logs</h2>
+              <p className="muted smallNote">
+                Showing {visibleEvents.length} of {activityLogEvents(data.events).length}. Use Latest events for the live feed, or choose Selected time period for historical filters.
+              </p>
+            </div>
+            <div className="cardActions">
+              <button className="refresh-dashboard" type="button" onClick={() => router.refresh()}>Refresh latest data</button>
+            </div>
+            <div className="cardFilters rawEventFilters" data-card-filter="true">
+              <label>
+                View
+                <select className="filter-mode" value={mode} onChange={(event) => setMode(event.target.value as 'latest' | 'range')}>
+                  <option value="latest">Latest events</option>
+                  <option value="range">Selected time period</option>
+                </select>
+              </label>
+              <label>
+                User
+                <select className="filter-user" value={user} onChange={(event) => setUser(event.target.value)}>
+                  <option value="all">All users</option>
+                  {allUsers.map((option) => <option value={option} key={option}>{option}</option>)}
+                </select>
+              </label>
+              <label>
+                Event type
+                <select className="filter-event-type" value={eventType} onChange={(event) => setEventType(event.target.value)}>
+                  <option value="all">All event types</option>
+                  {allEventTypes.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
+                </select>
+              </label>
+              <label>
+                Start time
+                <input className="filter-start-time" type="datetime-local" value={startTime} disabled={rangeDisabled} onChange={(event) => setStartTime(event.target.value)} />
+              </label>
+              <label>
+                End time
+                <input className="filter-end-time" type="datetime-local" value={endTime} disabled={rangeDisabled} onChange={(event) => setEndTime(event.target.value)} />
+              </label>
+            </div>
+          </div>
+          <EventsTable events={visibleEvents} />
+          <p className="muted smallNote">Browser search and normal text fields log exact typed text; password, OTP, token, card, CVV, and PIN-like fields stay redacted.</p>
+        </section>
+      );
+    }
+    return null;
+  }
+
   return (
     <div>
       <section className="card">
@@ -402,80 +596,10 @@ export default function DashboardClient({ data, configured, error, initialFilter
         {!configured && <p className="warn">DATABASE_URL is not configured yet.</p>}
         {error && <p className="bad">Database error: {error}</p>}
         <p className="muted">Latest captured: {formatLocalTime(latestCaptured)} ({relativeAge(latestCaptured)}). Latest uploaded: {formatLocalTime(latestReceived)} ({relativeAge(latestReceived)}).</p>
+        <CardVisibilityControls cards={visibleCardIds} onCardsChange={setVisibleCardIds} />
       </section>
 
-      <BrowserSafetyAlerts alerts={visibleBrowserSafetyAlerts} />
-
-      <section className="card" style={{marginTop:16}}>
-        <div className="cardHeader">
-          <div>
-            <h2>Device freshness</h2>
-            <p className="muted smallNote">
-              Uses device last upload time, so it is not affected by event-type filters or the latest-event table limit.
-            </p>
-          </div>
-        </div>
-        <DeviceFreshness devices={visibleDeviceFreshness} />
-      </section>
-
-      <section className="card" style={{marginTop:16}}>
-        <div className="cardHeader">
-          <div>
-            <h2>Currently open tabs</h2>
-            <p className="muted smallNote">
-              These are live browser state snapshots, so they are separated from the activity logs below.
-            </p>
-          </div>
-        </div>
-        <CurrentOpenTabs tabs={visibleOpenTabs} />
-      </section>
-
-      <section className="card" style={{marginTop:16}}>
-        <div className="cardHeader">
-          <div>
-            <h2>Activity logs</h2>
-            <p className="muted smallNote">
-              Showing {visibleEvents.length} of {activityLogEvents(data.events).length}. Use Latest events for the live feed, or choose Selected time period for historical filters.
-            </p>
-          </div>
-          <div className="cardActions">
-            <button className="refresh-dashboard" type="button" onClick={() => router.refresh()}>Refresh latest data</button>
-          </div>
-          <div className="cardFilters rawEventFilters" data-card-filter="true">
-            <label>
-              View
-              <select className="filter-mode" value={mode} onChange={(event) => setMode(event.target.value as 'latest' | 'range')}>
-                <option value="latest">Latest events</option>
-                <option value="range">Selected time period</option>
-              </select>
-            </label>
-            <label>
-              User
-              <select className="filter-user" value={user} onChange={(event) => setUser(event.target.value)}>
-                <option value="all">All users</option>
-                {allUsers.map((option) => <option value={option} key={option}>{option}</option>)}
-              </select>
-            </label>
-            <label>
-              Event type
-              <select className="filter-event-type" value={eventType} onChange={(event) => setEventType(event.target.value)}>
-                <option value="all">All event types</option>
-                {allEventTypes.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
-              </select>
-            </label>
-            <label>
-              Start time
-              <input className="filter-start-time" type="datetime-local" value={startTime} disabled={rangeDisabled} onChange={(event) => setStartTime(event.target.value)} />
-            </label>
-            <label>
-              End time
-              <input className="filter-end-time" type="datetime-local" value={endTime} disabled={rangeDisabled} onChange={(event) => setEndTime(event.target.value)} />
-            </label>
-          </div>
-        </div>
-        <EventsTable events={visibleEvents} />
-        <p className="muted smallNote">Browser search and normal text fields log exact typed text; password, OTP, token, card, CVV, and PIN-like fields stay redacted.</p>
-      </section>
+      {visibleCardIds.map((cardId) => renderDashboardCard(cardId))}
     </div>
   );
 }

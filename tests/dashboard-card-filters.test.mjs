@@ -9,6 +9,14 @@ const page = readFileSync(new URL('../app/dashboard/page.tsx', import.meta.url),
 
 assert.match(page, /<DashboardClient\s+data=\{(?:data|serializableData)\}/, 'server dashboard page should hand data to DashboardClient');
 assert.match(client, /Activity logs/, 'dashboard should render an activity logs card');
+assert.match(client, /dashboardCardRegistry/, 'dashboard should define a card registry for configurable cards');
+assert.match(client, /Customize cards for this user/, 'dashboard should expose per-user card customization controls');
+assert.match(client, /localStorage\.setItem\(dashboardCardStorageKey\(user\)/, 'dashboard should persist visible cards per selected user');
+assert.match(client, /visibleCardIds\.map/, 'dashboard should render cards from the selected card configuration');
+assert.match(client, /device_freshness/, 'card registry should include the device freshness card');
+assert.match(client, /current_open_tabs/, 'card registry should include the open tabs card');
+assert.match(client, /activity_logs/, 'card registry should include the activity logs card');
+assert.match(client, /browser_safety_alerts/, 'card registry should include the browser safety alerts card');
 assert.match(client, /filter-user/, 'raw events card should render a user filter control');
 assert.match(client, /filter-event-type/, 'raw events card should render an event type filter control');
 assert.match(client, /filter-start-time/, 'raw events card should render a start time control');

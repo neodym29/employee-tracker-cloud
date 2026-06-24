@@ -33,5 +33,12 @@ button, .button { display:inline-block; border:0; border-radius:999px; backgroun
 .cardFilters { display:grid; grid-template-columns:repeat(2,minmax(150px,1fr)); gap:10px; min-width:min(420px,100%); }
 .cardFilters label { color:var(--muted); font-size:12px; font-weight:900; text-transform:uppercase; letter-spacing:.05em; }
 .smallNote { margin:0 0 10px; font-size:13px; }
+.dashboard-card-config summary { cursor:pointer; font-weight:900; }
+.cardConfigList { display:grid; gap:10px; margin-top:12px; }
+.cardConfigRow { display:flex; justify-content:space-between; gap:12px; align-items:center; border:1px solid var(--line); border-radius:16px; padding:10px 12px; background:#fff; }
+.cardConfigRow label { display:flex; gap:10px; align-items:flex-start; cursor:pointer; }
+.cardConfigRow input { width:auto; margin-top:4px; }
+.cardConfigActions { display:flex; gap:6px; }
+.cardConfigActions button { padding:8px 11px; }
 button:disabled { opacity:.55; cursor:not-allowed; }
 @media (max-width:800px){ .hero{grid-template-columns:1fr;} }
