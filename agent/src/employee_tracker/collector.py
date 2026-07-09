@@ -229,8 +229,9 @@ class ActivityCollector:
         file_roots: tuple[Path, ...] | None = None,
         poll_interval_seconds: int = 1,
         screenshot_interval_seconds: int = 60,
-        file_scan_interval_seconds: int = 30,
-        process_scan_interval_seconds: int = 30,
+        file_scan_interval_seconds: int = 120,
+        process_scan_interval_seconds: int = 60,
+        state_snapshot_interval_seconds: int = 10,
         enable_screenshots: bool = True,
         enable_keyboard_chunks: bool = False,
         keyboard_idle_seconds: float = 2.5,
@@ -271,6 +272,7 @@ class ActivityCollector:
         self.local_failed_retention_seconds = max(0, local_failed_retention_seconds)
         self.file_scan_interval_seconds = file_scan_interval_seconds
         self.process_scan_interval_seconds = process_scan_interval_seconds
+        self.state_snapshot_interval_seconds = max(1, state_snapshot_interval_seconds)
         self.enable_screenshots = enable_screenshots
         self.enable_keyboard_chunks = enable_keyboard_chunks
         self._keyboard_recorder = KeyboardChunkRecorder(
@@ -285,6 +287,9 @@ class ActivityCollector:
         # Do not block first cloud connection on a potentially large home-directory scan.
         self._last_file_scan_at: float = time.time()
         self._last_process_scan_at: float = 0.0
+        self._last_state_snapshot_at: float = 0.0
+        self._cached_windows: list[object] = []
+        self._cached_open_state: dict[str, list[dict[str, object]]] = {'open_apps': [], 'subwindows': [], 'browser_compliance_events': []}
         self._last_keyboard_status_at: float = 0.0
         self._workspace_root = str(self.workspace_dir)
         self._file_roots = tuple(str(root) for root in self.file_roots)
@@ -1234,9 +1239,20 @@ class ActivityCollector:
             file_change_events = self._record_workspace_snapshot(connection, captured_at, host, current_processes)
             self._last_file_scan_at = now
 
-        windows = self._record_window_snapshot(connection, captured_at, host)
-        self._record_warp_activity(connection, captured_at, host, current_processes, windows)
-        open_state = self._record_current_open_state(connection, captured_at, host, current_processes, windows)
+        state_snapshot_fresh = (now - self._last_state_snapshot_at) >= self.state_snapshot_interval_seconds
+        if state_snapshot_fresh:
+            windows = self._record_window_snapshot(connection, captured_at, host)
+            self._record_warp_activity(connection, captured_at, host, current_processes, windows)
+            open_state = self._record_current_open_state(connection, captured_at, host, current_processes, windows)
+            self._cached_windows = windows
+            self._cached_open_state = open_state
+            self._last_state_snapshot_at = now
+        else:
+            windows = self._cached_windows
+            # Keep using the cached windows for click attribution, but do not re-upload
+            # repeated current-open-state rows every lightweight tick. Dedicated current
+            # snapshot tables and rich logs refresh on the state cadence above.
+            open_state = {'open_apps': [], 'subwindows': [], 'browser_compliance_events': []}
         focus_events = self._record_browser_focus_events(connection, captured_at, host)
 
         window = current_window_info()

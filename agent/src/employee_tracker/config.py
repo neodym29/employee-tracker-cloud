@@ -41,6 +41,7 @@ class Settings:
     screenshot_similarity_threshold: float
     file_scan_interval_seconds: int
     process_scan_interval_seconds: int
+    state_snapshot_interval_seconds: int
     enable_screenshots: bool
     enable_keyboard_chunks: bool
     keyboard_idle_seconds: float
@@ -68,12 +69,12 @@ def load_settings() -> Settings:
     screenshot_dir = Path(os.environ.get('EMPLOYEE_TRACKER_SCREENSHOT_DIR', base_dir / 'screenshots'))
     workspace_dir = Path(os.environ.get('EMPLOYEE_TRACKER_WORKSPACE', default_workspace)).expanduser()
     file_roots = _parse_path_list(os.environ.get('EMPLOYEE_TRACKER_FILE_ROOTS')) or (workspace_dir,)
-    poll_interval_seconds = int(os.environ.get('EMPLOYEE_TRACKER_POLL_SECONDS', '1'))
+    poll_interval_seconds = int(os.environ.get('EMPLOYEE_TRACKER_POLL_SECONDS', '2'))
     file_scan_interval_seconds = int(
-        os.environ.get('EMPLOYEE_TRACKER_FILE_SCAN_SECONDS', str(poll_interval_seconds))
+        os.environ.get('EMPLOYEE_TRACKER_FILE_SCAN_SECONDS', '120')
     )
     process_scan_interval_seconds = int(
-        os.environ.get('EMPLOYEE_TRACKER_PROCESS_SCAN_SECONDS', str(poll_interval_seconds))
+        os.environ.get('EMPLOYEE_TRACKER_PROCESS_SCAN_SECONDS', '60')
     )
 
     return Settings(
@@ -87,11 +88,12 @@ def load_settings() -> Settings:
         screenshot_similarity_threshold=float(os.environ.get('EMPLOYEE_TRACKER_SCREENSHOT_SIMILARITY_THRESHOLD', '0.985')),
         file_scan_interval_seconds=file_scan_interval_seconds,
         process_scan_interval_seconds=process_scan_interval_seconds,
+        state_snapshot_interval_seconds=int(os.environ.get('EMPLOYEE_TRACKER_STATE_SNAPSHOT_SECONDS', '10')),
         enable_screenshots=os.environ.get('EMPLOYEE_TRACKER_ENABLE_SCREENSHOTS', '0') in {'1', 'true', 'True', 'yes', 'YES'},
         enable_keyboard_chunks=os.environ.get('EMPLOYEE_TRACKER_ENABLE_KEYBOARD_CHUNKS', '0') in {'1', 'true', 'True', 'yes', 'YES'},
         keyboard_idle_seconds=float(os.environ.get('EMPLOYEE_TRACKER_KEYBOARD_IDLE_SECONDS', '2.5')),
         keyboard_max_chunk_seconds=float(os.environ.get('EMPLOYEE_TRACKER_KEYBOARD_MAX_CHUNK_SECONDS', '30')),
-        enable_file_content=os.environ.get('EMPLOYEE_TRACKER_ENABLE_FILE_CONTENT', '1') in {'1', 'true', 'True', 'yes', 'YES'},
+        enable_file_content=os.environ.get('EMPLOYEE_TRACKER_ENABLE_FILE_CONTENT', '0') in {'1', 'true', 'True', 'yes', 'YES'},
         file_content_max_bytes=int(os.environ.get('EMPLOYEE_TRACKER_FILE_CONTENT_MAX_BYTES', '65536')),
         enable_process_cwd_roots=os.environ.get('EMPLOYEE_TRACKER_ENABLE_PROCESS_CWD_ROOTS', '1') in {'1', 'true', 'True', 'yes', 'YES'},
         enable_clipboard=os.environ.get('EMPLOYEE_TRACKER_ENABLE_CLIPBOARD', '0') in {'1', 'true', 'True', 'yes', 'YES'},
@@ -99,7 +101,7 @@ def load_settings() -> Settings:
         clipboard_poll_interval_seconds=float(os.environ.get('EMPLOYEE_TRACKER_CLIPBOARD_POLL_SECONDS', '120')),
         clipboard_startup_delay_seconds=float(os.environ.get('EMPLOYEE_TRACKER_CLIPBOARD_STARTUP_DELAY_SECONDS', '30')),
         enable_audio_outputs=os.environ.get('EMPLOYEE_TRACKER_ENABLE_AUDIO_OUTPUTS', '0') in {'1', 'true', 'True', 'yes', 'YES'},
-        max_dynamic_file_roots=int(os.environ.get('EMPLOYEE_TRACKER_MAX_DYNAMIC_FILE_ROOTS', '8')),
+        max_dynamic_file_roots=int(os.environ.get('EMPLOYEE_TRACKER_MAX_DYNAMIC_FILE_ROOTS', '3')),
         # Cloud installs should not keep employee activity on the local PC after
         # Supabase accepts it. Keep successful-upload retention at 0 by default;
         # override only for local debugging/export workflows. Failed uploads are

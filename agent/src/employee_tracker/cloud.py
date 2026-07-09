@@ -48,11 +48,11 @@ def load_cloud_settings() -> CloudSettings | None:
     host = socket.gethostname()
     os_user = _os_user()
     device_key = os.environ.get('EMPLOYEE_TRACKER_DEVICE_KEY', f'{employee_email}:{host}:{os_user}').strip()
-    upload_interval = int(os.environ.get('EMPLOYEE_TRACKER_CLOUD_UPLOAD_SECONDS', '1'))
+    upload_interval = int(os.environ.get('EMPLOYEE_TRACKER_CLOUD_UPLOAD_SECONDS', '5'))
     batch_size = int(os.environ.get('EMPLOYEE_TRACKER_UPLOAD_BATCH_SIZE', '25'))
     drain_pause = float(os.environ.get('EMPLOYEE_TRACKER_UPLOAD_BATCH_PAUSE_SECONDS', '0.25'))
-    max_queue_rows = int(os.environ.get('EMPLOYEE_TRACKER_MAX_UPLOAD_QUEUE_ROWS', '25000'))
-    max_queue_bytes = int(os.environ.get('EMPLOYEE_TRACKER_MAX_UPLOAD_QUEUE_BYTES', str(256 * 1024 * 1024)))
+    max_queue_rows = int(os.environ.get('EMPLOYEE_TRACKER_MAX_UPLOAD_QUEUE_ROWS', '5000'))
+    max_queue_bytes = int(os.environ.get('EMPLOYEE_TRACKER_MAX_UPLOAD_QUEUE_BYTES', str(64 * 1024 * 1024)))
     return CloudSettings(
         api_url=api_url,
         token=token.strip(),
