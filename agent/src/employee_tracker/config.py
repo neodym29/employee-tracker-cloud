@@ -55,8 +55,10 @@ class Settings:
     clipboard_startup_delay_seconds: float
     enable_audio_outputs: bool
     max_dynamic_file_roots: int
+    max_file_roots_per_scan: int
     local_success_retention_seconds: int
     local_failed_retention_seconds: int
+    local_cleanup_interval_seconds: int
     app_name: str
     username: str
 
@@ -69,7 +71,7 @@ def load_settings() -> Settings:
     screenshot_dir = Path(os.environ.get('EMPLOYEE_TRACKER_SCREENSHOT_DIR', base_dir / 'screenshots'))
     workspace_dir = Path(os.environ.get('EMPLOYEE_TRACKER_WORKSPACE', default_workspace)).expanduser()
     file_roots = _parse_path_list(os.environ.get('EMPLOYEE_TRACKER_FILE_ROOTS')) or (workspace_dir,)
-    poll_interval_seconds = int(os.environ.get('EMPLOYEE_TRACKER_POLL_SECONDS', '2'))
+    poll_interval_seconds = int(os.environ.get('EMPLOYEE_TRACKER_POLL_SECONDS', '3'))
     file_scan_interval_seconds = int(
         os.environ.get('EMPLOYEE_TRACKER_FILE_SCAN_SECONDS', '120')
     )
@@ -102,12 +104,14 @@ def load_settings() -> Settings:
         clipboard_startup_delay_seconds=float(os.environ.get('EMPLOYEE_TRACKER_CLIPBOARD_STARTUP_DELAY_SECONDS', '30')),
         enable_audio_outputs=os.environ.get('EMPLOYEE_TRACKER_ENABLE_AUDIO_OUTPUTS', '0') in {'1', 'true', 'True', 'yes', 'YES'},
         max_dynamic_file_roots=int(os.environ.get('EMPLOYEE_TRACKER_MAX_DYNAMIC_FILE_ROOTS', '3')),
+        max_file_roots_per_scan=max(1, int(os.environ.get('EMPLOYEE_TRACKER_MAX_FILE_ROOTS_PER_SCAN', '1'))),
         # Cloud installs should not keep employee activity on the local PC after
         # Supabase accepts it. Keep successful-upload retention at 0 by default;
         # override only for local debugging/export workflows. Failed uploads are
         # kept briefly so transient network outages do not grow without bound.
         local_success_retention_seconds=int(os.environ.get('EMPLOYEE_TRACKER_LOCAL_SUCCESS_RETENTION_SECONDS', '0')),
         local_failed_retention_seconds=int(os.environ.get('EMPLOYEE_TRACKER_LOCAL_FAILED_RETENTION_SECONDS', '3600')),
+        local_cleanup_interval_seconds=max(60, int(os.environ.get('EMPLOYEE_TRACKER_LOCAL_CLEANUP_SECONDS', '300'))),
         app_name=os.environ.get('EMPLOYEE_TRACKER_APP_NAME', 'employee-tracker'),
         username=os.environ.get('EMPLOYEE_TRACKER_USERNAME', os.environ.get('USER', 'unknown')),
     )

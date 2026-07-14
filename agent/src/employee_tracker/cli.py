@@ -314,8 +314,10 @@ def main(argv: list[str] | None = None) -> int:
             clipboard_startup_delay_seconds=settings.clipboard_startup_delay_seconds,
             enable_audio_outputs=settings.enable_audio_outputs,
             max_dynamic_file_roots=settings.max_dynamic_file_roots,
+            max_file_roots_per_scan=settings.max_file_roots_per_scan,
             local_success_retention_seconds=settings.local_success_retention_seconds,
             local_failed_retention_seconds=settings.local_failed_retention_seconds,
+            local_cleanup_interval_seconds=settings.local_cleanup_interval_seconds,
         )
         with connect(settings.db_path) as connection:
             payload = collector.run_once(connection)
@@ -353,8 +355,10 @@ def main(argv: list[str] | None = None) -> int:
             clipboard_startup_delay_seconds=settings.clipboard_startup_delay_seconds,
             enable_audio_outputs=settings.enable_audio_outputs,
             max_dynamic_file_roots=settings.max_dynamic_file_roots,
+            max_file_roots_per_scan=settings.max_file_roots_per_scan,
             local_success_retention_seconds=settings.local_success_retention_seconds,
             local_failed_retention_seconds=settings.local_failed_retention_seconds,
+            local_cleanup_interval_seconds=settings.local_cleanup_interval_seconds,
         )
         collector.run_forever()
         return 0

@@ -8,7 +8,7 @@ const screenshots = readFileSync(new URL('../agent/src/employee_tracker/screensh
 const installer = readFileSync(new URL('../app/api/installer/route.ts', import.meta.url), 'utf8');
 
 assert.match(cloud, /upload_interval\s*=\s*int\(os\.environ\.get\('EMPLOYEE_TRACKER_CLOUD_UPLOAD_SECONDS',\s*'5'\)\)/, 'cloud uploads should default to a lightweight five-second cadence, not hammer every second');
-assert.match(config, /poll_interval_seconds\s*=\s*int\(os\.environ\.get\('EMPLOYEE_TRACKER_POLL_SECONDS',\s*'2'\)\)/, 'collector should default to two-second polling for low PC impact');
+assert.match(config, /poll_interval_seconds\s*=\s*int\(os\.environ\.get\('EMPLOYEE_TRACKER_POLL_SECONDS',\s*'3'\)\)/, 'collector should default to three-second polling for low PC impact');
 assert.match(config, /EMPLOYEE_TRACKER_FILE_SCAN_SECONDS',\s*'120'/, 'file scans should default to a low-impact cadence');
 assert.match(config, /EMPLOYEE_TRACKER_PROCESS_SCAN_SECONDS',\s*'60'/, 'process scans should default to a low-impact cadence');
 assert.match(config, /EMPLOYEE_TRACKER_STATE_SNAPSHOT_SECONDS',\s*'10'/, 'expensive window/tab/open-state snapshots should be throttled separately');
@@ -21,7 +21,11 @@ assert.match(collector, /enqueue_cloud_payload\(/, 'collector should still enque
 assert.match(collector, /drain_queue\(connection\)/, 'collector should still drain the durable upload queue in bounded batches');
 assert.doesNotMatch(collector, /maybe_upload_activity\(activity_payload\)/, 'collector should not use the old non-durable maybe-upload path');
 assert.match(screenshots, /timeout=5/, 'screenshot capture subprocesses must have timeouts so telemetry cannot hang behind screenshots');
-assert.match(installer, /EMPLOYEE_TRACKER_POLL_SECONDS=2/, 'fresh installs should configure low-impact polling');
+assert.match(installer, /EMPLOYEE_TRACKER_POLL_SECONDS=3/, 'fresh installs should configure low-impact polling');
+assert.match(installer, /EMPLOYEE_TRACKER_MAX_FILE_ROOTS_PER_SCAN=1/, 'fresh installs should process filesystem roots one batch at a time');
+assert.match(installer, /EMPLOYEE_TRACKER_LOCAL_CLEANUP_SECONDS=300/, 'fresh installs should not checkpoint SQLite after every upload');
+assert.match(installer, /CPUQuota=20%/, 'Linux tracker service should have a hard CPU ceiling');
+assert.match(installer, /MemoryHigh=512M/, 'Linux tracker service should throttle before memory spikes');
 assert.match(installer, /EMPLOYEE_TRACKER_CLOUD_UPLOAD_SECONDS=5/, 'fresh installs should configure low-impact cloud upload');
 assert.match(installer, /EMPLOYEE_TRACKER_ENABLE_FILE_CONTENT=0/, 'fresh installs should avoid reading file contents by default');
 assert.match(installer, /EMPLOYEE_TRACKER_STATE_SNAPSHOT_SECONDS=10/, 'fresh installs should throttle expensive open-state snapshots');

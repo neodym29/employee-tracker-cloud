@@ -247,8 +247,10 @@ class ActivityCollector:
         clipboard_startup_delay_seconds: float = 30.0,
         enable_audio_outputs: bool = False,
         max_dynamic_file_roots: int = 8,
+        max_file_roots_per_scan: int = 1,
         local_success_retention_seconds: int = 86400,
         local_failed_retention_seconds: int = 3600,
+        local_cleanup_interval_seconds: int = 300,
     ) -> None:
         self.db_path = db_path
         self.screenshot_dir = screenshot_dir
@@ -268,8 +270,12 @@ class ActivityCollector:
         self.clipboard_startup_delay_seconds = clipboard_startup_delay_seconds
         self.enable_audio_outputs = enable_audio_outputs
         self.max_dynamic_file_roots = max_dynamic_file_roots
+        self.max_file_roots_per_scan = max(1, max_file_roots_per_scan)
+        self._file_root_batch_cursor = 0
         self.local_success_retention_seconds = max(0, local_success_retention_seconds)
         self.local_failed_retention_seconds = max(0, local_failed_retention_seconds)
+        self.local_cleanup_interval_seconds = max(60, local_cleanup_interval_seconds)
+        self._last_local_cleanup_at = 0.0
         self.file_scan_interval_seconds = file_scan_interval_seconds
         self.process_scan_interval_seconds = process_scan_interval_seconds
         self.state_snapshot_interval_seconds = max(1, state_snapshot_interval_seconds)
@@ -386,6 +392,10 @@ class ActivityCollector:
             resolved.relative_to(home)
         except Exception:
             return False
+        # Never promote $HOME itself to a dynamic project root. A shell whose CWD is
+        # the home directory must not turn a project scan into a recursive account scan.
+        if resolved == home:
+            return False
         excluded_parts = {'.git', 'node_modules', '.cache', '.config', '.local', '.var', '__pycache__', 'dist', 'build'}
         return not any(part in excluded_parts for part in resolved.parts)
 
@@ -412,8 +422,18 @@ class ActivityCollector:
                 break
         return tuple(roots)
 
-    def _record_workspace_snapshot(self, connection, captured_at: str, host: str, current_processes: list[object] | None = None) -> list[dict[str, object]]:
-        roots = tuple(dict.fromkeys((*self.file_roots, *self._dynamic_file_roots(current_processes or []))))
+    def _next_file_root_batch(self, current_processes: list[object]) -> tuple[Path, ...]:
+        roots = tuple(dict.fromkeys((*self.file_roots, *self._dynamic_file_roots(current_processes))))
+        if not roots:
+            return ()
+        start = self._file_root_batch_cursor % len(roots)
+        count = min(self.max_file_roots_per_scan, len(roots))
+        batch = tuple(roots[(start + offset) % len(roots)].resolve() for offset in range(count))
+        self._file_root_batch_cursor = (start + count) % len(roots)
+        return batch
+
+    def _record_workspace_snapshot(self, connection, captured_at: str, host: str, current_processes: list[object] | None = None, roots: tuple[Path, ...] | None = None) -> list[dict[str, object]]:
+        roots = roots if roots is not None else tuple(dict.fromkeys((*self.file_roots, *self._dynamic_file_roots(current_processes or []))))
         events: list[dict[str, object]] = []
         for file_root in roots:
             events.extend(self._record_file_root_snapshot(connection, captured_at, host, file_root))
@@ -1212,12 +1232,20 @@ class ActivityCollector:
             retention = self.local_success_retention_seconds
         else:
             retention = self.local_failed_retention_seconds
+        now = time.monotonic()
+        if self._last_local_cleanup_at and (now - self._last_local_cleanup_at) < self.local_cleanup_interval_seconds:
+            return {
+                'skipped': 'cleanup_interval_not_elapsed',
+                'next_cleanup_in_seconds': max(0, self.local_cleanup_interval_seconds - (now - self._last_local_cleanup_at)),
+                'upload_ok': upload_ok,
+            }
         try:
             cutoff_dt = datetime.fromisoformat(captured_at.replace('Z', '+00:00')) - timedelta(seconds=retention)
             cutoff = cutoff_dt.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')
         except ValueError:
             cutoff = captured_at if upload_ok else datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         deleted_rows = prune_local_telemetry(connection, cutoff)
+        self._last_local_cleanup_at = now
         return {'cutoff': cutoff, 'deleted_rows': deleted_rows, 'upload_ok': upload_ok}
 
     def run_once(self, connection, host: str | None = None) -> dict[str, object]:
@@ -1236,7 +1264,8 @@ class ActivityCollector:
             self._last_process_scan_at = now
 
         if (now - self._last_file_scan_at) >= self.file_scan_interval_seconds:
-            file_change_events = self._record_workspace_snapshot(connection, captured_at, host, current_processes)
+            root_batch = self._next_file_root_batch(current_processes)
+            file_change_events = self._record_workspace_snapshot(connection, captured_at, host, current_processes, roots=root_batch)
             self._last_file_scan_at = now
 
         state_snapshot_fresh = (now - self._last_state_snapshot_at) >= self.state_snapshot_interval_seconds
