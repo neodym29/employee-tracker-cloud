@@ -449,6 +449,7 @@ class ActivityCollector:
         current_paths: set[str] = set()
         baseline_mode = not any(key[0] == workspace_root for key in self._file_state)
         events: list[dict[str, object]] = []
+        pending_file_rows = 0
 
         for snapshot in snapshots:
             state_key = (workspace_root, snapshot.relative_path)
@@ -466,7 +467,7 @@ class ActivityCollector:
                     previous=None,
                     note=note,
                 )
-                insert_file_event(connection, row)
+                insert_file_event(connection, row, commit=False)
                 if event_type != 'baseline':
                     events.append(row)
             else:
@@ -501,7 +502,7 @@ class ActivityCollector:
                         previous=previous,
                         note='; '.join(note_parts),
                     )
-                    insert_file_event(connection, row)
+                    insert_file_event(connection, row, commit=False)
                     events.append(row)
 
             upsert_file_state(
@@ -517,7 +518,12 @@ class ActivityCollector:
                     'language': snapshot.language,
                     'last_seen_at': captured_at,
                 },
+                commit=False,
             )
+            pending_file_rows += 1
+            if pending_file_rows >= 250:
+                connection.commit()
+                pending_file_rows = 0
             self._file_state[state_key] = {
                 'workspace_root': workspace_root,
                 'absolute_path': snapshot.absolute_path,
@@ -555,11 +561,23 @@ class ActivityCollector:
                 'language': previous.get('language'),
                 'note': 'file removed from tracked root',
             }
-            insert_file_event(connection, row)
+            insert_file_event(connection, row, commit=False)
             events.append(row)
-            mark_file_deleted(connection, workspace_root, relative_path, captured_at)
+            mark_file_deleted(
+                connection,
+                workspace_root,
+                relative_path,
+                captured_at,
+                commit=False,
+            )
+            pending_file_rows += 1
+            if pending_file_rows >= 250:
+                connection.commit()
+                pending_file_rows = 0
             del self._file_state[state_key]
 
+        if pending_file_rows:
+            connection.commit()
         return [self._file_change_rich_event(row) for row in events]
 
     def _record_process_snapshot(self, connection, captured_at: str, host: str) -> list[object]:

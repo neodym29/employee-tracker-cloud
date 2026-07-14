@@ -56,6 +56,30 @@ class ResourceBatchingTests(unittest.TestCase):
         self.assertEqual(batches[2], (roots[2].resolve(),))
         self.assertEqual(batches[3], (roots[0].resolve(),))
 
+    def test_file_scan_commits_database_writes_in_bounded_batches(self) -> None:
+        with TemporaryDirectory(dir=Path.home()) as tmp:
+            base = Path(tmp)
+            root = base / 'project'
+            root.mkdir()
+            for index in range(520):
+                (root / f'file-{index:04d}.txt').write_text('small\n', encoding='utf-8')
+            collector = self._collector(base, (root,))
+            commits = []
+            with connect(collector.db_path) as connection:
+                connection.set_trace_callback(
+                    lambda statement: commits.append(statement)
+                    if statement.strip().upper() == 'COMMIT'
+                    else None
+                )
+                collector._record_file_root_snapshot(
+                    connection,
+                    '2026-07-14T00:00:00+00:00',
+                    'test-host',
+                    root,
+                )
+
+        self.assertEqual(len(commits), 3)
+
     def test_successful_upload_cleanup_is_rate_limited(self) -> None:
         with TemporaryDirectory(dir=Path.home()) as tmp:
             base = Path(tmp)

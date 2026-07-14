@@ -772,7 +772,12 @@ def insert_current_subwindow_snapshot(connection: sqlite3.Connection, row: dict[
     connection.commit()
 
 
-def insert_file_event(connection: sqlite3.Connection, row: dict[str, Any]) -> None:
+def insert_file_event(
+    connection: sqlite3.Connection,
+    row: dict[str, Any],
+    *,
+    commit: bool = True,
+) -> None:
     connection.execute(
         """
         INSERT INTO file_activity_events (
@@ -808,7 +813,8 @@ def insert_file_event(connection: sqlite3.Connection, row: dict[str, Any]) -> No
             row.get('content_reason'),
         ),
     )
-    connection.commit()
+    if commit:
+        connection.commit()
 
 
 def insert_process_snapshot(connection: sqlite3.Connection, row: dict[str, Any]) -> None:
@@ -970,7 +976,12 @@ def insert_audio_output_snapshot(connection: sqlite3.Connection, row: dict[str, 
     connection.commit()
 
 
-def upsert_file_state(connection: sqlite3.Connection, row: dict[str, Any]) -> None:
+def upsert_file_state(
+    connection: sqlite3.Connection,
+    row: dict[str, Any],
+    *,
+    commit: bool = True,
+) -> None:
     connection.execute(
         """
         INSERT INTO file_state (
@@ -999,7 +1010,8 @@ def upsert_file_state(connection: sqlite3.Connection, row: dict[str, Any]) -> No
             row['last_seen_at'],
         ),
     )
-    connection.commit()
+    if commit:
+        connection.commit()
 
 
 def mark_file_deleted(
@@ -1007,6 +1019,8 @@ def mark_file_deleted(
     workspace_root: str,
     relative_path: str,
     deleted_at: str,
+    *,
+    commit: bool = True,
 ) -> None:
     connection.execute(
         """
@@ -1016,7 +1030,8 @@ def mark_file_deleted(
         """,
         (deleted_at, workspace_root, relative_path),
     )
-    connection.commit()
+    if commit:
+        connection.commit()
 
 
 def fetch_file_state_rows(db_path: Path) -> list[sqlite3.Row]:
