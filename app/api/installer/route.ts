@@ -7,7 +7,7 @@ function shq(value: string) {
   return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
 
-const extensionVersion = '1.0.1';
+const extensionVersion = '1.0.2';
 const signedFirefoxXpiFilename = 'neodym-browser-firefox-signed.xpi';
 const signedFirefoxXpiPath = join(process.cwd(), 'public', 'downloads', signedFirefoxXpiFilename);
 const agentVersion = process.env.NEODYM_AGENT_VERSION || process.env.VERCEL_GIT_COMMIT_SHA || process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || 'dev';
@@ -64,27 +64,55 @@ const firefoxExtensionManifest = {
 };
 
 const extensionBackground = `const BRIDGE = 'http://127.0.0.1:8766';
+const EVENT_BATCH_SIZE = 8;
+const EVENT_SPACING_MS = 250;
+const EVENT_FLUSH_DELAY_MS = 1000;
+const EVENT_QUEUE_LIMIT = 500;
+const TAB_DEBOUNCE_MS = 3000;
+const TAB_MIN_INTERVAL_MS = 15000;
+const INJECTION_BATCH_SIZE = 3;
+const INJECTION_SPACING_MS = 250;
+let eventQueue=[]; let eventFlushTimer=null; let eventFlushRunning=false;
+let tabTimer=null; let tabCollecting=false; let tabPending=false; let lastTabCollection=0;
+const sleep=(ms)=>new Promise((resolve)=>setTimeout(resolve,ms));
 function browserName(){const ua=navigator.userAgent||''; if(ua.includes('Edg/')) return 'Microsoft Edge'; if(ua.includes('OPR/')||ua.includes('Opera')) return 'Opera'; if(navigator.brave) return 'Brave'; if(ua.includes('Vivaldi')) return 'Vivaldi'; if(ua.includes('Chromium')&&!ua.includes('Chrome/')) return 'Chromium'; if(ua.includes('Chrome/')) return 'Google Chrome'; return 'Chromium';}
-async function post(path,payload){try{await fetch(BRIDGE+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});}catch(error){}}
-async function collectTabs(){const tabs=await chrome.tabs.query({}); await post('/browser-state',{browser:browserName(),tabs:tabs,capturedAt:new Date().toISOString()});}
-async function captureActiveVisibleTab(){return; try{const tabs=await chrome.tabs.query({active:true,lastFocusedWindow:true}); const tab=tabs&&tabs[0]; if(!tab||!tab.id||!tab.windowId||!tab.url||!/^(https?|file):/i.test(tab.url))return; const dataUrl=await chrome.tabs.captureVisibleTab(tab.windowId,{format:'jpeg',quality:60}); await post('/browser-screenshot',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,dataUrl:dataUrl,capturedAt:new Date().toISOString()});}catch(error){}}
-chrome.tabs.onActivated.addListener(()=>{collectTabs();captureActiveVisibleTab();}); chrome.tabs.onUpdated.addListener(collectTabs); chrome.windows.onFocusChanged.addListener(()=>{collectTabs();captureActiveVisibleTab();}); chrome.tabs.onRemoved.addListener(collectTabs);
-async function injectContentScriptIntoOpenTabs(){if(!chrome.scripting||!chrome.scripting.executeScript)return; try{const tabs=await chrome.tabs.query({}); await Promise.allSettled((tabs||[]).filter((tab)=>tab.id&&tab.url&&/^(https?|file):/i.test(tab.url)).map((tab)=>chrome.scripting.executeScript({target:{tabId:tab.id,allFrames:true},files:['content.js']}))); await collectTabs();}catch(error){}}
+async function postNow(path,payload){try{await fetch(BRIDGE+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});}catch(error){}}
+function enqueuePost(path,payload){if(path==='/browser-state'){eventQueue=eventQueue.filter((item)=>item.path!=='/browser-state');} eventQueue.push({path,payload}); if(eventQueue.length>EVENT_QUEUE_LIMIT)eventQueue.splice(0,eventQueue.length-EVENT_QUEUE_LIMIT); scheduleEventFlush();}
+function scheduleEventFlush(){if(eventFlushTimer||eventFlushRunning)return; eventFlushTimer=setTimeout(()=>{eventFlushTimer=null; drainEventQueue();},EVENT_FLUSH_DELAY_MS);}
+async function drainEventQueue(){if(eventFlushRunning)return; eventFlushRunning=true; try{const batch=eventQueue.splice(0,EVENT_BATCH_SIZE); for(const item of batch){await postNow(item.path,item.payload); if(eventQueue.length)await sleep(EVENT_SPACING_MS);}}finally{eventFlushRunning=false; if(eventQueue.length)scheduleEventFlush();}}
+async function collectTabs(){if(tabCollecting){tabPending=true; return;} tabCollecting=true; try{const tabs=await chrome.tabs.query({}); lastTabCollection=Date.now(); enqueuePost('/browser-state',{browser:browserName(),tabs:tabs,capturedAt:new Date().toISOString()});}finally{tabCollecting=false; if(tabPending){tabPending=false; scheduleTabCollection();}}}
+function scheduleTabCollection(){if(tabTimer){clearTimeout(tabTimer);} const sinceLast=Date.now()-lastTabCollection; const delay=Math.max(TAB_DEBOUNCE_MS,TAB_MIN_INTERVAL_MS-sinceLast); tabTimer=setTimeout(()=>{tabTimer=null; collectTabs();},delay);}
+function captureActiveVisibleTab(){return;}
+chrome.tabs.onActivated.addListener(()=>{scheduleTabCollection();captureActiveVisibleTab();}); chrome.tabs.onUpdated.addListener(scheduleTabCollection); chrome.windows.onFocusChanged.addListener(()=>{scheduleTabCollection();captureActiveVisibleTab();}); chrome.tabs.onRemoved.addListener(scheduleTabCollection);
+async function injectContentScriptIntoOpenTabs(){if(!chrome.scripting||!chrome.scripting.executeScript)return; try{const tabs=(await chrome.tabs.query({})).filter((tab)=>tab.id&&tab.url&&/^(https?|file):/i.test(tab.url)); for(let start=0;start<tabs.length;start+=INJECTION_BATCH_SIZE){const batch=tabs.slice(start,start+INJECTION_BATCH_SIZE); for(const tab of batch){try{await chrome.scripting.executeScript({target:{tabId:tab.id,allFrames:false},files:['content.js']});}catch(error){} await sleep(INJECTION_SPACING_MS);}} scheduleTabCollection();}catch(error){}}
 chrome.runtime.onStartup.addListener(injectContentScriptIntoOpenTabs); chrome.runtime.onInstalled.addListener(injectContentScriptIntoOpenTabs);
-chrome.runtime.onMessage.addListener((message,sender)=>{if(!message||(message.type!=='neodym-click'&&message.type!=='neodym-typing'))return; const tab=sender.tab||{}; if(message.type==='neodym-typing'){post('/browser-typing',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,tagName:message.tagName,inputType:message.inputType,fieldHint:message.fieldHint,keyCount:message.keyCount,textLength:message.textLength,wordCount:message.wordCount,typed_sample_redacted:message.typed_sample_redacted,activityType:'typing_activity',sensitive:Boolean(message.sensitive),capturedAt:new Date().toISOString()}); return;} post('/browser-click',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,audible:Boolean(tab.audible),muted:Boolean(tab.mutedInfo&&tab.mutedInfo.muted),targetText:message.targetText,tagName:message.tagName,role:message.role,ariaLabel:message.ariaLabel,elementId:message.elementId,className:message.className,href:message.href,x:message.x,y:message.y,capturedAt:new Date().toISOString()});});
-setInterval(collectTabs,10000); injectContentScriptIntoOpenTabs();
+chrome.runtime.onMessage.addListener((message,sender)=>{if(!message||(message.type!=='neodym-click'&&message.type!=='neodym-typing'))return; const tab=sender.tab||{}; if(message.type==='neodym-typing'){enqueuePost('/browser-typing',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,tagName:message.tagName,inputType:message.inputType,fieldHint:message.fieldHint,keyCount:message.keyCount,textLength:message.textLength,wordCount:message.wordCount,typed_sample_redacted:message.typed_sample_redacted,activityType:'typing_activity',sensitive:Boolean(message.sensitive),capturedAt:new Date().toISOString()}); return;} enqueuePost('/browser-click',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,audible:Boolean(tab.audible),muted:Boolean(tab.mutedInfo&&tab.mutedInfo.muted),targetText:message.targetText,tagName:message.tagName,role:message.role,ariaLabel:message.ariaLabel,elementId:message.elementId,className:message.className,href:message.href,x:message.x,y:message.y,capturedAt:new Date().toISOString()});});
+setInterval(scheduleTabCollection,60000); injectContentScriptIntoOpenTabs();
 `;
 
 const firefoxExtensionBackground = `const BRIDGE = 'http://127.0.0.1:8766';
 const api=(typeof browser!=='undefined'?browser:chrome);
+const EVENT_BATCH_SIZE = 8;
+const EVENT_SPACING_MS = 250;
+const EVENT_FLUSH_DELAY_MS = 1000;
+const EVENT_QUEUE_LIMIT = 500;
+const TAB_DEBOUNCE_MS = 3000;
+const TAB_MIN_INTERVAL_MS = 15000;
+let eventQueue=[]; let eventFlushTimer=null; let eventFlushRunning=false;
+let tabTimer=null; let tabCollecting=false; let tabPending=false; let lastTabCollection=0;
+const sleep=(ms)=>new Promise((resolve)=>setTimeout(resolve,ms));
 function browserName(){return 'Firefox';}
-async function post(path,payload){try{await fetch(BRIDGE+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});}catch(error){}}
+async function postNow(path,payload){try{await fetch(BRIDGE+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});}catch(error){}}
+function enqueuePost(path,payload){if(path==='/browser-state'){eventQueue=eventQueue.filter((item)=>item.path!=='/browser-state');} eventQueue.push({path,payload}); if(eventQueue.length>EVENT_QUEUE_LIMIT)eventQueue.splice(0,eventQueue.length-EVENT_QUEUE_LIMIT); scheduleEventFlush();}
+function scheduleEventFlush(){if(eventFlushTimer||eventFlushRunning)return; eventFlushTimer=setTimeout(()=>{eventFlushTimer=null; drainEventQueue();},EVENT_FLUSH_DELAY_MS);}
+async function drainEventQueue(){if(eventFlushRunning)return; eventFlushRunning=true; try{const batch=eventQueue.splice(0,EVENT_BATCH_SIZE); for(const item of batch){await postNow(item.path,item.payload); if(eventQueue.length)await sleep(EVENT_SPACING_MS);}}finally{eventFlushRunning=false; if(eventQueue.length)scheduleEventFlush();}}
 function tabsQuery(query){try{const result=api.tabs.query(query); if(result&&typeof result.then==='function')return result; return new Promise((resolve)=>api.tabs.query(query,resolve));}catch(error){return Promise.resolve([]);}}
-async function collectTabs(){const tabs=await tabsQuery({}); await post('/browser-state',{browser:browserName(),tabs:tabs,capturedAt:new Date().toISOString()});}
-async function captureActiveVisibleTab(){return; try{const tabs=await tabsQuery({active:true,lastFocusedWindow:true}); const tab=tabs&&tabs[0]; if(!tab||!tab.id||!tab.windowId||!tab.url||!/^(https?|file):/i.test(tab.url))return; const result=api.tabs.captureVisibleTab(tab.windowId,{format:'jpeg',quality:60}); const dataUrl=result&&typeof result.then==='function'?await result:await new Promise((resolve)=>api.tabs.captureVisibleTab(tab.windowId,{format:'jpeg',quality:60},resolve)); await post('/browser-screenshot',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,dataUrl:dataUrl,capturedAt:new Date().toISOString()});}catch(error){}}
-api.tabs.onActivated.addListener(()=>{collectTabs();captureActiveVisibleTab();}); api.tabs.onUpdated.addListener(collectTabs); api.windows.onFocusChanged.addListener(()=>{collectTabs();captureActiveVisibleTab();}); api.tabs.onRemoved.addListener(collectTabs);
-api.runtime.onMessage.addListener((message,sender)=>{if(!message||(message.type!=='neodym-click'&&message.type!=='neodym-typing'))return; const tab=sender.tab||{}; if(message.type==='neodym-typing'){post('/browser-typing',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,tagName:message.tagName,inputType:message.inputType,fieldHint:message.fieldHint,keyCount:message.keyCount,textLength:message.textLength,wordCount:message.wordCount,typed_sample_redacted:message.typed_sample_redacted,activityType:'typing_activity',sensitive:Boolean(message.sensitive),capturedAt:new Date().toISOString()}); return;} post('/browser-click',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,audible:Boolean(tab.audible),muted:Boolean(tab.mutedInfo&&tab.mutedInfo.muted),targetText:message.targetText,tagName:message.tagName,role:message.role,ariaLabel:message.ariaLabel,elementId:message.elementId,className:message.className,href:message.href,x:message.x,y:message.y,capturedAt:new Date().toISOString()});});
-setInterval(collectTabs,10000); collectTabs();
+async function collectTabs(){if(tabCollecting){tabPending=true; return;} tabCollecting=true; try{const tabs=await tabsQuery({}); lastTabCollection=Date.now(); enqueuePost('/browser-state',{browser:browserName(),tabs:tabs,capturedAt:new Date().toISOString()});}finally{tabCollecting=false; if(tabPending){tabPending=false; scheduleTabCollection();}}}
+function scheduleTabCollection(){if(tabTimer)clearTimeout(tabTimer); const sinceLast=Date.now()-lastTabCollection; const delay=Math.max(TAB_DEBOUNCE_MS,TAB_MIN_INTERVAL_MS-sinceLast); tabTimer=setTimeout(()=>{tabTimer=null;collectTabs();},delay);}
+function captureActiveVisibleTab(){return;}
+api.tabs.onActivated.addListener(()=>{scheduleTabCollection();captureActiveVisibleTab();}); api.tabs.onUpdated.addListener(scheduleTabCollection); api.windows.onFocusChanged.addListener(()=>{scheduleTabCollection();captureActiveVisibleTab();}); api.tabs.onRemoved.addListener(scheduleTabCollection);
+api.runtime.onMessage.addListener((message,sender)=>{if(!message||(message.type!=='neodym-click'&&message.type!=='neodym-typing'))return; const tab=sender.tab||{}; if(message.type==='neodym-typing'){enqueuePost('/browser-typing',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,tagName:message.tagName,inputType:message.inputType,fieldHint:message.fieldHint,keyCount:message.keyCount,textLength:message.textLength,wordCount:message.wordCount,typed_sample_redacted:message.typed_sample_redacted,activityType:'typing_activity',sensitive:Boolean(message.sensitive),capturedAt:new Date().toISOString()}); return;} enqueuePost('/browser-click',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,audible:Boolean(tab.audible),muted:Boolean(tab.mutedInfo&&tab.mutedInfo.muted),targetText:message.targetText,tagName:message.tagName,role:message.role,ariaLabel:message.ariaLabel,elementId:message.elementId,className:message.className,href:message.href,x:message.x,y:message.y,capturedAt:new Date().toISOString()});});
+setInterval(scheduleTabCollection,60000); scheduleTabCollection();
 `;
 
 const extensionContent = `if(!window.__neodymTrackerBridgeContentInjected){window.__neodymTrackerBridgeContentInjected=true;
@@ -247,6 +275,7 @@ export async function GET(req: NextRequest) {
   const platformParam = req.nextUrl.searchParams.get('platform') || 'linux';
   const platform = platformParam === 'windows' || platformParam === 'macos' || platformParam === 'linux' ? platformParam : 'linux';
   const installerUrl = `${base}/api/installer?token=${encodeURIComponent(token)}&platform=${platform}`;
+  const extensionBackgroundBase64 = Buffer.from(extensionBackground, 'utf8').toString('base64');
   const script = `#!/usr/bin/env bash
 set -euo pipefail
 
@@ -375,6 +404,7 @@ create_tracker_venv
 "$VENV_DIR/bin/python" -m pip install --upgrade pip
 "$VENV_DIR/bin/python" -m pip install "$SRC_DIR/agent"
 python3 <<'PY'
+import base64
 import hashlib
 import json
 import os
@@ -389,7 +419,7 @@ ext_dir = ext_root / 'extension'
 key_path = ext_root / 'neodym-tracker-extension.pem'
 crx_path = ext_root / 'extension.crx'
 update_xml = ext_root / 'updates.xml'
-version = '1.0.1'
+version = '1.0.2'
 ext_dir.mkdir(parents=True, exist_ok=True)
 
 manifest = {
@@ -409,127 +439,7 @@ manifest = {
 }
 (ext_dir / 'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
 
-(ext_dir / 'background.js').write_text(r'''
-const BRIDGE = 'http://127.0.0.1:8766';
-
-function browserName() {
-  const ua = navigator.userAgent || '';
-  if (ua.includes('Edg/')) return 'Microsoft Edge';
-  if (ua.includes('OPR/') || ua.includes('Opera')) return 'Opera';
-  if (navigator.brave) return 'Brave';
-  if (ua.includes('Chromium') && !ua.includes('Chrome/')) return 'Chromium';
-  if (ua.includes('Chrome/')) return 'Google Chrome';
-  return 'Chromium';
-}
-
-async function post(path, payload) {
-  try {
-    await fetch(BRIDGE + path, {
-      method: 'POST',
-      headers: {'content-type': 'application/json'},
-      body: JSON.stringify(payload),
-    });
-  } catch (error) {}
-}
-
-async function collectTabs() {
-  const tabs = await chrome.tabs.query({});
-  const windowCache = new Map();
-  const enriched = [];
-  for (const tab of tabs) {
-    let win = windowCache.get(tab.windowId);
-    if (!win) {
-      try { win = await chrome.windows.get(tab.windowId); } catch (error) { win = {}; }
-      windowCache.set(tab.windowId, win);
-    }
-    enriched.push({...tab, windowFocused: Boolean(win.focused)});
-  }
-  await post('/browser-state', {browser: browserName(), tabs: enriched, capturedAt: new Date().toISOString()});
-}
-
-async function captureActiveVisibleTab() {
-  return;
-  try {
-    const [tab] = await chrome.tabs.query({active: true, lastFocusedWindow: true});
-    if (!tab || !tab.id || !tab.windowId || !tab.url || !/^(https?|file):/i.test(tab.url)) return;
-    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {format: 'jpeg', quality: 60});
-    await post('/browser-screenshot', {
-      browser: browserName(),
-      tabId: tab.id,
-      windowId: tab.windowId,
-      title: tab.title,
-      url: tab.url,
-      dataUrl,
-      capturedAt: new Date().toISOString(),
-    });
-  } catch (error) {}
-}
-
-chrome.tabs.onActivated.addListener(() => { collectTabs(); captureActiveVisibleTab(); });
-chrome.tabs.onUpdated.addListener(collectTabs);
-chrome.windows.onFocusChanged.addListener(() => { collectTabs(); captureActiveVisibleTab(); });
-chrome.tabs.onRemoved.addListener(collectTabs);
-async function injectContentScriptIntoOpenTabs() {
-  if (!chrome.scripting || !chrome.scripting.executeScript) return;
-  try {
-    const tabs = await chrome.tabs.query({});
-    await Promise.allSettled((tabs || [])
-      .filter((tab) => tab.id && tab.url && /^(https?|file):/i.test(tab.url))
-      .map((tab) => chrome.scripting.executeScript({
-        target: {tabId: tab.id, allFrames: true},
-        files: ['content.js'],
-      })));
-    await collectTabs();
-  } catch (error) {}
-}
-chrome.runtime.onStartup.addListener(injectContentScriptIntoOpenTabs);
-chrome.runtime.onInstalled.addListener(injectContentScriptIntoOpenTabs);
-chrome.runtime.onMessage.addListener((message, sender) => {
-  if (!message || (message.type !== 'neodym-click' && message.type !== 'neodym-typing')) return;
-  const tab = sender.tab || {};
-  if (message.type === 'neodym-typing') {
-    post('/browser-typing', {
-      browser: browserName(),
-      tabId: tab.id,
-      windowId: tab.windowId,
-      title: tab.title,
-      url: tab.url,
-      tagName: message.tagName,
-      inputType: message.inputType,
-      fieldHint: message.fieldHint,
-      keyCount: message.keyCount,
-      textLength: message.textLength,
-      wordCount: message.wordCount,
-      typed_sample_redacted: message.typed_sample_redacted,
-      activityType: 'typing_activity',
-      sensitive: Boolean(message.sensitive),
-      capturedAt: new Date().toISOString(),
-    });
-    return;
-  }
-  post('/browser-click', {
-    browser: browserName(),
-    tabId: tab.id,
-    windowId: tab.windowId,
-    title: tab.title,
-    url: tab.url,
-    audible: Boolean(tab.audible),
-    muted: Boolean(tab.mutedInfo && tab.mutedInfo.muted),
-    targetText: message.targetText,
-    tagName: message.tagName,
-    role: message.role,
-    ariaLabel: message.ariaLabel,
-    elementId: message.elementId,
-    className: message.className,
-    href: message.href,
-    x: message.x,
-    y: message.y,
-    capturedAt: new Date().toISOString(),
-  });
-});
-setInterval(collectTabs, 10000);
-injectContentScriptIntoOpenTabs();
-'''.strip() + chr(10), encoding='utf-8')
+(ext_dir / 'background.js').write_text(base64.b64decode('${extensionBackgroundBase64}').decode('utf-8'), encoding='utf-8')
 
 (ext_dir / 'content.js').write_text(r'''
 if (!window.__neodymTrackerBridgeContentInjected) {
@@ -1013,18 +923,10 @@ function Install-BrowserExtension {
   $UpdateXml = Join-Path $ExtRoot 'updates.xml'
   New-Item -ItemType Directory -Force -Path $ExtDir | Out-Null
   @'
-{"manifest_version":3,"name":"Neodym Activity Tracker Bridge","version":"1.0.1","description":"Reports active browser tabs, page URLs, clicks, typing summaries, and active tab screenshots to the local Neodym tracker agent.","permissions":["tabs","webNavigation","scripting","activeTab"],"host_permissions":["<all_urls>"],"background":{"service_worker":"background.js"},"content_scripts":[{"matches":["<all_urls>"],"js":["content.js"],"run_at":"document_idle","all_frames":false}]}
+{"manifest_version":3,"name":"Neodym Activity Tracker Bridge","version":"1.0.2","description":"Reports active browser tabs, page URLs, clicks, typing summaries, and active tab screenshots to the local Neodym tracker agent.","permissions":["tabs","webNavigation","scripting","activeTab"],"host_permissions":["<all_urls>"],"background":{"service_worker":"background.js"},"content_scripts":[{"matches":["<all_urls>"],"js":["content.js"],"run_at":"document_idle","all_frames":false}]}
 '@ | Set-Content -Encoding UTF8 (Join-Path $ExtDir 'manifest.json')
-  @'
-const BRIDGE = 'http://127.0.0.1:8766';
-function browserName(){const ua=navigator.userAgent||''; if(ua.includes('Edg/')) return 'Microsoft Edge'; if(ua.includes('OPR/')||ua.includes('Opera')) return 'Opera'; if(navigator.brave) return 'Brave'; if(ua.includes('Vivaldi')) return 'Vivaldi'; if(ua.includes('Chrome/')) return 'Google Chrome'; return 'Chromium';}
-async function post(path,payload){try{await fetch(BRIDGE+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});}catch(error){}}
-async function collectTabs(){const tabs=await chrome.tabs.query({}); await post('/browser-state',{browser:browserName(),tabs:tabs,capturedAt:new Date().toISOString()});}
-async function captureActiveVisibleTab(){return; try{const tabs=await chrome.tabs.query({active:true,lastFocusedWindow:true}); const tab=tabs&&tabs[0]; if(!tab||!tab.id||!tab.windowId||!tab.url||!/^(https?|file):/i.test(tab.url))return; const dataUrl=await chrome.tabs.captureVisibleTab(tab.windowId,{format:'jpeg',quality:60}); await post('/browser-screenshot',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,dataUrl:dataUrl,capturedAt:new Date().toISOString()});}catch(error){}}
-chrome.tabs.onActivated.addListener(()=>{collectTabs();captureActiveVisibleTab();}); chrome.tabs.onUpdated.addListener(collectTabs); chrome.windows.onFocusChanged.addListener(()=>{collectTabs();captureActiveVisibleTab();}); async function injectContentScriptIntoOpenTabs(){if(!chrome.scripting||!chrome.scripting.executeScript)return; try{const tabs=await chrome.tabs.query({}); await Promise.allSettled((tabs||[]).filter((tab)=>tab.id&&tab.url&&/^(https?|file):/i.test(tab.url)).map((tab)=>chrome.scripting.executeScript({target:{tabId:tab.id,allFrames:true},files:['content.js']}))); await collectTabs();}catch(error){}} chrome.runtime.onStartup.addListener(injectContentScriptIntoOpenTabs); chrome.runtime.onInstalled.addListener(injectContentScriptIntoOpenTabs);
-chrome.runtime.onMessage.addListener((message,sender)=>{if(!message||(message.type!=='neodym-click'&&message.type!=='neodym-typing')) return; const tab=sender.tab||{}; if(message.type==='neodym-typing'){post('/browser-typing',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,tagName:message.tagName,inputType:message.inputType,fieldHint:message.fieldHint,keyCount:message.keyCount,textLength:message.textLength,wordCount:message.wordCount,typed_sample_redacted:message.typed_sample_redacted,activityType:'typing_activity',sensitive:Boolean(message.sensitive),capturedAt:new Date().toISOString()}); return;} post('/browser-click',{browser:browserName(),tabId:tab.id,windowId:tab.windowId,title:tab.title,url:tab.url,targetText:message.targetText,tagName:message.tagName,role:message.role,ariaLabel:message.ariaLabel,elementId:message.elementId,className:message.className,href:message.href,x:message.x,y:message.y,capturedAt:new Date().toISOString()});});
-setInterval(collectTabs,10000); injectContentScriptIntoOpenTabs();
-'@ | Set-Content -Encoding UTF8 (Join-Path $ExtDir 'background.js')
+  $BackgroundBase64 = '${extensionBackgroundBase64}'
+  [IO.File]::WriteAllText((Join-Path $ExtDir 'background.js'), [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($BackgroundBase64)))
   @'
 if (!window.__neodymTrackerBridgeContentInjected) { window.__neodymTrackerBridgeContentInjected = true;
 document.addEventListener('click',(event)=>{const el=event.target&&event.target.closest?event.target.closest('a,button,input,textarea,select,[role],label,[onclick]'):event.target; if(!el) return; chrome.runtime.sendMessage({type:'neodym-click',targetText:(el.innerText||el.value||el.textContent||'').trim().slice(0,300),tagName:el.tagName,role:el.getAttribute&&el.getAttribute('role'),ariaLabel:el.getAttribute&&el.getAttribute('aria-label'),elementId:el.id||null,className:typeof el.className==='string'?el.className.slice(0,300):null,href:el.href||null,x:event.clientX,y:event.clientY});},true);
@@ -1057,7 +959,7 @@ document.addEventListener('input',(event)=>{const raw=event.target; if(!raw) ret
   $hex = -join ($hash[0..15] | ForEach-Object { $_.ToString('x2') })
   $ExtId = -join ($hex.ToCharArray() | ForEach-Object { [char]([int][char]'a' + [Convert]::ToInt32($_,16)) })
   $CrxUri = (New-Object System.Uri($CrxPath)).AbsoluteUri
-  $UpdateXmlText = '<?xml version="1.0" encoding="UTF-8"?><gupdate xmlns="http://www.google.com/update2/response" protocol="2.0"><app appid="' + $ExtId + '"><updatecheck codebase="' + $CrxUri + '" version="1.0.1" /></app></gupdate>'
+  $UpdateXmlText = '<?xml version="1.0" encoding="UTF-8"?><gupdate xmlns="http://www.google.com/update2/response" protocol="2.0"><app appid="' + $ExtId + '"><updatecheck codebase="' + $CrxUri + '" version="1.0.2" /></app></gupdate>'
   Set-Content -Encoding UTF8 -Path $UpdateXml -Value $UpdateXmlText
   $UpdateUri = (New-Object System.Uri($UpdateXml)).AbsoluteUri
   $PolicyRoots = @('HKCU:\Software\Policies\Google\Chrome\ExtensionInstallForcelist','HKCU:\Software\Policies\BraveSoftware\Brave\ExtensionInstallForcelist','HKCU:\Software\Policies\Microsoft\Edge\ExtensionInstallForcelist','HKCU:\Software\Policies\Opera Software\Opera Stable\ExtensionInstallForcelist','HKCU:\Software\Policies\Vivaldi\ExtensionInstallForcelist')
