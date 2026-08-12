@@ -1,5 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ensureSchema, health, listEventStatsForSetup, listUsersForSetup, optimizeTelemetryIndexesForSetup, repairTelemetrySequencesForSetup, resetExistingUserPassword, restoreAdminAccess, setTelemetryPauseForSetup, wipeTelemetryBatchForSetup, wipeTelemetryForSetup } from '@/lib/db';
+import { ensureSchema, health, listEventStatsForSetup, listUsersForSetup, optimizeTelemetryIndexesForSetup, repairTelemetrySequencesForSetup, resetExistingUserPassword, restoreAdminAccess, setTelemetryPauseForSetup, wipeTelemetryBatchForSetup } from '@/lib/db';
+import { wipeFilesAgentDailySummariesForSetup, withFilesAgentSummaryWipeLock } from '@/lib/files-agent-daily-summary';
+
+async function wipeTelemetryAndSummariesBatch(limit: number) {
+  return withFilesAgentSummaryWipeLock(async (db) => {
+    const result = await wipeTelemetryBatchForSetup(limit);
+    const filesAgentDailySummaries = await wipeFilesAgentDailySummariesForSetup(limit, db);
+    return {
+      ...result,
+      filesAgentDailySummaries,
+      done: result.done && filesAgentDailySummaries === 0,
+    };
+  });
+}
 
 export async function POST(req: NextRequest) {
   const key = req.headers.get('x-admin-setup-key') || '';
@@ -18,7 +31,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, stats });
   }
   if (body.action === 'wipe_telemetry') {
-    const result = await wipeTelemetryForSetup();
+    await setTelemetryPauseForSetup(true);
+    let result;
+    do {
+      result = await wipeTelemetryAndSummariesBatch(50000);
+    } while (!result.done);
     return NextResponse.json({ ok: true, result });
   }
   if (body.action === 'set_telemetry_pause') {
@@ -26,7 +43,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, result });
   }
   if (body.action === 'wipe_telemetry_batch') {
-    const result = await wipeTelemetryBatchForSetup(Number(body.limit || 10000));
+    const limit = Number(body.limit || 10000);
+    await setTelemetryPauseForSetup(true);
+    const result = await wipeTelemetryAndSummariesBatch(limit);
     return NextResponse.json({ ok: true, result });
   }
   if (body.action === 'repair_sequences') {

@@ -178,10 +178,84 @@ async function ensureSchemaNow() {
       value text not null,
       updated_at timestamptz not null default now()
     );
+    create table if not exists files_agent_enrollments (
+      id bigserial primary key,
+      company_id bigint not null references companies(id),
+      user_id bigint not null references app_users(id),
+      token_hash text not null unique,
+      expires_at timestamptz not null,
+      used_at timestamptz,
+      created_at timestamptz not null default now()
+    );
+    create table if not exists files_agent_devices (
+      id bigserial primary key,
+      company_id bigint not null references companies(id),
+      user_id bigint not null references app_users(id),
+      enrollment_id bigint not null unique references files_agent_enrollments(id),
+      credential_hash text not null unique,
+      device_label text,
+      hostname text,
+      platform text,
+      agent_version text,
+      revoked_at timestamptz,
+      ingest_window_started_at timestamptz not null default now(),
+      ingest_window_count integer not null default 0 check(ingest_window_count >= 0),
+      created_at timestamptz not null default now(),
+      last_seen_at timestamptz not null default now()
+    );
+    create table if not exists files_agent_events (
+      id bigserial primary key,
+      company_id bigint not null references companies(id),
+      user_id bigint not null references app_users(id),
+      device_id bigint not null references files_agent_devices(id),
+      event_id text not null constraint files_agent_events_event_id_check check(length(event_id) between 1 and 200),
+      captured_at timestamptz not null,
+      action text not null constraint files_agent_events_action_check check(action in (
+        'open_write','create','write','truncate','mkdir','rmdir','unlink',
+        'rename_from','rename_to','link_from','link_to','symlink'
+      )),
+      path text not null constraint files_agent_events_path_check check(length(path) between 1 and 4096),
+      payload jsonb not null constraint files_agent_events_payload_check check(
+        jsonb_typeof(payload)='object'
+        and (payload - 'run_id' - 'agent' - 'bytes' - 'count')='{}'::jsonb
+        and jsonb_typeof(payload->'run_id')='string'
+        and length(payload->>'run_id') between 1 and 200
+        and payload->>'agent' in ('hermes','codex','claude')
+        and jsonb_typeof(payload->'bytes')='number'
+        and (payload->>'bytes')::numeric = trunc((payload->>'bytes')::numeric)
+        and (payload->>'bytes')::numeric between 0 and 1000000000000000
+        and jsonb_typeof(payload->'count')='number'
+        and (payload->>'count')::numeric = trunc((payload->>'count')::numeric)
+        and (payload->>'count')::numeric between 0 and 1000000000
+      ),
+      received_at timestamptz not null default now(),
+      unique(device_id, event_id)
+    );
   `);
   await db.query(`alter table app_users add column if not exists enrollment_token text unique`);
   await db.query(`alter table app_users add column if not exists approved_at timestamptz`);
   await db.query(`alter table app_users add column if not exists password_hash text`);
+  await db.query(`alter table files_agent_devices add column if not exists ingest_window_started_at timestamptz not null default now()`);
+  await db.query(`alter table files_agent_devices add column if not exists ingest_window_count integer not null default 0 check(ingest_window_count >= 0)`);
+  await db.query(`
+    do $$ begin
+      if not exists (select 1 from pg_constraint where conname='files_agent_events_event_id_check' and conrelid='files_agent_events'::regclass) then
+        alter table files_agent_events add constraint files_agent_events_event_id_check check(length(event_id) between 1 and 200);
+      end if;
+      if not exists (select 1 from pg_constraint where conname='files_agent_events_action_check' and conrelid='files_agent_events'::regclass) then
+        alter table files_agent_events add constraint files_agent_events_action_check check(action in ('open_write','create','write','truncate','mkdir','rmdir','unlink','rename_from','rename_to','link_from','link_to','symlink'));
+      end if;
+      if not exists (select 1 from pg_constraint where conname='files_agent_events_path_check' and conrelid='files_agent_events'::regclass) then
+        alter table files_agent_events add constraint files_agent_events_path_check check(length(path) between 1 and 4096);
+      end if;
+      if not exists (select 1 from pg_constraint where conname='files_agent_events_payload_check' and conrelid='files_agent_events'::regclass) then
+        alter table files_agent_events add constraint files_agent_events_payload_check check(jsonb_typeof(payload)='object' and (payload - 'run_id' - 'agent' - 'bytes' - 'count')='{}'::jsonb and jsonb_typeof(payload->'run_id')='string' and length(payload->>'run_id') between 1 and 200 and payload->>'agent' in ('hermes','codex','claude') and jsonb_typeof(payload->'bytes')='number' and (payload->>'bytes')::numeric=trunc((payload->>'bytes')::numeric) and (payload->>'bytes')::numeric between 0 and 1000000000000000 and jsonb_typeof(payload->'count')='number' and (payload->>'count')::numeric=trunc((payload->>'count')::numeric) and (payload->>'count')::numeric between 0 and 1000000000);
+      end if;
+    end $$;
+  `);
+  await db.query(`create index if not exists idx_files_agent_enrollments_expiry on files_agent_enrollments (expires_at)`);
+  await db.query(`create index if not exists idx_files_agent_devices_company_user on files_agent_devices (company_id, user_id, last_seen_at desc)`);
+  await db.query(`create index if not exists idx_files_agent_events_company_received on files_agent_events (company_id, received_at desc, id desc)`);
 }
 
 export async function registerCompanyWithAdmin(companyName: string, adminEmail: string, adminPassword: string) {
@@ -275,7 +349,7 @@ export async function setTelemetryPauseForSetup(paused: boolean) {
   return { telemetry_paused: paused };
 }
 
-async function deleteBatch(table: 'activity_screenshots' | 'activity_events' | 'devices', limit: number) {
+async function deleteBatch(table: 'activity_screenshots' | 'activity_events' | 'devices' | 'files_agent_events' | 'files_agent_devices' | 'files_agent_enrollments', limit: number) {
   const db = getPool();
   const result = await db.query(
     `with doomed as (select ctid from ${table} limit $1)
@@ -290,8 +364,17 @@ export async function wipeTelemetryBatchForSetup(limit = 10000) {
   const boundedLimit = Math.max(1, Math.min(Number(limit) || 10000, 50000));
   const screenshots = await deleteBatch('activity_screenshots', boundedLimit);
   const events = await deleteBatch('activity_events', boundedLimit);
+  const filesAgentEvents = await deleteBatch('files_agent_events', boundedLimit);
+  const filesAgentDevices = filesAgentEvents === 0 ? await deleteBatch('files_agent_devices', boundedLimit) : 0;
+  const filesAgentEnrollments = filesAgentEvents === 0 && filesAgentDevices === 0 ? await deleteBatch('files_agent_enrollments', boundedLimit) : 0;
   const devices = events === 0 ? await deleteBatch('devices', boundedLimit) : 0;
-  return { screenshots, events, devices, done: screenshots === 0 && events === 0 && devices === 0 };
+  return {
+    screenshots, events, devices,
+    files_agent_events: filesAgentEvents,
+    files_agent_devices: filesAgentDevices,
+    files_agent_enrollments: filesAgentEnrollments,
+    done: screenshots === 0 && events === 0 && devices === 0 && filesAgentEvents === 0 && filesAgentDevices === 0 && filesAgentEnrollments === 0,
+  };
 }
 
 export async function wipeTelemetryForSetup() {
@@ -353,7 +436,7 @@ export async function resetExistingUserPassword(email: string, password: string)
   return result.rows[0] as { email: string; role: 'admin' | 'employee'; approval_status: string; company_id: string; has_password: boolean };
 }
 
-export async function approveEmployee(email: string) {
+export async function approveEmployee(email: string, companyId?: string) {
   const normalized = normalizeEmail(email);
   const token = crypto.randomBytes(24).toString('hex');
   const db = getPool();
@@ -361,9 +444,9 @@ export async function approveEmployee(email: string) {
   const result = await db.query(
     `update app_users
      set approval_status='approved', enrollment_token=coalesce(enrollment_token,$2), approved_at=now()
-     where email=$1 and role='employee'
+     where email=$1 and role='employee' and ($3::bigint is null or company_id=$3)
      returning email, enrollment_token, company_id`,
-    [normalized, token],
+    [normalized, token, companyId || null],
   );
   if (!result.rows[0]) throw new Error('Employee not found');
   return result.rows[0] as { email: string; enrollment_token: string; company_id: string };
@@ -432,17 +515,18 @@ type DashboardReadFilters = {
   endTime?: string;
 };
 
-export async function readDashboard(filters: DashboardReadFilters = {}) {
+export async function readDashboard(filters: DashboardReadFilters, companyId: string) {
   const db = getPool();
   await ensureSchema();
 
   const allPortalUsersSql = `select app_users.id, app_users.email, app_users.role, app_users.approval_status, app_users.employee_username, app_users.approved_at, app_users.created_at, app_users.enrollment_token, companies.domain as company_domain
-    from app_users join companies on companies.id=app_users.company_id`;
+    from app_users join companies on companies.id=app_users.company_id
+    where app_users.company_id=$1`;
   const enrolledPortalUsersSql = `${allPortalUsersSql}
-    where app_users.approval_status='approved' and app_users.enrollment_token is not null`;
+    and app_users.approval_status='approved' and app_users.enrollment_token is not null`;
 
   const eventWhere: string[] = [];
-  const eventParams: unknown[] = [];
+  const eventParams: unknown[] = [companyId];
   if (filters.user && filters.user !== 'all') {
     eventParams.push(filters.user);
     eventWhere.push(`activity_events.employee_email = $${eventParams.length}`);
@@ -472,11 +556,56 @@ export async function readDashboard(filters: DashboardReadFilters = {}) {
     order by activity_events.received_at desc, activity_events.id desc
     limit $${limitParam}`;
 
-  const [companies, users, devices, events] = await Promise.all([
-    db.query(`select name, domain, created_at from companies order by id desc limit 25`),
-    db.query(`select email, role, approval_status, employee_username, approved_at, created_at, company_domain, case when enrollment_token is null then null else left(enrollment_token, 8) || '…' end as enrollment_token_hint from (${allPortalUsersSql}) portal_users order by id desc limit 50`),
-    db.query(`with portal_users as (${enrolledPortalUsersSql}) select devices.employee_email, devices.hostname, devices.os_user, devices.first_seen_at, devices.last_seen_at from devices join portal_users on portal_users.email = devices.employee_email order by devices.last_seen_at desc limit 25`),
+  const fileWhere: string[] = [];
+  const fileParams: unknown[] = [companyId];
+  fileWhere.push(`files_agent_events.company_id=$1`);
+  if (filters.user && filters.user !== 'all') {
+    fileParams.push(filters.user);
+    fileWhere.push(`app_users.email=$${fileParams.length}`);
+  }
+  if (filters.eventType && filters.eventType !== 'all' && filters.eventType !== 'ai_file_change') fileWhere.push('false');
+  if (filters.mode === 'range' && filters.startTime) {
+    fileParams.push(filters.startTime);
+    fileWhere.push(`files_agent_events.captured_at >= $${fileParams.length}`);
+  }
+  if (filters.mode === 'range' && filters.endTime) {
+    fileParams.push(filters.endTime);
+    fileWhere.push(`files_agent_events.captured_at <= $${fileParams.length}`);
+  }
+  fileParams.push(filters.mode === 'range' ? 500 : 120);
+  const filesEventSql = `select 'f-' || files_agent_events.id::text as id, app_users.email as employee_email,
+      files_agent_devices.hostname, null::text as os_user, files_agent_events.captured_at, files_agent_events.received_at,
+      'ai_file_change'::text as event_type, 'AI files tracker'::text as app_name,
+      files_agent_events.path as window_title, null::text as url, null::integer as idle_seconds,
+      files_agent_events.payload || jsonb_build_object(
+        'action', files_agent_events.action, 'path', files_agent_events.path,
+        'agent', coalesce(files_agent_events.payload->>'agent', files_agent_devices.agent_version, 'files-agent'),
+        'device', coalesce(files_agent_devices.device_label, files_agent_devices.hostname, files_agent_devices.id::text),
+        'device_id', files_agent_devices.id
+      ) as payload, false as has_screenshot
+    from files_agent_events
+    join files_agent_devices on files_agent_devices.id=files_agent_events.device_id and files_agent_devices.company_id=files_agent_events.company_id
+    join app_users on app_users.id=files_agent_events.user_id and app_users.company_id=files_agent_events.company_id
+    ${fileWhere.length ? `where ${fileWhere.join(' and ')}` : ''}
+    order by files_agent_events.received_at desc, files_agent_events.id desc
+    limit $${fileParams.length}`;
+
+  const [companies, users, devices, events, fileEvents, fileDevices] = await Promise.all([
+    db.query(`select name, domain, created_at from companies where id=$1 order by id desc limit 25`, [companyId]),
+    db.query(`select email, role, approval_status, employee_username, approved_at, created_at, company_domain, case when enrollment_token is null then null else left(enrollment_token, 8) || '…' end as enrollment_token_hint from (${allPortalUsersSql}) portal_users order by id desc limit 50`, [companyId]),
+    db.query(`with portal_users as (${enrolledPortalUsersSql}) select devices.employee_email, devices.hostname, devices.os_user, devices.first_seen_at, devices.last_seen_at from devices join portal_users on portal_users.email = devices.employee_email order by devices.last_seen_at desc limit 25`, [companyId]),
     db.query(eventSql, eventParams),
+    db.query(filesEventSql, fileParams),
+    db.query(`select app_users.email as employee_email, files_agent_devices.hostname,
+      coalesce(files_agent_devices.device_label, files_agent_devices.platform, 'files-agent') as os_user,
+      files_agent_devices.created_at as first_seen_at, files_agent_devices.last_seen_at
+      from files_agent_devices join app_users on app_users.id=files_agent_devices.user_id and app_users.company_id=files_agent_devices.company_id
+      where files_agent_devices.company_id=$1
+      order by files_agent_devices.last_seen_at desc limit 25`, [companyId]),
   ]);
-  return { companies: companies.rows, users: users.rows, devices: devices.rows, events: events.rows };
+  const mergedEvents = [...events.rows, ...fileEvents.rows]
+    .sort((left, right) => new Date(right.received_at).getTime() - new Date(left.received_at).getTime())
+    .slice(0, filters.mode === 'range' ? 500 : 120);
+  const mergedDevices = [...fileDevices.rows, ...devices.rows].slice(0, 50);
+  return { companies: companies.rows, users: users.rows, devices: mergedDevices, events: mergedEvents };
 }

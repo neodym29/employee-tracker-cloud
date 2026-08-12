@@ -2,11 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { approveEmployee, health } from '@/lib/db';
 import { currentSession } from '@/lib/auth';
 
-function normalizeInstallerPlatform(value: unknown): 'linux' | 'macos' | 'windows' {
-  if (value === 'macos' || value === 'windows') return value;
-  return 'linux';
-}
-
 export async function POST(req: NextRequest) {
   const session = await currentSession();
   if (!session || session.role !== 'admin') {
@@ -15,10 +10,8 @@ export async function POST(req: NextRequest) {
   if (!health().configured) return NextResponse.json({ ok: false, error: 'DATABASE_URL or POSTGRES_URL is not configured' }, { status: 503 });
   const body = await req.json().catch(() => ({}));
   try {
-    const platform = normalizeInstallerPlatform(body.platform);
-    const result = await approveEmployee(String(body.email || ''));
-    const base = process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin;
-    return NextResponse.json({ ok: true, email: result.email, platform, installer_url: `${base}/api/installer?token=${result.enrollment_token}&platform=${platform}` });
+    const result = await approveEmployee(String(body.email || ''), session.company_id);
+    return NextResponse.json({ ok: true, email: result.email, approval_status: 'approved' });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 400 });
   }

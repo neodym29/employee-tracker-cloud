@@ -1,46 +1,26 @@
-# Neodym Employee Tracker Cloud
+# Neodym AI Files Tracker
 
-Vercel-safe cloud prototype for `neodym.ai` employee-device enrollment.
+A Next.js/Postgres portal for company enrollment and **files-only metadata** reporting from approved AI coding-agent process trees.
 
-## What this is
+## Privacy boundary
 
-- Next.js app deployable to Vercel.
-- Admin dashboard for `hello@neodym.ai`.
-- Seeded employee record for `ibrahim@neodym.ai`.
-- `/api/ingest` endpoint for employee PCs to upload activity.
-- Postgres-backed persistence via `DATABASE_URL` or `POSTGRES_URL`.
+The active files agent accepts changes attributed only to Hermes, Codex, or Claude wrapper process trees. It reports:
 
-## Required Vercel env vars for real cross-PC testing
+- file path
+- action
+- timestamp
+- device
+- approved agent and run identifier
 
-```bash
-DATABASE_URL=postgres://...
-INGEST_API_KEY=<private shared key or enrollment-token backend>
-ADMIN_SETUP_KEY=<private bootstrap key>
-NEXT_PUBLIC_APP_URL=https://<project>.vercel.app
-```
+It does **not** collect file contents, screenshots, keyboard or click input, clipboard data, browser activity, audio, terminal commands, windows, or general process activity. The retired legacy ingest, installer, screenshot, and update routes remain as HTTP `410 Gone` tombstones. Historical database tables/data are retained for migration safety but are not queried by active pages.
 
-Without `DATABASE_URL`, the app still deploys and shows readiness/demo screens, but it cannot persist Ibrahim PC activity.
-
-## Bootstrap schema after env vars are set
+## Local development
 
 ```bash
-curl -X POST https://<project>.vercel.app/api/bootstrap \
-  -H "x-admin-setup-key: $ADMIN_SETUP_KEY"
+npm install
+npm test
+npm run typecheck
+npm run build
 ```
 
-## Test ingest
-
-```bash
-curl -X POST https://<project>.vercel.app/api/ingest \
-  -H "content-type: application/json" \
-  -H "x-ingest-key: $INGEST_API_KEY" \
-  -d '{
-    "employee_email":"ibrahim@neodym.ai",
-    "hostname":"ibrahim-pc",
-    "os_user":"ibrahim",
-    "event_type":"activity_snapshot",
-    "app_name":"Chrome",
-    "window_title":"Neodym work",
-    "captured_at":"'"$(date -Is)"'"
-  }'
-```
+Set `DATABASE_URL` (or `POSTGRES_URL`) and `AUTH_SECRET` for authenticated database-backed use. See `.env.example` if present and the files-agent documentation under `docs/` and `files-agent/`.

@@ -5,9 +5,9 @@ export default function Home() {
   return (
     <div className="hero">
       <section className="card">
-        <span className="pill">Cloud prototype · fresh company onboarding</span>
-        <h1>Start with company registration, then enroll employees.</h1>
-        <p className="muted">The tracker code is working, so the cloud flow now starts clean: register a company using a real work-email domain, create the first approved admin, then let employees request access and receive installers after approval.</p>
+        <span className="pill">Files-only AI change tracking</span>
+        <h1>See file metadata changed by approved AI coding agents.</h1>
+        <p className="muted">Register a company, approve employee accounts, then enroll the files-only agent. It reports path, action, time, and device only when an approved Hermes, Codex, or Claude process tree changes a file. It never collects file contents, screens, input, audio, browser activity, or general computer activity.</p>
         <div className="grid">
           <div className="card"><div className="metricLabel">Step 1</div><div className="metric">Company</div><p className="muted">Validate the admin email domain with DNS and create the company.</p></div>
           <div className="card"><div className="metricLabel">Step 2</div><div className="metric">Admin</div><p className="muted">The first admin is approved automatically during company registration.</p></div>
@@ -18,7 +18,7 @@ export default function Home() {
       </section>
       <aside className="card">
         <h2>Operations</h2>
-        <p className="muted">Use the dashboard for accounts, approvals, installers, and uploaded activity.</p>
+        <p className="muted">Use the dashboard for account approvals, files-agent enrollment, devices, and approved AI file-change metadata.</p>
         <p><a className="button" href="/dashboard">Open admin dashboard</a></p>
         <p><a className="button" href="/signup">Employee signup</a></p>
       </aside>

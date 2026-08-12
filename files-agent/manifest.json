@@ -1,0 +1,12 @@
+{
+  "name": "files-agent",
+  "version": "1.0.0",
+  "description": "Privacy-safe Linux files-only AI CLI tracer",
+  "runtime": "python3-stdlib",
+  "platforms": ["linux"],
+  "requires": ["python3", "strace"],
+  "entrypoint": "files_agent.py",
+  "commands": ["exec", "status", "list", "flush"],
+  "captures": ["successful file mutation paths", "operation type", "byte count", "timestamp", "approved agent name"],
+  "never_captures": ["file contents", "command arguments", "keyboard input", "browser activity", "screenshots", "audio"]
+}

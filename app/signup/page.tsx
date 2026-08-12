@@ -17,7 +17,7 @@ export default function Signup() {
     <section className="card">
       <span className="pill">Employee signup</span>
       <h1>Request access</h1>
-      <p className="muted">Employees sign up after their company and first admin are registered. Use your company work email; the domain must match an existing registered company. After admin approval, you receive an installer that connects this PC to the cloud dashboard.</p>
+      <p className="muted">Employees sign up after their company and first admin are registered. Use your company work email; the domain must match an existing registered company. Approval grants access only to the files-agent package, which reports file-change metadata from approved Hermes, Codex, or Claude process trees—never file contents or general computer activity.</p>
       <form onSubmit={submit}>
         <label>Work email<input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="employee@company.com" required /></label>
         <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" minLength={8} required /></label>

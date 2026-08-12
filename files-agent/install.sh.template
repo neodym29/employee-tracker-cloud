@@ -1,0 +1,32 @@
+#!/bin/sh
+# Generated per-user installer template. Replace {{...}} server-side, then deliver
+# over an authenticated channel. No root privileges or system service required.
+set -eu
+
+command -v python3 >/dev/null 2>&1 || { printf '%s\n' 'python3 is required' >&2; exit 1; }
+command -v strace >/dev/null 2>&1 || { printf '%s\n' 'strace is required (ask your administrator to install it)' >&2; exit 1; }
+
+LIB="$HOME/.local/lib/files-agent"
+BIN="$HOME/.local/bin"
+CONFIG_DIR="$HOME/.config/files-agent"
+STATE="$HOME/.local/state/files-agent"
+umask 077
+mkdir -p "$LIB" "$BIN" "$CONFIG_DIR" "$STATE"
+
+# {{PAYLOAD_BASE64}} is the base64 encoding of files_agent.py from this package.
+printf '%s' '{{PAYLOAD_BASE64}}' | python3 -c 'import base64,sys; sys.stdout.buffer.write(base64.b64decode(sys.stdin.buffer.read()))' > "$LIB/files_agent.py"
+chmod 700 "$LIB/files_agent.py"
+ln -sf "$LIB/files_agent.py" "$BIN/files-agent"
+
+# JSON replacement values must be JSON-string escaped by the installer generator.
+cat > "$CONFIG_DIR/config.json" <<'CONFIG'
+{
+  "endpoint": "{{ENDPOINT}}",
+  "device_token": "{{DEVICE_TOKEN}}",
+  "auth": "{{AUTH_SCHEME}}",
+  "agents": {{APPROVED_AGENTS_JSON}}
+}
+CONFIG
+chmod 600 "$CONFIG_DIR/config.json"
+printf '%s\n' "Installed files-agent in $BIN. Add that directory to PATH if needed."
+printf '%s\n' "Usage: files-agent exec --agent NAME -- REALCMD..."

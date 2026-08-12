@@ -2,8 +2,8 @@ import './globals.css';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Neodym Employee Tracker Cloud',
-  description: 'Cloud enrollment and activity ingest prototype for neodym.ai',
+  title: 'Neodym AI Files Tracker',
+  description: 'Files-only metadata tracking for approved AI coding agents',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -12,7 +12,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <header>
           <div className="nav">
-            <div className="brand"><div className="logo" /> Neodym Tracker Cloud</div>
+            <div className="brand"><div className="logo" /> Neodym AI Files Tracker</div>
             <div style={{display:'flex', gap:12, flexWrap:'wrap'}}>
               <a href="/">Home</a>
               <a href="/register">Company registration</a>
