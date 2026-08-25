@@ -118,6 +118,8 @@ class TraceParser:
         self.pending: dict[str, str] = {}
         self.events: dict[tuple[str, str], Event] = {}
         self.shared_mmaps: dict[str, tuple[int, int, int, int] | None] = {}
+        self.mmap_regions: dict[tuple[str, int], tuple[int, str]] = {}
+        self.confirmed_mmaps: set[str] = set()
         self.observed_metadata: dict[str, tuple[int, int, int, int] | None] = {}
 
     @staticmethod
@@ -258,7 +260,7 @@ class TraceParser:
                 for deferred in reversed(waiting.pop(child, [])):
                     work.appendleft(deferred)
         for path, before in self.shared_mmaps.items():
-            if self._metadata(path) != before:
+            if path not in self.confirmed_mmaps and self._metadata(path) != before:
                 self._add("write", path)
         return sorted(self.events.values(), key=lambda event: (event.path, event.action))
 
@@ -327,6 +329,18 @@ class TraceParser:
                 path = self._fd_path(pid, args[4])
                 if path and self._allowed(path) and path not in self.shared_mmaps:
                     self.shared_mmaps[path] = self.observed_metadata.get(path, self._metadata(path))
+                address = self._result_int(result)
+                length = self._result_int(args[1])
+                if path and address > 0 and length > 0:
+                    self.mmap_regions[(pid, address)] = (address + length, path)
+            return
+        if name == "msync" and len(args) >= 2:
+            start = self._result_int(args[0])
+            end = start + self._result_int(args[1])
+            for (owner, region_start), (region_end, path) in self.mmap_regions.items():
+                if owner == pid and start < region_end and end > region_start:
+                    self._add("write", path)
+                    self.confirmed_mmaps.add(path)
             return
         if name == "fallocate":
             self._add("write", self._fd_path(pid, args[0]))

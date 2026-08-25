@@ -111,6 +111,17 @@ class ParserTests(unittest.TestCase):
             writes = {event.path for event in events if event.action == "write"}
             self.assertEqual(writes, {str(changed)})
 
+    def test_successful_msync_attributes_only_the_matching_shared_mapping(self):
+        trace = '''5 openat(AT_FDCWD</work>, "changed", O_RDWR) = 3</work/changed>
+5 mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_SHARED, 3</work/changed>, 0) = 0x1000
+5 openat(AT_FDCWD</work>, "untouched", O_RDWR) = 4</work/untouched>
+5 mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_SHARED, 4</work/untouched>, 0) = 0x3000
+5 msync(0x1000, 4096, MS_SYNC) = 0
+'''.splitlines()
+        events = self.m.TraceParser("/work", []).parse(trace)
+        writes = {event.path for event in events if event.action == "write"}
+        self.assertEqual(writes, {"/work/changed"})
+
     def test_unfinished_lines_descendant_cwd_and_all_metadata_calls(self):
         trace = '''20 chdir("/tmp/tree") = 0
 21 mkdir("child", 0777 <unfinished ...>
