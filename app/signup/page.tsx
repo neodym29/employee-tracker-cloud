@@ -10,16 +10,23 @@ export default function Signup() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
+  const [existingAccount, setExistingAccount] = useState(false);
   const [done, setDone] = useState(false);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    setExistingAccount(false);
     setMessage('Submitting...');
     const response = await fetch('/api/signup', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ accountType, displayName, email, password }),
     });
     const data = await response.json().catch(() => ({}));
+    if (response.status === 409) {
+      setExistingAccount(true);
+      setMessage('An account already exists for this email. Sign in instead.');
+      return;
+    }
     if (!response.ok || !data.ok) { setMessage(data.error || 'Signup failed. Please try again.'); return; }
     setDone(true);
     setMessage('Your account is pending approval. You can sign in after an admin approves it.');
@@ -41,6 +48,7 @@ export default function Signup() {
           <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} autoComplete="new-password" required /></label>
           <button type="submit">Submit for approval</button>
           {message && <p className="bad" role="alert">{message}</p>}
+          {existingAccount && <a className="secondaryButton" href="/login">Sign in</a>}
         </form>
       )}
     </section>

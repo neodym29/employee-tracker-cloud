@@ -53,6 +53,26 @@ export function projectAccessSql(userParameter: string, projectAlias = 'p', memb
 }
 
 type ProjectReadOptions = { platformAudit?: boolean };
+type ProjectAccessOptions = { ownerOnly?: boolean };
+
+async function assertProjectAccess(
+  db: Pick<PoolClient, 'query'>,
+  session: SessionUser,
+  projectId: string,
+  options: ProjectAccessOptions = {},
+) {
+  const result = options.ownerOnly
+    ? await db.query(
+        `select 1 from projects p where p.id=$1 and p.client_id=$2`,
+        [projectId, session.id],
+      )
+    : await db.query(
+        `select 1 from projects p ${projectAccessSql('$2').join}
+         where p.id=$1 and ${projectAccessSql('$2').predicate}`,
+        [projectId, session.id],
+      );
+  if (!result.rows[0]) throw new ProjectServiceError('Project not found', 404, 'not_found');
+}
 
 function recordBody(body: unknown) {
   let encoded: string;
@@ -202,12 +222,14 @@ export async function requestMembership(session: SessionUser, projectId: unknown
 
 export async function listProjectMemberships(session: SessionUser, projectId: unknown) {
   requireType(session, 'client');
+  const project = id(projectId, 'project id');
   const db = await ready();
+  await assertProjectAccess(db, session, project, { ownerOnly: true });
   return (await db.query(
     `select pm.id,pm.project_id,pm.user_id,u.display_name,pm.membership_type,pm.membership_status,pm.created_at,pm.responded_at
      from project_memberships pm join projects p on p.id=pm.project_id and p.client_id=$2
      join app_users u on u.id=pm.user_id where pm.project_id=$1 order by pm.created_at desc,pm.id desc`,
-    [id(projectId, 'project id'), session.id],
+    [project, session.id],
   )).rows;
 }
 
@@ -241,14 +263,16 @@ export async function respondToMembership(session: SessionUser, projectId: unkno
 }
 
 export async function listRecords(session: SessionUser, projectId: unknown) {
+  const project = id(projectId, 'project id');
   const db = await ready();
+  await assertProjectAccess(db, session, project);
   const access = projectAccessSql('$2');
   return (await db.query(
     `select resource.id,resource.project_id,resource.record_id,resource.version,resource.title,resource.body,resource.created_by,resource.created_at
      from project_records resource join projects p on p.id=resource.project_id ${access.join}
      where resource.project_id=$1 and ${access.predicate}
      order by resource.record_id,resource.version desc`,
-    [id(projectId, 'project id'), session.id],
+    [project, session.id],
   )).rows;
 }
 
@@ -298,14 +322,16 @@ export async function createRecordVersion(session: SessionUser, projectId: unkno
 }
 
 export async function listArtifacts(session: SessionUser, projectId: unknown) {
+  const project = id(projectId, 'project id');
   const db = await ready();
+  await assertProjectAccess(db, session, project);
   const access = projectAccessSql('$2');
   return (await db.query(
     `select resource.id,resource.project_id,resource.filename,resource.media_type,resource.size_bytes,resource.sha256,resource.storage_key,resource.created_by,resource.created_at
      from project_artifacts resource join projects p on p.id=resource.project_id ${access.join}
      where resource.project_id=$1 and ${access.predicate}
      order by resource.created_at desc,resource.id desc`,
-    [id(projectId, 'project id'), session.id],
+    [project, session.id],
   )).rows;
 }
 

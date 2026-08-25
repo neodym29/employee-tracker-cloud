@@ -15,6 +15,9 @@ test('public header and role signup expose the new account journey', async () =>
   assert.match(signup, /displayName/);
   assert.match(signup, /accountType/);
   assert.match(signup, /pending approval/i);
+  assert.match(signup, /response\.status\s*===\s*409/, 'duplicate signup should get a dedicated safe UI path');
+  assert.match(signup, /An account already exists for this email\. Sign in instead\./);
+  assert.match(signup, /href="\/login"[^>]*>Sign in/);
   assert.doesNotMatch(signup, /company and first admin|Employee signup/i);
 });
 
