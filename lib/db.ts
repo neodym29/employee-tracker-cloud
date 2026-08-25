@@ -134,6 +134,10 @@ async function ensureSchemaNow() {
       device_label text,
       enrollment_token text unique,
       approved_at timestamptz,
+      display_name text,
+      account_type text,
+      reviewed_at timestamptz,
+      reviewed_by bigint references app_users(id),
       created_at timestamptz not null default now()
     );
     create table if not exists devices (
@@ -235,6 +239,14 @@ async function ensureSchemaNow() {
   await db.query(`alter table app_users add column if not exists enrollment_token text unique`);
   await db.query(`alter table app_users add column if not exists approved_at timestamptz`);
   await db.query(`alter table app_users add column if not exists password_hash text`);
+  await db.query(`alter table app_users add column if not exists display_name text`);
+  await db.query(`alter table app_users add column if not exists account_type text`);
+  await db.query(`alter table app_users add column if not exists reviewed_at timestamptz`);
+  await db.query(`alter table app_users add column if not exists reviewed_by bigint references app_users(id)`);
+  await db.query(`update app_users set account_type=case when role='admin' then 'admin' else 'engineer' end where account_type is null`);
+  await db.query(`update app_users set display_name=coalesce(nullif(employee_username,''),split_part(email,'@',1)) where display_name is null`);
+  await db.query(`alter table app_users alter column account_type set not null`);
+  await db.query(`alter table app_users alter column display_name set not null`);
   await db.query(`alter table files_agent_devices add column if not exists ingest_window_started_at timestamptz not null default now()`);
   await db.query(`alter table files_agent_devices add column if not exists ingest_window_count integer not null default 0 check(ingest_window_count >= 0)`);
   await db.query(`
@@ -256,6 +268,82 @@ async function ensureSchemaNow() {
   await db.query(`create index if not exists idx_files_agent_enrollments_expiry on files_agent_enrollments (expires_at)`);
   await db.query(`create index if not exists idx_files_agent_devices_company_user on files_agent_devices (company_id, user_id, last_seen_at desc)`);
   await db.query(`create index if not exists idx_files_agent_events_company_received on files_agent_events (company_id, received_at desc, id desc)`);
+  await db.query(`
+    do $$ begin
+      if not exists (select 1 from pg_constraint where conname='app_users_account_type_check') then
+        alter table app_users add constraint app_users_account_type_check check(account_type in ('admin','client','engineer'));
+      end if;
+    end $$;
+    create table if not exists projects (
+      id bigserial primary key, client_id bigint not null references app_users(id),
+      title text not null check(length(title) between 1 and 120), description text not null default '' check(length(description)<=4000),
+      status text not null default 'draft' check(status in ('draft','open','active','completed','archived')),
+      created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+    );
+    create table if not exists project_memberships (
+      id bigserial primary key, project_id bigint not null references projects(id) on delete cascade, user_id bigint not null references app_users(id),
+      membership_type text not null check(membership_type in ('invitation','request')), membership_status text not null default 'pending' check(membership_status in ('pending','active','declined','rejected')),
+      created_by bigint not null references app_users(id), responded_by bigint references app_users(id), created_at timestamptz not null default now(), responded_at timestamptz,
+      unique(project_id,user_id)
+    );
+    create table if not exists project_records (
+      id bigserial primary key, project_id bigint not null references projects(id) on delete cascade, record_id text not null, version integer not null check(version>0),
+      title text not null check(length(title) between 1 and 160), body jsonb not null, created_by bigint not null references app_users(id), created_at timestamptz not null default now(),
+      unique(project_id,record_id,version)
+    );
+    create table if not exists project_artifacts (
+      id bigserial primary key, project_id bigint not null references projects(id) on delete cascade,
+      filename text not null check(length(filename) between 1 and 255), media_type text not null check(length(media_type) between 1 and 255),
+      size_bytes bigint not null check(size_bytes>=0 and size_bytes<=1000000000000), sha256 text not null check(sha256 ~ '^[a-f0-9]{64}$'),
+      storage_key text check(storage_key is null or length(storage_key)<=1024), created_by bigint not null references app_users(id), created_at timestamptz not null default now()
+    );
+    create table if not exists project_chat_messages (
+      id bigserial primary key, project_id bigint not null references projects(id) on delete cascade, user_id bigint references app_users(id),
+      role text not null check(role in ('user','assistant','system')), body text not null, created_at timestamptz not null default now()
+    );
+    create table if not exists project_agent_actions (
+      id bigserial primary key, project_id bigint not null references projects(id) on delete cascade, actor_user_id bigint references app_users(id),
+      action_type text not null, input jsonb not null default '{}'::jsonb, output jsonb,
+      status text not null default 'pending' check(status in ('pending','confirmed','cancelled')),
+      confirmed_by bigint references app_users(id), confirmed_at timestamptz, result jsonb,
+      created_at timestamptz not null default now()
+    );
+    alter table project_agent_actions add column if not exists status text not null default 'pending';
+    alter table project_agent_actions add column if not exists confirmed_by bigint references app_users(id);
+    alter table project_agent_actions add column if not exists confirmed_at timestamptz;
+    alter table project_agent_actions add column if not exists result jsonb;
+    do $$ begin
+      if not exists (select 1 from pg_constraint where conname='project_agent_actions_status_check') then
+        alter table project_agent_actions add constraint project_agent_actions_status_check check(status in ('pending','confirmed','cancelled'));
+      end if;
+    end $$;
+    create index if not exists idx_app_users_approval_type on app_users (approval_status,account_type,id);
+    create index if not exists idx_projects_client_status on projects (client_id,status,updated_at desc);
+    create index if not exists idx_projects_open on projects (updated_at desc,id) where status='open';
+    create index if not exists idx_project_memberships_user_status on project_memberships (user_id,membership_status,project_id);
+    create index if not exists idx_project_memberships_project_status on project_memberships (project_id,membership_status,id);
+    create index if not exists idx_project_records_latest on project_records (project_id,record_id,version desc);
+    create index if not exists idx_project_artifacts_project on project_artifacts (project_id,created_at desc,id desc);
+    create index if not exists idx_project_chat_project on project_chat_messages (project_id,created_at,id);
+    create index if not exists idx_project_agent_actions_project on project_agent_actions (project_id,created_at,id);
+  `);
+  await db.query(`
+    create or replace function prevent_project_agent_action_mutation() returns trigger language plpgsql as $$
+    begin
+      if tg_op='DELETE' then raise exception 'project agent action audit rows are immutable'; end if;
+      if old.status='pending' and new.status in ('confirmed','cancelled')
+         and new.project_id=old.project_id and new.actor_user_id is not distinct from old.actor_user_id
+         and new.action_type=old.action_type and new.input=old.input and new.created_at=old.created_at
+         and new.output is not distinct from old.output and new.confirmed_by is not null and new.confirmed_at is not null then
+        return new;
+      end if;
+      raise exception 'project agent action audit rows are immutable';
+    end $$;
+    drop trigger if exists prevent_project_agent_action_update on project_agent_actions;
+    create trigger prevent_project_agent_action_update before update or delete on project_agent_actions
+      for each row execute function prevent_project_agent_action_mutation();
+    create index if not exists idx_project_agent_actions_pending on project_agent_actions(project_id,id) where status='pending';
+  `);
 }
 
 export async function registerCompanyWithAdmin(companyName: string, adminEmail: string, adminPassword: string) {
@@ -273,12 +361,35 @@ export async function registerCompanyWithAdmin(companyName: string, adminEmail: 
     [name, domain],
   );
   const user = await db.query(
-    `insert into app_users(company_id,email,password_hash,role,approval_status,employee_username,approved_at)
-     values($1,$2,$3,'admin','approved',$4,now())
+    `insert into app_users(company_id,email,password_hash,role,approval_status,employee_username,approved_at,display_name,account_type)
+     values($1,$2,$3,'admin','approved',$4,now(),$5,'client')
      returning id, email, role, approval_status`,
-    [company.rows[0].id, email, passwordHash, email.split('@')[0]],
+    [company.rows[0].id, email, passwordHash, email.split('@')[0], name],
   );
   return { ok: true, company: company.rows[0], admin: user.rows[0] };
+}
+
+export async function signupAccount(accountType: 'client' | 'engineer', displayName: string, email: string, password: string) {
+  const normalized = normalizeEmail(email);
+  if (accountType !== 'client' && accountType !== 'engineer') throw new Error('Choose client or engineer');
+  const name = displayName.trim();
+  if (!name || name.length > 120) throw new Error('Display name must be between 1 and 120 characters');
+  const passwordHash = hashPassword(password);
+  const db = getPool();
+  await ensureSchema();
+  const company = await db.query(
+    `insert into companies(name,domain) values('Platform Accounts','platform.local')
+     on conflict(domain) do update set name=companies.name returning id`,
+  );
+  const signup = await db.query(
+    `insert into app_users(company_id,email,password_hash,role,approval_status,employee_username,display_name,account_type)
+     values($1,$2,$3,'employee','pending',$4,$5,$6)
+     on conflict(email) do nothing
+     returning email, account_type, approval_status`,
+    [company.rows[0].id, normalized, passwordHash, normalized.split('@')[0], name, accountType],
+  );
+  if (!signup.rows[0]) throw new Error('Account could not be created');
+  return { ok: true, email: normalized, account_type: accountType, status: 'pending' };
 }
 
 export async function signupEmployee(email: string, password: string) {
@@ -291,15 +402,14 @@ export async function signupEmployee(email: string, password: string) {
   const companyId = company.rows[0]?.id;
   if (!companyId) throw new Error(`${domain} is not registered yet. Register the company and first admin before employee signups.`);
   const signup = await db.query(
-    `insert into app_users(company_id,email,password_hash,role,approval_status,employee_username)
-     values($1,$2,$3,'employee','pending',$4)
-     on conflict(email) do update set company_id=excluded.company_id, password_hash=excluded.password_hash, approval_status='pending', employee_username=excluded.employee_username
-     where app_users.role='employee'
-     returning email, role, approval_status`,
+    `insert into app_users(company_id,email,password_hash,role,approval_status,employee_username,display_name,account_type)
+     values($1,$2,$3,'employee','pending',$4,$4,'engineer')
+     on conflict(email) do nothing
+     returning email, role, account_type, approval_status`,
     [companyId, normalized, passwordHash, normalized.split('@')[0]],
   );
-  if (!signup.rows[0]) throw new Error(`${normalized} is already an admin. Use the login page or reset admin access.`);
-  return { ok: true, email: normalized, company_domain: domain, status: 'pending' };
+  if (!signup.rows[0]) throw new Error('Account could not be created');
+  return { ok: true, email: normalized, company_domain: domain, account_type: 'engineer' as const, status: 'pending' as const };
 }
 
 export async function listEventStatsForSetup() {
@@ -411,9 +521,9 @@ export async function restoreAdminAccess(email: string, password: string) {
   const company = await db.query(`select id, domain from companies where domain=$1`, [domain]);
   if (!company.rows[0]) throw new Error(`${domain} is not registered yet`);
   const result = await db.query(
-    `insert into app_users(company_id,email,password_hash,role,approval_status,employee_username,approved_at)
-     values($1,$2,$3,'admin','approved',$4,now())
-     on conflict(email) do update set company_id=excluded.company_id, password_hash=excluded.password_hash, role='admin', approval_status='approved', approved_at=now(), employee_username=excluded.employee_username
+    `insert into app_users(company_id,email,password_hash,role,approval_status,employee_username,approved_at,display_name,account_type)
+     values($1,$2,$3,'admin','approved',$4,now(),$4,'admin')
+     on conflict(email) do update set company_id=excluded.company_id, password_hash=excluded.password_hash, role='admin', account_type='admin', approval_status='approved', approved_at=now(), employee_username=excluded.employee_username
      returning email, role, approval_status, company_id`,
     [company.rows[0].id, normalized, passwordHash, normalized.split('@')[0]],
   );
@@ -489,7 +599,7 @@ export async function loginUser(email: string, password: string) {
   const db = getPool();
   await ensureSchema();
   const result = await db.query(
-    `select app_users.id, app_users.company_id, app_users.email, app_users.password_hash, app_users.role, app_users.approval_status, companies.domain as company_domain
+    `select app_users.id, app_users.company_id, app_users.email, app_users.password_hash, app_users.role, app_users.account_type, app_users.approval_status, companies.domain as company_domain
      from app_users join companies on companies.id=app_users.company_id
      where app_users.email=$1`,
     [normalized],
@@ -502,6 +612,7 @@ export async function loginUser(email: string, password: string) {
     company_id: String(user.company_id),
     email: user.email as string,
     role: user.role as 'admin' | 'employee',
+    account_type: user.account_type as 'admin' | 'client' | 'engineer',
     approval_status: user.approval_status as string,
     company_domain: user.company_domain as string,
   };

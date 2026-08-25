@@ -1,69 +1,30 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 
-type UserRow = {
-  email: string;
-  role: string;
-  approval_status: string;
-  employee_username?: string | null;
-  company_domain?: string | null;
-};
+type Approval = { id: string; display_name: string; email: string; account_type: 'client' | 'engineer'; created_at: string };
 
-export default function ApprovalClient({ users }: { users: UserRow[] }) {
-  const [rows, setRows] = useState(users);
-  const [busyEmail, setBusyEmail] = useState('');
+export default function ApprovalClient({ initialApprovals, unavailable }: { initialApprovals: Approval[]; unavailable: boolean }) {
+  const [rows, setRows] = useState(initialApprovals);
+  const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
-  const employees = useMemo(() => rows.filter((user) => user.role === 'employee'), [rows]);
-  const pendingCount = employees.filter((user) => user.approval_status === 'pending').length;
 
-  async function approve(email: string) {
-    setBusyEmail(email);
-    setError('');
-    try {
-      const response = await fetch('/api/approve', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result.ok) throw new Error(result.error || 'Approval failed');
-      setRows((current) => current.map((user) => user.email === email ? { ...user, approval_status: 'approved' } : user));
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Approval failed');
-    } finally {
-      setBusyEmail('');
-    }
+  async function review(user: Approval, action: 'approve' | 'reject') {
+    setBusy(user.id); setError('');
+    const response = await fetch(`/api/admin/approvals/${user.id}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action }) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) setError(data.error || 'The account could not be reviewed.');
+    else setRows((current) => current.filter((row) => row.id !== user.id));
+    setBusy('');
   }
 
-  return (
-    <>
-      <section className="card">
-        <span className="pill">Admin approval</span>
-        <h1>Approve employees</h1>
-        <p className="muted">Approval grants access to the files-only agent package. No legacy tracker package is generated.</p>
-        <p className={pendingCount ? 'warn' : 'good'}>{pendingCount ? `${pendingCount} employee${pendingCount === 1 ? '' : 's'} waiting for approval` : 'No pending approvals'}</p>
-      </section>
-      <section className="card" style={{ marginTop: 16 }}>
-        <h2>Signup requests</h2>
-        {employees.length === 0 ? <p className="muted">No employee signups yet.</p> : (
-          <div className="tableWrap">
-            <table>
-              <thead><tr><th>Employee</th><th>Company</th><th>Status</th><th>Username</th><th>Action</th></tr></thead>
-              <tbody>{employees.map((user) => {
-                const approved = user.approval_status === 'approved';
-                return <tr key={user.email}>
-                  <td>{user.email}</td><td>{user.company_domain || '—'}</td>
-                  <td className={approved ? 'good' : 'warn'}>{user.approval_status}</td>
-                  <td>{user.employee_username || '—'}</td>
-                  <td>{approved ? <span className="good">Approved</span> : <button type="button" onClick={() => approve(user.email)} disabled={Boolean(busyEmail)}>{busyEmail === user.email ? 'Approving…' : 'Approve'}</button>}</td>
-                </tr>;
-              })}</tbody>
-            </table>
-          </div>
-        )}
-        {error && <p className="bad" role="alert">{error}</p>}
-      </section>
-    </>
-  );
+  return <div className="dashboardShell">
+    <div className="dashboardHeading"><div><span className="pill">Platform admin</span><h1>Account approvals</h1><p>Review pending client and engineer accounts.</p></div><a className="secondaryButton" href="/projects">Projects</a></div>
+    {unavailable && <p className="errorBanner" role="alert">Approvals are temporarily unavailable.</p>}
+    {error && <p className="errorBanner" role="alert">{error}</p>}
+    <section className="dashboardPanel">
+      <div className="panelHeader"><h2>Pending accounts</h2><span className="muted">{rows.length} waiting</span></div>
+      {rows.length === 0 ? <div className="emptyState"><h3>No pending approvals</h3><p>New signup requests will appear here.</p></div> : <div className="approvalList">{rows.map((user) => <article className="approvalRow" key={user.id}><div><strong>{user.display_name}</strong><span>{user.email}</span></div><span className="statusBadge">{user.account_type}</span><div className="rowActions"><button disabled={Boolean(busy)} onClick={() => review(user, 'approve')}>{busy === user.id ? 'Working...' : 'Approve'}</button><button className="secondaryButton" disabled={Boolean(busy)} onClick={() => review(user, 'reject')}>Reject</button></div></article>)}</div>}
+    </section>
+  </div>;
 }

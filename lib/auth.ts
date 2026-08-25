@@ -8,6 +8,7 @@ export type SessionUser = {
   company_id: string;
   email: string;
   role: 'admin' | 'employee';
+  account_type: 'admin' | 'client' | 'engineer';
   company_domain: string;
 };
 
@@ -35,11 +36,13 @@ export function parseSessionToken(token: string | undefined): SessionUser | null
   const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as SessionUser & { exp?: number };
   if (!parsed.exp || parsed.exp < Date.now()) return null;
   if (parsed.role !== 'admin' && parsed.role !== 'employee') return null;
+  if (!['admin', 'client', 'engineer'].includes(parsed.account_type)) return null;
   return {
     id: String(parsed.id),
     company_id: String(parsed.company_id),
     email: parsed.email,
     role: parsed.role,
+    account_type: parsed.account_type,
     company_domain: parsed.company_domain,
   };
 }
@@ -61,18 +64,18 @@ export async function clearSessionCookie() {
 }
 
 async function getSessionUserFromDatabase(parsed: SessionUser): Promise<SessionUser | null> {
-  if (!health().configured) return parsed;
+  if (!health().configured) return null;
   try {
     const db = getPool();
     const result = await db.query(
-      `select app_users.id, app_users.company_id, app_users.email, app_users.role, companies.domain as company_domain
+      `select app_users.id, app_users.company_id, app_users.email, app_users.role, app_users.account_type, companies.domain as company_domain
        from app_users join companies on companies.id=app_users.company_id
        where app_users.id=$1
          and app_users.email=$2
          and app_users.company_id=$3
-         and app_users.role=$4
+         and app_users.account_type=$4
          and app_users.approval_status='approved'`,
-      [parsed.id, parsed.email, parsed.company_id, parsed.role],
+      [parsed.id, parsed.email, parsed.company_id, parsed.account_type],
     );
     const liveUser = result.rows[0];
     if (!liveUser) return null;
@@ -81,6 +84,7 @@ async function getSessionUserFromDatabase(parsed: SessionUser): Promise<SessionU
       company_id: String(liveUser.company_id),
       email: liveUser.email,
       role: liveUser.role,
+      account_type: liveUser.account_type,
       company_domain: liveUser.company_domain,
     };
   } catch {
@@ -102,7 +106,19 @@ export async function requireAdminSession(): Promise<SessionUser> {
   return session;
 }
 
+export async function requirePlatformAdminSession(): Promise<SessionUser> {
+  const session = await currentSession();
+  if (!session || session.role !== 'admin' || session.account_type !== 'admin') redirect('/login?next=/dashboard');
+  return session;
+}
+
 export async function requireEmployeeOrAdminSession(): Promise<SessionUser> {
+  const session = await currentSession();
+  if (!session) redirect('/login');
+  return session;
+}
+
+export async function requireApprovedSession(): Promise<SessionUser> {
   const session = await currentSession();
   if (!session) redirect('/login');
   return session;

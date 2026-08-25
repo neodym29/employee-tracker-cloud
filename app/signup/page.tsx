@@ -2,28 +2,47 @@
 
 import { useState } from 'react';
 
+type AccountType = 'client' | 'engineer';
+
 export default function Signup() {
+  const [accountType, setAccountType] = useState<AccountType>('client');
+  const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setMessage('Submitting…');
-    const res = await fetch('/api/signup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) });
-    const data = await res.json().catch(() => ({}));
-    setMessage(data.ok ? `${data.email} is pending admin approval for ${data.company_domain}.` : `Error: ${data.error || res.statusText}`);
+  const [done, setDone] = useState(false);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setMessage('Submitting...');
+    const response = await fetch('/api/signup', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ accountType, displayName, email, password }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) { setMessage(data.error || 'Signup failed. Please try again.'); return; }
+    setDone(true);
+    setMessage('Your account is pending approval. You can sign in after an admin approves it.');
   }
+
   return (
-    <section className="card">
-      <span className="pill">Employee signup</span>
-      <h1>Request access</h1>
-      <p className="muted">Employees sign up after their company and first admin are registered. Use your company work email; the domain must match an existing registered company. Approval grants access only to the files-agent package, which reports file-change metadata from approved Hermes, Codex, or Claude process trees—never file contents or general computer activity.</p>
-      <form onSubmit={submit}>
-        <label>Work email<input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="employee@company.com" required /></label>
-        <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" minLength={8} required /></label>
-        <button>Submit for approval</button>
-      </form>
-      {message && <p className="warn">{message}</p>}
+    <section className="card authCard">
+      <span className="pill">Join Trace</span>
+      <h1>Create your account</h1>
+      <p className="muted">Choose how you will use Trace. Every new account is reviewed before sign in. The optional files-only dashboard shows file-change metadata from approved Hermes, Codex, or Claude agents and never file contents.</p>
+      {done ? <div className="successPanel" role="status"><h2>Request received</h2><p>{message}</p><a className="secondaryButton" href="/login">Go to sign in</a></div> : (
+        <form onSubmit={submit}>
+          <fieldset className="rolePicker"><legend>I am a</legend>
+            <label className={accountType === 'client' ? 'roleCard selected' : 'roleCard'}><input type="radio" name="accountType" value="client" checked={accountType === 'client'} onChange={() => setAccountType('client')} /><strong>Client</strong><span>Create projects and invite engineers.</span></label>
+            <label className={accountType === 'engineer' ? 'roleCard selected' : 'roleCard'}><input type="radio" name="accountType" value="engineer" checked={accountType === 'engineer'} onChange={() => setAccountType('engineer')} /><strong>Engineer</strong><span>Find open projects and collaborate.</span></label>
+          </fieldset>
+          <label>Display name<input value={displayName} onChange={(e) => setDisplayName(e.target.value)} maxLength={120} autoComplete="name" required /></label>
+          <label>Email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required /></label>
+          <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} autoComplete="new-password" required /></label>
+          <button type="submit">Submit for approval</button>
+          {message && <p className="bad" role="alert">{message}</p>}
+        </form>
+      )}
     </section>
   );
 }

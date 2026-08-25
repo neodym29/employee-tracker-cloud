@@ -12,10 +12,12 @@ const signupPage = readFileSync(new URL('../app/signup/page.tsx', import.meta.ur
 assert.match(db, /resolveMx|resolveNs|resolve4|resolve6/, 'company registration must validate that email domain has DNS records');
 assert.match(db, /registerCompanyWithAdmin/, 'database layer should create the company and first admin together');
 assert.match(db, /insert into companies\(name, domain\)/, 'registration should create companies dynamically');
-assert.match(db, /'admin','approved'/, 'registration should create the first approved admin');
-assert.match(db, /where app_users\.role='employee'/, 'employee signup conflict handling must not demote existing admins into pending employees');
+assert.match(db, /'admin','approved'[\s\S]*'client'/, 'registration should create the first approved company admin as a client account');
+const employeeSignup = db.slice(db.indexOf('export async function signupEmployee'), db.indexOf('export async function listEventStatsForSetup'));
+assert.match(employeeSignup, /on conflict\s*\(email\)\s*do nothing/i, 'employee signup must not demote or overwrite existing users');
+assert.doesNotMatch(employeeSignup, /on conflict\s*\(email\)\s*do update|password_hash\s*=/i, 'employee signup must never replace credentials');
 assert.match(db, /restoreAdminAccess/, 'database layer should expose a setup-key admin recovery helper');
-assert.match(db, /role='admin', approval_status='approved'/, 'admin recovery should promote/restore approved admin role');
+assert.match(db, /role='admin'[\s\S]*account_type='admin'[\s\S]*approval_status='approved'/, 'setup-key admin recovery should explicitly restore platform authority and approved status');
 assert.doesNotMatch(db, /hello@neodym\.ai|ibrahim@neodym\.ai/, 'fresh installs must not seed demo users');
 assert.doesNotMatch(db, /select id from companies where domain=\$1`, \['neodym\.ai'\]/, 'runtime paths must not hard-code neodym.ai company lookups');
 
@@ -23,5 +25,8 @@ assert.match(registerRoute, /registerCompanyWithAdmin/, 'register API must use c
 assert.match(bootstrapRoute, /restoreAdminAccess/, 'setup-key bootstrap route should allow emergency admin recovery');
 assert.match(bootstrapRoute, /listUsersForSetup/, 'setup-key bootstrap route should allow admin-only account diagnostics without exposing hashes');
 assert.match(registerPage, /Company registration/, 'first public signup should be company registration');
-assert.match(signupRoute, /signupEmployee/, 'employee signup API must remain available after admin setup');
-assert.match(signupPage, /Employee signup/, 'employee signup page must remain separate from company registration');
+assert.match(signupRoute, /signupAccount/, 'public signup API must use the new client/engineer account workflow');
+assert.match(db, /export async function signupEmployee/, 'legacy company-domain employee signup contract must remain available to telemetry callers');
+assert.match(signupPage, /Client[\s\S]*Engineer/, 'public signup page must offer both project account roles');
+assert.match(signupPage, /accountType[\s\S]*displayName/, 'public signup page must submit role and display name');
+assert.doesNotMatch(signupPage, /company and first admin|Employee signup/i, 'public signup must not retain company-only employee copy');

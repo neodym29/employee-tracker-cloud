@@ -1,7 +1,7 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { clearSessionCookie } from '@/lib/auth';
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   await clearSessionCookie();
-  return NextResponse.json({ ok: true });
+  return NextResponse.redirect(new URL('/', req.url), 303);
 }

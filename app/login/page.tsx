@@ -5,7 +5,8 @@ import { useSearchParams } from 'next/navigation';
 
 function LoginForm() {
   const params = useSearchParams();
-  const next = params.get('next') || '/dashboard';
+  const requestedNext = params.get('next');
+  const next = requestedNext?.startsWith('/') && !requestedNext.startsWith('//') ? requestedNext : null;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
@@ -23,14 +24,16 @@ function LoginForm() {
       setMessage(`Error: ${data.error || res.statusText}`);
       return;
     }
-    window.location.href = data.user?.role === 'admin' ? next : '/employee';
+    const accountType = data.user?.account_type;
+    const destination = accountType === 'admin' ? '/admin/approve' : '/projects';
+    window.location.assign(next ?? destination);
   }
 
   return (
     <section className="card">
       <span className="pill">Login</span>
       <h1>Sign in</h1>
-      <p className="muted">Admins can access the dashboard and approvals. Employees can sign in to their employee area after approval.</p>
+      <p className="muted">Sign in after approval to manage projects, collaborate, and keep project work in one place.</p>
       <form onSubmit={submit}>
         <label>Email<input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com" required /></label>
         <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Your password" required /></label>

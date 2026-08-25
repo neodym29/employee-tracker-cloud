@@ -121,11 +121,77 @@ th { color: var(--muted); font-size: 10px; letter-spacing: .08em; text-transform
 .good { color: var(--green); } .warn { color: var(--amber); } .bad { color: var(--red); }
 pre { overflow: auto; border-radius: 12px; padding: 16px; color: #e9e9e5; background: var(--dark); }
 
+/* Project marketplace and workspaces */
+.inlineForm { display: inline-flex; }
+.authCard { margin: 20px auto; }
+.rolePicker { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0; border: 0; padding: 0; }
+.rolePicker legend { grid-column: 1 / -1; margin-bottom: 7px; color: #4f4e48; font-size: 13px; font-weight: 650; }
+.roleCard { position: relative; min-height: 116px; border: 1px solid var(--line-dark); border-radius: 14px; padding: 18px; cursor: pointer; }
+.roleCard.selected { border-color: var(--violet); background: rgba(117,103,232,.06); box-shadow: 0 0 0 2px rgba(117,103,232,.1); }
+.roleCard input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.roleCard strong, .roleCard span { display: block; }
+.roleCard strong { margin-bottom: 7px; color: var(--ink); font-size: 17px; }
+.roleCard span { color: var(--muted); font-weight: 450; line-height: 1.45; }
+.successPanel { border: 1px solid #cce5d7; border-radius: 14px; padding: 22px; background: #f3faf6; }
+.successPanel p { color: #397358; line-height: 1.55; }
+.approvalList, .recordList, .artifactList { display: grid; }
+.approvalRow, .memberRow, .recordRow, .artifactRow { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 24px; }
+.approvalRow + .approvalRow, .memberRow + .memberRow, .recordRow + .recordRow, .artifactRow + .artifactRow { border-top: 1px solid var(--line); }
+.approvalRow > div:first-child, .memberRow > div:first-child, .artifactRow > div:first-child { min-width: 0; display: grid; gap: 5px; }
+.approvalRow span, .memberRow span, .artifactRow span { color: var(--muted); font-size: 12px; }
+.rowActions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rowActions button, .rowActions .secondaryButton { min-height: 40px; padding: 8px 13px; font-size: 13px; }
+.statusBadge { display: inline-flex; width: fit-content; border-radius: 999px; padding: 6px 10px; color: #41755c; background: #edf8f1; font-size: 11px; font-weight: 750; text-transform: capitalize; }
+.statusBadge.subtle { color: #665cae; background: #f0eefc; }
+.projectGrid { display: grid; grid-template-columns: repeat(auto-fit,minmax(250px,1fr)); gap: 14px; }
+.projectTools { grid-template-columns: repeat(2,minmax(0,1fr)); margin-bottom: 34px; }
+.projectTools .card { max-width: none; }
+.projectCard { min-height: 220px; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 17px; padding: 20px; background: var(--paper); box-shadow: 0 12px 34px rgba(46,43,35,.045); }
+.projectCard .cardTop { display: flex; gap: 7px; margin-bottom: 14px; }
+.projectCard h3 { margin: 0 0 8px; font-size: 19px; }
+.projectCard p { flex: 1; color: var(--muted); line-height: 1.5; }
+.sectionHeading { display: flex; align-items: center; justify-content: space-between; margin: 30px 0 14px; }
+.workspaceShell { max-width: 1160px; margin: 0 auto; }
+.backLink { display: inline-flex; min-height: 42px; align-items: center; margin-bottom: 14px; color: var(--muted); font-size: 13px; font-weight: 650; }
+.workspaceHeader { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; margin-bottom: 24px; }
+.workspaceHeader h1 { margin: 6px 0 10px; font-size: clamp(40px,5vw,62px); }
+.workspaceHeader p { max-width: 720px; margin: 0; color: var(--muted); line-height: 1.55; }
+.statusControl { min-width: 150px; display: grid; justify-items: end; gap: 9px; }
+.workspaceGrid { display: grid; grid-template-columns: minmax(0,1.45fr) minmax(320px,.75fr); gap: 18px; align-items: start; }
+.workspaceMain { min-width: 0; display: grid; gap: 18px; }
+.memberPanel { margin-bottom: 18px; }
+.panelForm { padding: 22px 24px 24px; border-top: 1px solid var(--line); }
+.panelForm h3 { margin: 0 0 2px; }
+.padded { padding: 20px 24px; }
+.recordRow { align-items: flex-start; }
+.recordRow > div { min-width: 0; flex: 1; display: grid; gap: 6px; }
+.recordRow span { color: var(--muted); font-size: 11px; }
+.recordRow pre { max-height: 180px; margin: 6px 0 0; font-size: 11px; }
+.artifactRow code { max-width: 42%; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; }
+.chatPanel { position: sticky; top: 90px; overflow: hidden; }
+.chatUnavailable { margin: 16px; border: 1px solid #ead8b8; border-radius: 12px; padding: 14px; color: #7e602e; background: #fff9ef; }
+.chatUnavailable p { margin: 6px 0 0; font-size: 12px; line-height: 1.45; }
+.messageList { max-height: 440px; display: grid; gap: 12px; overflow-y: auto; padding: 18px; }
+.message { max-width: 92%; border-radius: 14px; padding: 12px 14px; background: #f4f2ed; }
+.message.user { justify-self: end; color: #fff; background: var(--dark); }
+.message span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 10px; font-weight: 750; text-transform: uppercase; }
+.message.user span { color: #bbb; }
+.message p { margin: 0; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+.actionList { display: grid; gap: 10px; padding: 0 18px 18px; }
+.actionList h3 { margin: 4px 0; font-size: 14px; }
+.proposedAction { border: 1px solid #ddd8f7; border-radius: 12px; padding: 13px; background: #f8f7fe; }
+.proposedAction strong { font-size: 12px; text-transform: capitalize; }
+.proposedAction pre { max-height: 150px; margin: 9px 0; padding: 10px; font-size: 10px; }
+.chatForm { padding: 18px; border-top: 1px solid var(--line); background: #fbfaf8; }
+button:disabled { cursor: not-allowed; opacity: .55; transform: none; box-shadow: none; }
+
 @media (max-width: 900px) {
   .heroSimple { grid-template-columns: 1fr; gap: 42px; }
   .heroCopy { max-width: 680px; }
   .changePreview { transform: none; }
   .connectedPanel { grid-template-columns: 1fr; gap: 10px; }
+  .workspaceGrid { grid-template-columns: 1fr; }
+  .chatPanel { position: static; }
 }
 @media (max-width: 720px) {
   .nav { width: min(100% - 28px, 1180px); height: 64px; }
@@ -149,6 +215,14 @@ pre { overflow: auto; border-radius: 12px; padding: 16px; color: #e9e9e5; backgr
   .panelHeader { align-items: flex-start; flex-direction: column; }
   .changeRow time { display: none; }
   .card { padding: 22px 18px; }
+  .projectTools, .rolePicker { grid-template-columns: 1fr; }
+  .workspaceHeader { align-items: flex-start; flex-direction: column; }
+  .statusControl { width: 100%; grid-template-columns: auto 1fr; align-items: center; justify-items: start; }
+  .approvalRow, .memberRow, .recordRow, .artifactRow { align-items: flex-start; flex-direction: column; padding: 16px 18px; }
+  .approvalRow .rowActions, .memberRow .rowActions { width: 100%; }
+  .approvalRow .rowActions > *, .memberRow .rowActions > * { flex: 1; }
+  .panelForm { padding: 20px 18px; }
+  .artifactRow code { max-width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }

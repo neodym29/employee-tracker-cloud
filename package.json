@@ -4,6 +4,9 @@
     "build": "next build",
     "start": "next start",
     "test": "node --test tests/*.test.mjs && python3 tests/files-agent.test.py",
+    "test:project-agent-bridge": "node --test tests/project-agent-bridge.test.mjs",
+    "project-agent-bridge": "node scripts/project-agent-bridge.mjs",
+    "project-agent-bridge:smoke": "node scripts/project-agent-bridge-smoke.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "next lint"
   },
