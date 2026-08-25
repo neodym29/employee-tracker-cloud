@@ -88,12 +88,12 @@ test('browser dashboard payload excludes direct identifiers, raw device details,
   assert.doesNotMatch(eventQuery, /email|hostname|device_label|agent_version|run_id/i);
 });
 
-test('dashboard UI renders durable generation state and contains no direct-identifier fields', () => {
+test('dashboard UI prioritizes recent file changes and contains no direct-identifier fields', () => {
   const client = read('app/dashboard/DashboardClient.tsx');
   const page = read('app/dashboard/page.tsx');
-  assert.match(client, /not generated yet/i);
-  assert.match(client, /Generated/);
-  assert.match(client, /generatedAt/);
+  assert.match(client, /Recent changes/);
+  assert.match(client, /Connected agents/);
+  assert.match(client, /dailySummary/);
   assert.doesNotMatch(client, /ownerEmail|hostname|agentVersion|runId|event\.path/);
   assert.doesNotMatch(page, /failure\.message|String\(failure\)/);
 });

@@ -101,12 +101,15 @@ test('dead invasive implementation surfaces are removed, without deleting histor
   assert.match(db, /activity_screenshots/);
 });
 
-test('public onboarding copy clearly promises approved-agent file metadata only', async () => {
+test('public copy clearly promises approved-agent file metadata only', async () => {
   const landing = await source('app/page.tsx');
+  assert.match(landing, /Files only/i);
+  assert.match(landing, /Hermes and Codex/);
+  assert.match(landing, /without tracking screens, clicks, browsers, text/i);
+  assert.match(landing, /No file contents/i);
+
   const signup = await source('app/signup/page.tsx');
-  for (const text of [landing, signup]) {
-    assert.match(text, /files-only|file-change metadata/i);
-    assert.match(text, /Hermes, Codex, or Claude/);
-    assert.match(text, /never/i);
-  }
+  assert.match(signup, /files-only|file-change metadata/i);
+  assert.match(signup, /Hermes, Codex, or Claude/);
+  assert.match(signup, /never/i);
 });
