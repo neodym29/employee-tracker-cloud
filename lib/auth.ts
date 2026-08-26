@@ -102,7 +102,8 @@ export async function currentSession(): Promise<SessionUser | null> {
 
 export async function requireAdminSession(): Promise<SessionUser> {
   const session = await currentSession();
-  if (!session || session.role !== 'admin') redirect('/login?next=/dashboard');
+  if (!session) redirect('/login?next=/dashboard');
+  if (session.role !== 'admin') redirect('/projects');
   return session;
 }
 

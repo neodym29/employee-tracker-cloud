@@ -36,6 +36,14 @@ test('shared navigation highlights the current public and authenticated route', 
   assert.match(activeLink, /active/);
   assert.match(css, /\.navLink\.active/);
   assert.doesNotMatch(css, /body:has\(\[data-auth-page=/, 'route-specific page markers must not control global navigation');
+  assert.match(layout, /session\.role\s*===\s*'admin'\s*&&\s*<ActiveNavLink href="\/dashboard"/, 'Files navigation must be admin-only');
+});
+
+test('authenticated non-admins are redirected away from the admin-only Files dashboard without being sent to login', async () => {
+  const [auth, dashboard] = await Promise.all([read('lib/auth.ts'), read('app/dashboard/page.tsx')]);
+  assert.match(dashboard, /requireAdminSession/);
+  assert.match(auth, /if \(!session\) redirect\('\/login\?next=\/dashboard'\)/);
+  assert.match(auth, /if \(session\.role !== 'admin'\) redirect\('\/projects'\)/);
 });
 
 test('admin approval UI uses platform approval routes for both decisions', async () => {
