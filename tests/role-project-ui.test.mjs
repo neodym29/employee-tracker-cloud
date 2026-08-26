@@ -69,19 +69,34 @@ test('role-aware projects matching UI supports client and engineer flows', async
   assert.match(client, /Decline/);
 });
 
-test('project workspace includes records, artifact metadata and confirmable chat', async () => {
+test('project workspace is agent-first, file-aware, and has no manual records or artifact surfaces', async () => {
   for (const path of ['app/projects/[projectId]/page.tsx', 'app/projects/[projectId]/WorkspaceClient.tsx']) assert.ok(existsSync(url(path)));
   const workspace = await read('app/projects/[projectId]/WorkspaceClient.tsx');
-  assert.match(workspace, /Project records/);
-  assert.match(workspace, /Create record/);
-  assert.match(workspace, /Update record/);
-  assert.match(workspace, /Artifact metadata/);
-  assert.match(workspace, /sha256/i);
-  assert.match(workspace, /Project chat/);
+
+  assert.match(workspace, /Project agent/);
+  assert.match(workspace, /inspect project files/i);
+  assert.match(workspace, /create, edit, and organize/i);
+  assert.match(workspace, /Starter commands/);
+  assert.match(workspace, /Generated files/);
+  assert.match(workspace, /\$\{base\}\/files/);
+  assert.match(workspace, /\$\{base\}\/files\/\$\{file\.file_id\}/);
+  assert.match(workspace, /Version \{file\.version\}/);
+  assert.match(workspace, /file\.media_type/);
+  assert.match(workspace, /formatBytes\(file\.byte_size\)/);
+  assert.match(workspace, /ask the agent to create/i);
+  assert.match(workspace, /Conversation/);
+  assert.match(workspace, /Pending changes/);
+  assert.match(workspace, /describeAction/);
   assert.match(workspace, /Confirm/);
   assert.match(workspace, /Cancel/);
-  assert.match(workspace, /Chat is unavailable/);
-  assert.doesNotMatch(workspace, /CHAT_BACKEND_URL|CHAT_BACKEND_TOKEN/);
+  assert.match(workspace, /File created/);
+  assert.match(workspace, /await loadFiles\(\)/, 'file manifests refresh after agent work');
+  assert.match(workspace, /onKeyDown/, 'composer supports keyboard submission');
+
+  assert.doesNotMatch(workspace, /Create record|Update record|Register artifact metadata|JSON body|SHA256|Size in bytes|Workspace health|Project assistant/);
+  assert.doesNotMatch(workspace, /\$\{base\}\/records|\$\{base\}\/artifacts/, 'legacy collections must not be fetched by the workspace');
+  assert.doesNotMatch(workspace, /JSON\.stringify\(action\.input/, 'raw action JSON must not be the primary action UX');
+  assert.doesNotMatch(workspace, /CHAT_BACKEND_URL|CHAT_BACKEND_TOKEN|supabase/i);
 });
 
 test('login redirects by account type and project CSS is responsive', async () => {

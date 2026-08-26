@@ -19,6 +19,13 @@ function loadProjects() {
       queries.push({ sql, values });
       if (/from project_(?:records|artifacts) resource/i.test(sql)) return { rows: [] };
       if (/from project_memberships pm/i.test(sql)) return { rows: [] };
+      if (/select distinct p\.id/i.test(sql)) {
+        const userId = String(values[1]);
+        return { rows: userId === owner.id || userId === member.id ? [{ id: '2', client_id: owner.id, title: 'Created workspace', status: 'draft' }] : [] };
+      }
+      if (/update projects set/i.test(sql)) {
+        return { rows: String(values[1]) === owner.id ? [{ id: '2', client_id: owner.id, title: values[2], description: values[3], status: values[4] }] : [] };
+      }
       if (/select 1[\s\S]*from projects p/i.test(sql)) {
         const userId = String(values[1]);
         const ownerOnly = !/project_memberships access_membership/i.test(sql);
@@ -66,6 +73,18 @@ for (const method of ['listRecords', 'listArtifacts']) {
     await assert.rejects(service[method](outsider, '2'), isNotFound);
   });
 }
+
+test('creator access covers project detail while only the selected client controls project status', async () => {
+  const { service } = loadProjects();
+  assert.equal((await service.getProject(owner, '2')).client_id, owner.id);
+  assert.equal((await service.getProject(member, '2')).client_id, owner.id);
+  await assert.rejects(service.getProject(outsider, '2'), isNotFound);
+
+  const changed = await service.updateProject(owner, '2', { title: 'Renamed', description: '', status: 'active' });
+  assert.equal(changed.status, 'active');
+  await assert.rejects(service.updateProject(otherClient, '2', { title: 'Hijack', description: '', status: 'archived' }), isNotFound);
+  await assert.rejects(service.updateProject(member, '2', { title: 'Engineer edit', description: '', status: 'archived' }), (error) => error?.status === 403);
+});
 
 test('listProjectMemberships fails closed for an empty project the client does not own', async () => {
   const { service } = loadProjects();

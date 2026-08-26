@@ -278,11 +278,13 @@ async function ensureSchemaNow() {
       id bigserial primary key, client_id bigint not null references app_users(id),
       title text not null check(length(title) between 1 and 120), description text not null default '' check(length(description)<=4000),
       status text not null default 'draft' check(status in ('draft','open','active','completed','archived')),
+      creation_request_key uuid, creation_requested_by bigint references app_users(id),
+      creation_payload_fingerprint text check(creation_payload_fingerprint is null or creation_payload_fingerprint ~ '^[a-f0-9]{64}$'),
       created_at timestamptz not null default now(), updated_at timestamptz not null default now()
     );
     create table if not exists project_memberships (
       id bigserial primary key, project_id bigint not null references projects(id) on delete cascade, user_id bigint not null references app_users(id),
-      membership_type text not null check(membership_type in ('invitation','request')), membership_status text not null default 'pending' check(membership_status in ('pending','active','declined','rejected')),
+      membership_type text not null check(membership_type in ('invitation','request','creator')), membership_status text not null default 'pending' check(membership_status in ('pending','active','declined','rejected')),
       created_by bigint not null references app_users(id), responded_by bigint references app_users(id), created_at timestamptz not null default now(), responded_at timestamptz,
       unique(project_id,user_id)
     );
@@ -296,6 +298,26 @@ async function ensureSchemaNow() {
       filename text not null check(length(filename) between 1 and 255), media_type text not null check(length(media_type) between 1 and 255),
       size_bytes bigint not null check(size_bytes>=0 and size_bytes<=1000000000000), sha256 text not null check(sha256 ~ '^[a-f0-9]{64}$'),
       storage_key text check(storage_key is null or length(storage_key)<=1024), created_by bigint not null references app_users(id), created_at timestamptz not null default now()
+    );
+    create table if not exists project_files (
+      id bigserial primary key, project_id bigint not null references projects(id) on delete cascade,
+      file_id text not null check(file_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'),
+      version integer not null check(version > 0),
+      path text not null check(length(path) between 1 and 1024 and path !~ '^/' and path !~ '\\\\' and path !~ '[[:cntrl:]]' and path ~ '^[^/]+(/[^/]+)*$' and path !~ '(^|/)\\.{1,2}(/|$)'),
+      media_type text not null check(length(media_type) between 1 and 255), content text not null check(octet_length(content) <= 262144),
+      byte_size integer not null check(byte_size >= 0 and byte_size <= 262144 and byte_size = octet_length(content)),
+      sha256 text not null check(sha256 ~ '^[a-f0-9]{64}$'), created_by bigint not null references app_users(id), created_at timestamptz not null default now(),
+      unique(project_id,file_id,version)
+    );
+    alter table project_files drop constraint if exists project_files_project_id_path_version_key;
+    create table if not exists project_file_heads (
+      project_id bigint not null references projects(id) on delete cascade, file_id text not null,
+      current_version integer not null check(current_version>0),
+      path text not null check(length(path) between 1 and 1024 and path !~ '^/' and path !~ '\\\\' and path !~ '[[:cntrl:]]' and path ~ '^[^/]+(/[^/]+)*$' and path !~ '(^|/)\\.{1,2}(/|$)'),
+      media_type text not null check(length(media_type) between 1 and 255), byte_size integer not null check(byte_size>=0 and byte_size<=262144),
+      sha256 text not null check(sha256 ~ '^[a-f0-9]{64}$'), deleted_at timestamptz, updated_at timestamptz not null default now(),
+      primary key(project_id,file_id),
+      foreign key(project_id,file_id,current_version) references project_files(project_id,file_id,version) deferrable initially deferred
     );
     create table if not exists project_chat_messages (
       id bigserial primary key, project_id bigint not null references projects(id) on delete cascade, user_id bigint references app_users(id),
@@ -312,6 +334,35 @@ async function ensureSchemaNow() {
     alter table project_agent_actions add column if not exists confirmed_by bigint references app_users(id);
     alter table project_agent_actions add column if not exists confirmed_at timestamptz;
     alter table project_agent_actions add column if not exists result jsonb;
+    alter table projects add column if not exists creation_request_key uuid;
+    alter table projects add column if not exists creation_requested_by bigint references app_users(id);
+    alter table projects add column if not exists creation_payload_fingerprint text;
+    do $$
+    declare membership_constraint text;
+    begin
+      for membership_constraint in
+        select conname from pg_constraint
+        where conrelid='project_memberships'::regclass and contype='c'
+          and pg_get_constraintdef(oid) ilike '%membership_type%'
+          and pg_get_constraintdef(oid) not ilike '%creator%'
+      loop
+        execute format('alter table project_memberships drop constraint %I',membership_constraint);
+      end loop;
+      if not exists (
+        select 1 from pg_constraint where conrelid='project_memberships'::regclass and contype='c'
+          and pg_get_constraintdef(oid) ilike '%membership_type%creator%'
+      ) then
+        alter table project_memberships add constraint project_memberships_membership_type_check
+          check(membership_type in ('invitation','request','creator'));
+      end if;
+      if not exists (select 1 from pg_constraint where conname='projects_creation_request_unique' and conrelid='projects'::regclass) then
+        alter table projects add constraint projects_creation_request_unique unique(creation_requested_by,creation_request_key);
+      end if;
+      if not exists (select 1 from pg_constraint where conname='projects_creation_payload_fingerprint_check' and conrelid='projects'::regclass) then
+        alter table projects add constraint projects_creation_payload_fingerprint_check check(creation_payload_fingerprint is null or creation_payload_fingerprint ~ '^[a-f0-9]{64}$');
+      end if;
+    end $$;
+
     do $$ begin
       if not exists (select 1 from pg_constraint where conname='project_agent_actions_status_check') then
         alter table project_agent_actions add constraint project_agent_actions_status_check check(status in ('pending','confirmed','cancelled'));
@@ -324,17 +375,50 @@ async function ensureSchemaNow() {
     create index if not exists idx_project_memberships_project_status on project_memberships (project_id,membership_status,id);
     create index if not exists idx_project_records_latest on project_records (project_id,record_id,version desc);
     create index if not exists idx_project_artifacts_project on project_artifacts (project_id,created_at desc,id desc);
+    create index if not exists idx_project_files_latest on project_files (project_id,file_id,version desc);
+    create index if not exists idx_project_files_path_latest on project_files (project_id,path,version desc);
+    create unique index if not exists project_file_heads_active_path_unique on project_file_heads(project_id,path) where deleted_at is null;
     create index if not exists idx_project_chat_project on project_chat_messages (project_id,created_at,id);
     create index if not exists idx_project_agent_actions_project on project_agent_actions (project_id,created_at,id);
   `);
   await db.query(`
+    insert into project_file_heads(project_id,file_id,current_version,path,media_type,byte_size,sha256,deleted_at,updated_at)
+    select project_id,file_id,version,path,media_type,byte_size,sha256,
+      case when media_type='application/x.project-tombstone' then created_at else null end,created_at
+    from (select distinct on(project_id,file_id) * from project_files order by project_id,file_id,version desc) latest
+    on conflict(project_id,file_id) do nothing;
+    do $$ begin
+      if exists (select 1 from pg_constraint where conname='project_file_heads_project_id_fkey' and confdeltype='c') then
+        alter table project_file_heads drop constraint project_file_heads_project_id_fkey;
+        alter table project_file_heads add constraint project_file_heads_project_id_fkey foreign key(project_id) references projects(id) on delete restrict;
+      end if;
+      if exists (select 1 from pg_constraint where conname='project_files_project_id_fkey' and confdeltype='c') then
+        alter table project_files drop constraint project_files_project_id_fkey;
+        alter table project_files add constraint project_files_project_id_fkey foreign key(project_id) references projects(id) on delete restrict;
+      end if;
+      if exists (select 1 from pg_constraint where conname='project_agent_actions_project_id_fkey' and confdeltype='c') then
+        alter table project_agent_actions drop constraint project_agent_actions_project_id_fkey;
+        alter table project_agent_actions add constraint project_agent_actions_project_id_fkey foreign key(project_id) references projects(id) on delete restrict;
+      end if;
+    end $$;
+    create or replace function prevent_project_file_version_mutation() returns trigger language plpgsql as $$
+    begin raise exception 'project file version rows are immutable'; end $$;
+    drop trigger if exists prevent_project_file_version_update on project_files;
+    create trigger prevent_project_file_version_update before update or delete on project_files
+      for each row execute function prevent_project_file_version_mutation();
+    do $$ begin
+      if not exists (select 1 from pg_constraint where conname='project_agent_actions_actor_not_null') then
+        alter table project_agent_actions add constraint project_agent_actions_actor_not_null check(actor_user_id is not null) not valid;
+      end if;
+    end $$;
     create or replace function prevent_project_agent_action_mutation() returns trigger language plpgsql as $$
     begin
       if tg_op='DELETE' then raise exception 'project agent action audit rows are immutable'; end if;
       if old.status='pending' and new.status in ('confirmed','cancelled')
-         and new.project_id=old.project_id and new.actor_user_id is not distinct from old.actor_user_id
+         and new.id=old.id and new.project_id=old.project_id and new.actor_user_id is not distinct from old.actor_user_id
          and new.action_type=old.action_type and new.input=old.input and new.created_at=old.created_at
-         and new.output is not distinct from old.output and new.confirmed_by is not null and new.confirmed_at is not null then
+         and new.output is not distinct from old.output and new.confirmed_by=old.actor_user_id
+         and new.confirmed_at is not null and new.result is not null then
         return new;
       end if;
       raise exception 'project agent action audit rows are immutable';

@@ -92,98 +92,145 @@ async function ready() {
   return getPool();
 }
 
-export async function createProject(session: SessionUser, input: { clientId?: unknown; title?: unknown; description?: unknown; status?: unknown }) {
+function requestUuid(value: unknown) {
+  if (typeof value !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+    throw new ProjectServiceError('A valid project creation request key is required');
+  }
+  return value.toLowerCase();
+}
+
+const CREATION_ENGINEER_MAX = 20;
+
+function creationEngineerIds(value: unknown, allowed: boolean) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new ProjectServiceError('Engineer selection must be an array');
+  if (!allowed && value.length) throw new ProjectServiceError('Engineers cannot select additional project creators');
+  if (value.length > CREATION_ENGINEER_MAX) throw new ProjectServiceError(`Select at most ${CREATION_ENGINEER_MAX} engineers`);
+  const normalized = value.map((engineerId) => id(engineerId, 'engineer id'));
+  if (new Set(normalized).size !== normalized.length) throw new ProjectServiceError('Engineer selection contains duplicates');
+  return normalized.sort((left, right) => {
+    const leftId = BigInt(left);
+    const rightId = BigInt(right);
+    return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+  });
+}
+
+function creationFingerprint(payload: Record<string, unknown>) {
+  return crypto.createHash('sha256').update(JSON.stringify(payload), 'utf8').digest('hex');
+}
+
+export async function createProject(session: SessionUser, input: { clientId?: unknown; title?: unknown; description?: unknown; status?: unknown; engineerIds?: unknown; requestKey?: unknown }) {
+  const creationRequestKey = requestUuid(input.requestKey);
   const title = text(input.title, 'Title', TITLE_MAX);
   const description = text(input.description ?? '', 'Description', DESCRIPTION_MAX, true);
-  if (session.account_type === 'engineer') {
-    const clientId = id(input.clientId, 'client id');
-    const pool = await ready();
-    const client: PoolClient = await pool.connect();
-    let transactionStarted = false;
-    try {
-      await client.query('begin');
-      transactionStarted = true;
-      // Serialize proposals for this engineer/client pair. The duplicate lookup must run
-      // after this transaction-scoped lock so concurrent retries cannot both insert.
-      await client.query('select pg_advisory_xact_lock(hashtext($1))', [`engineer-proposal:${session.id}:${clientId}`]);
-      const existingResult = await client.query(
-        `select p.id,p.client_id,p.title,p.description,p.status,p.created_at,p.updated_at,
-                pm.id as membership_id,pm.project_id as membership_project_id,
-                pm.user_id as membership_user_id,pm.membership_type,pm.membership_status,
-                pm.created_by as membership_created_by,pm.created_at as membership_created_at
-         from projects p join project_memberships pm on pm.project_id=p.id
-         where p.client_id=$1 and pm.user_id=$2 and p.title=$3 and p.status='draft'
-           and pm.membership_type='request' and pm.membership_status='pending' and pm.created_by=$2
-         order by p.created_at asc,p.id asc limit 1`,
-        [clientId, session.id, title],
-      );
-      const existing = existingResult.rows[0];
-      if (existing) {
-        const project = {
-          id: existing.id,
-          client_id: existing.client_id,
-          title: existing.title,
-          description: existing.description,
-          status: existing.status,
-          created_at: existing.created_at,
-          updated_at: existing.updated_at,
-        };
-        const membership = {
-          id: existing.membership_id,
-          project_id: existing.membership_project_id,
-          user_id: existing.membership_user_id,
-          membership_type: existing.membership_type,
-          membership_status: existing.membership_status,
-          created_by: existing.membership_created_by,
-          created_at: existing.membership_created_at,
-        };
-        await client.query('commit');
-        return { ...project, membership };
-      }
+  if (session.account_type !== 'client' && session.account_type !== 'engineer') {
+    throw new ProjectServiceError('Forbidden', 403, 'forbidden');
+  }
+  const engineerCreating = session.account_type === 'engineer';
+  const ownerId = engineerCreating ? id(input.clientId, 'client id') : session.id;
+  const status = engineerCreating ? 'draft' : String(input.status ?? 'draft');
+  if (!STATUSES.has(status)) throw new ProjectServiceError('Invalid project status');
+  const selectedEngineerIds = creationEngineerIds(input.engineerIds, !engineerCreating);
+  const creatorIds = engineerCreating ? [session.id] : selectedEngineerIds;
+  const payloadFingerprint = creationFingerprint({
+    version: 1,
+    accountType: session.account_type,
+    ownerId,
+    title,
+    description,
+    status,
+    engineerIds: creatorIds,
+  });
 
-      // Keep proposals non-public until the client reviews the pending membership request.
-      const projectResult = await client.query(
-        `insert into projects(client_id,title,description,status)
-         select id,$2,$3,$4 from app_users
-         where id=$1 and account_type='client' and approval_status='approved'
-         returning id,client_id,title,description,status,created_at,updated_at`,
-        [clientId, title, description, 'draft'],
-      );
-      const project = projectResult.rows[0];
-      if (!project) throw new ProjectServiceError('Proposal could not be created', 409, 'conflict');
+  const pool = await ready();
+  const client: PoolClient = await pool.connect();
+  let transactionStarted = false;
+  try {
+    await client.query('begin');
+    transactionStarted = true;
+    const inserted = engineerCreating
+      ? await client.query(
+          `insert into projects(client_id,title,description,status,creation_requested_by,creation_request_key,creation_payload_fingerprint)
+           select id,$2,$3,$4,$5,$6::uuid,$7 from app_users
+           where id=$1 and account_type='client' and approval_status='approved'
+           on conflict(creation_requested_by,creation_request_key) do nothing
+           returning id,client_id,title,description,status,created_at,updated_at,creation_payload_fingerprint`,
+          [ownerId, title, description, status, session.id, creationRequestKey, payloadFingerprint],
+        )
+      : await client.query(
+          `insert into projects(client_id,title,description,status,creation_requested_by,creation_request_key,creation_payload_fingerprint)
+           values($1,$2,$3,$4,$5,$6::uuid,$7)
+           on conflict(creation_requested_by,creation_request_key) do nothing
+           returning id,client_id,title,description,status,created_at,updated_at,creation_payload_fingerprint`,
+          [ownerId, title, description, status, session.id, creationRequestKey, payloadFingerprint],
+        );
+
+    if (inserted.rows[0] && engineerCreating) {
       const membershipResult = await client.query(
         `insert into project_memberships(project_id,user_id,membership_type,membership_status,created_by)
-         values($1,$2,'request','pending',$2)
+         values($1,$2,'creator','active',$2)
          returning id,project_id,user_id,membership_type,membership_status,created_by,created_at`,
-        [project.id, session.id],
+        [inserted.rows[0].id, session.id],
       );
-      const membership = membershipResult.rows[0];
-      if (!membership) throw new ProjectServiceError('Proposal could not be created', 409, 'conflict');
-      await client.query('commit');
-      return { ...project, membership };
-    } catch (error) {
-      if (transactionStarted) {
-        try {
-          await client.query('rollback');
-        } catch {
-          // Preserve the primary transaction failure; a broken connection may reject rollback.
-        }
+      if (membershipResult.rows.length !== 1) throw new ProjectServiceError('Project could not be created', 409, 'conflict');
+    } else if (inserted.rows[0] && selectedEngineerIds.length) {
+      const membershipResult = await client.query(
+        `insert into project_memberships(project_id,user_id,membership_type,membership_status,created_by)
+         select $1,u.id,'creator','active',$3 from app_users u
+          where u.id=any($2::bigint[]) and u.account_type='engineer' and u.approval_status='approved'
+         returning id,project_id,user_id,membership_type,membership_status,created_by,created_at`,
+        [inserted.rows[0].id, selectedEngineerIds, session.id],
+      );
+      if (membershipResult.rows.length !== selectedEngineerIds.length) {
+        throw new ProjectServiceError('Every selected engineer must be approved', 409, 'conflict');
       }
-      throw error;
-    } finally {
-      client.release();
     }
+
+    // ON CONFLICT waits for a concurrent creator transaction. Bind the key to the
+    // canonical payload before returning any replayed project or memberships.
+    const canonicalResult = await client.query(
+      `select p.id,p.client_id,p.title,p.description,p.status,p.created_at,p.updated_at,p.creation_payload_fingerprint
+         from projects p
+        where p.creation_requested_by=$1 and p.creation_request_key=$2::uuid`,
+      [session.id, creationRequestKey],
+    );
+    const project = canonicalResult.rows[0];
+    if (!project) throw new ProjectServiceError('Project could not be created', 409, 'conflict');
+    if (project.creation_payload_fingerprint !== payloadFingerprint) {
+      throw new ProjectServiceError('Project creation key was already used for different inputs', 409, 'conflict');
+    }
+
+    let memberships: Record<string, unknown>[] = [];
+    if (creatorIds.length) {
+      const membershipResult = await client.query(
+        `select id,project_id,user_id,membership_type,membership_status,created_by,created_at
+           from project_memberships
+          where project_id=$1 and membership_type='creator' and membership_status='active'
+          order by user_id asc`,
+        [project.id],
+      );
+      memberships = membershipResult.rows;
+      const canonicalIds = memberships.map((membership) => String(membership.user_id)).sort((left, right) => {
+        const leftId = BigInt(left);
+        const rightId = BigInt(right);
+        return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+      });
+      if (canonicalIds.length !== creatorIds.length || canonicalIds.some((memberId, index) => memberId !== creatorIds[index])) {
+        throw new ProjectServiceError('Project creator memberships are inconsistent', 409, 'conflict');
+      }
+    }
+    await client.query('commit');
+    const { creation_payload_fingerprint: _fingerprint, ...publicProject } = project;
+    const canonicalProject = { ...publicProject, memberships };
+    return engineerCreating ? { ...canonicalProject, membership: memberships[0] } : canonicalProject;
+  } catch (error) {
+    if (transactionStarted) {
+      try { await client.query('rollback'); } catch { /* Preserve the primary transaction failure. */ }
+    }
+    throw error;
+  } finally {
+    client.release();
   }
-  requireType(session, 'client');
-  const status = String(input.status ?? 'draft');
-  if (!STATUSES.has(status)) throw new ProjectServiceError('Invalid project status');
-  const db = await ready();
-  const result = await db.query(
-    `insert into projects(client_id,title,description,status) values($1,$2,$3,$4)
-     returning id,client_id,title,description,status,created_at,updated_at`,
-    [session.id, title, description, status],
-  );
-  return result.rows[0];
 }
 
 export async function updateProject(session: SessionUser, projectId: unknown, input: { title?: unknown; description?: unknown; status?: unknown }) {
