@@ -12,7 +12,13 @@ export async function POST(req: NextRequest) {
     await setSessionCookie(user);
     return NextResponse.json({ ok: true, user: { email: user.email, role: user.role, account_type: user.account_type, company_domain: user.company_domain } });
   } catch (error) {
-    if (error instanceof Error && ['Invalid email or password', 'Account is not approved', 'Enter a valid work email'].includes(error.message)) {
+    if (error instanceof Error && [
+      'Invalid email or password',
+      'Account is pending approval',
+      'Account was rejected. Contact a platform admin to request another review.',
+      'Account is not approved',
+      'Enter a valid work email',
+    ].includes(error.message)) {
       return NextResponse.json({ ok: false, error: error.message === 'Enter a valid work email' ? 'Invalid email or password' : error.message }, { status: 401 });
     }
     return apiErrorResponse(error);

@@ -690,6 +690,8 @@ export async function loginUser(email: string, password: string) {
   );
   const user = result.rows[0];
   if (!user || !verifyPassword(password, user.password_hash)) throw new Error('Invalid email or password');
+  if (user.approval_status === 'pending') throw new Error('Account is pending approval');
+  if (user.approval_status === 'rejected') throw new Error('Account was rejected. Contact a platform admin to request another review.');
   if (user.approval_status !== 'approved') throw new Error('Account is not approved');
   return {
     id: String(user.id),

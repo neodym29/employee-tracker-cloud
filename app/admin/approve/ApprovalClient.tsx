@@ -20,7 +20,7 @@ export default function ApprovalClient({ initialApprovals, unavailable }: { init
 
   return <div className="dashboardShell">
     <div className="dashboardHeading"><div><span className="pill">Platform admin</span><h1>Account approvals</h1><p>Review pending client and engineer accounts.</p></div></div>
-    {unavailable && <p className="errorBanner" role="alert">Approvals are temporarily unavailable.</p>}
+    {unavailable && <div className="errorBanner" role="alert"><p>Approvals are temporarily unavailable.</p><button type="button" className="secondaryButton" onClick={() => window.location.reload()}>Retry</button></div>}
     {error && <p className="errorBanner" role="alert">{error}</p>}
     <section className="dashboardPanel">
       <div className="panelHeader"><h2>Pending accounts</h2><span className="muted">{rows.length} waiting</span></div>
