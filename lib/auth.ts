@@ -13,6 +13,7 @@ export type SessionUser = {
 };
 
 const COOKIE_NAME = 'neodym_session';
+const SESSION_TOKEN_TTL_MS = 1000 * 60 * 60 * 12;
 
 function authSecret(): string {
   const secret = process.env.AUTH_SECRET || process.env.ADMIN_SETUP_KEY || process.env.INGEST_API_KEY;
@@ -25,7 +26,7 @@ function sign(payload: string): string {
 }
 
 export function createSessionToken(user: SessionUser): string {
-  const payload = Buffer.from(JSON.stringify({ ...user, exp: Date.now() + 1000 * 60 * 60 * 24 * 7 })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ ...user, exp: Date.now() + SESSION_TOKEN_TTL_MS })).toString('base64url');
   return `${payload}.${sign(payload)}`;
 }
 
@@ -54,7 +55,6 @@ export async function setSessionCookie(user: SessionUser) {
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
     path: '/',
-    maxAge: 60 * 60 * 24 * 7,
   });
 }
 

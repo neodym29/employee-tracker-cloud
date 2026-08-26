@@ -1,3 +1,5 @@
+import { currentSession } from '@/lib/auth';
+
 const changes = [
   { action: 'Updated', path: 'src/auth/session.ts', agent: 'Codex', time: 'just now', tone: 'violet' },
   { action: 'Created', path: 'app/api/reports/route.ts', agent: 'Hermes', time: '2m', tone: 'green' },
@@ -5,7 +7,11 @@ const changes = [
   { action: 'Deleted', path: 'components/LegacyPanel.tsx', agent: 'Hermes', time: '11m', tone: 'red' },
 ];
 
-export default function Home() {
+export default async function Home() {
+  const session = await currentSession();
+  let primaryAction = { href: '/signup', label: 'Get started' };
+  if (session?.account_type === 'admin') primaryAction = { href: '/admin/approve', label: 'Review accounts' };
+  else if (session) primaryAction = { href: '/projects', label: 'Open projects' };
   return (
     <div className="landing">
       <section className="heroSimple">
@@ -14,7 +20,7 @@ export default function Home() {
           <h1>Every AI edit.<br /><span>Nothing else.</span></h1>
           <p className="heroText">See the files changed by Hermes and Codex without tracking screens, clicks, browsers, text, or the rest of the computer.</p>
           <div className="heroActions">
-            <a className="primaryButton" href="/dashboard">Open dashboard <span aria-hidden="true">→</span></a>
+            <a className="primaryButton" href={primaryAction.href}>{primaryAction.label} <span aria-hidden="true">→</span></a>
             <span className="privacyNote"><span aria-hidden="true">✓</span> File metadata only</span>
           </div>
         </div>

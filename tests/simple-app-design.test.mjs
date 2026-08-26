@@ -17,7 +17,10 @@ test('public shell is a simple files product rather than an operations route dir
 
   assert.match(home, /Every AI edit/i);
   assert.match(home, /Nothing else/i);
-  assert.match(home, /Open dashboard/i);
+  assert.match(home, /currentSession/);
+  assert.match(home, /account_type\s*===\s*'admin'[\s\S]*\/admin\/approve/);
+  assert.match(home, /else if \(session\)[\s\S]*\/projects/);
+  assert.doesNotMatch(home, /href="\/dashboard">Open dashboard/i);
   assert.match(home, /changePreview/);
   assert.match(home, /Hermes|Codex/);
   for (const noisyConcept of ['Database', 'DNS', 'register company', 'first admin', 'Operations']) {

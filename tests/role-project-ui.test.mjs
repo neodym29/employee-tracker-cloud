@@ -61,6 +61,7 @@ test('role-aware projects matching UI supports client and engineer flows', async
   const [page, client] = await Promise.all([read('app/projects/page.tsx'), read('app/projects/ProjectsClient.tsx')]);
   assert.match(page, /requireApprovedSession/);
   assert.match(client, /Create project/);
+  assert.match(client, /Projects start immediately\. Platform Admins approve accounts, not projects\./);
   assert.match(client, /Available engineers/);
   assert.match(client, /Invite/);
   assert.match(client, /Open projects/);
