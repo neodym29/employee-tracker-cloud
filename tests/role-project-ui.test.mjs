@@ -21,19 +21,21 @@ test('public header and role signup expose the new account journey', async () =>
   assert.doesNotMatch(signup, /company and first admin|Employee signup/i);
 });
 
-test('public auth navigation highlights only the current signup or sign-in route', async () => {
-  const [layout, signup, login, css] = await Promise.all([
+test('shared navigation highlights the current public and authenticated route', async () => {
+  const [layout, activeLink, css] = await Promise.all([
     read('app/layout.tsx'),
-    read('app/signup/page.tsx'),
-    read('app/login/page.tsx'),
+    read('app/components/ActiveNavLink.tsx'),
     read('app/globals.css'),
   ]);
-  assert.match(layout, /className="navLink authNavLink"[^>]*href="\/signup"/);
-  assert.match(layout, /className="navLink authNavLink"[^>]*href="\/login"/);
-  assert.match(signup, /data-auth-page="signup"/);
-  assert.match(login, /data-auth-page="login"/);
-  assert.match(css, /body:has\(\[data-auth-page="signup"\]\)[\s\S]*a\[href="\/signup"\]/);
-  assert.match(css, /body:has\(\[data-auth-page="login"\]\)[\s\S]*a\[href="\/login"\]/);
+  for (const href of ['/signup', '/login', '/admin/approve', '/projects', '/dashboard']) {
+    assert.match(layout, new RegExp(`ActiveNavLink[^>]*href=["']${href.replaceAll('/', '\\/')}["']`));
+  }
+  assert.match(activeLink, /usePathname/);
+  assert.match(activeLink, /pathname\.startsWith\(`\$\{href\}\/`\)/, 'nested project pages should keep Projects active');
+  assert.match(activeLink, /aria-current/);
+  assert.match(activeLink, /active/);
+  assert.match(css, /\.navLink\.active/);
+  assert.doesNotMatch(css, /body:has\(\[data-auth-page=/, 'route-specific page markers must not control global navigation');
 });
 
 test('admin approval UI uses platform approval routes for both decisions', async () => {

@@ -1,6 +1,7 @@
 import './globals.css';
 import type { Metadata } from 'next';
 import { currentSession } from '@/lib/auth';
+import ActiveNavLink from '@/app/components/ActiveNavLink';
 
 export const metadata: Metadata = {
   title: 'Trace | Project collaboration',
@@ -18,13 +19,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <div className="navActions">
               {session ? (
                 <>
-                  {session.account_type === 'admin' && <a className="navLink" href="/admin/approve">Approvals</a>}
-                  {session.account_type !== 'admin' && <a className="navLink" href="/projects">Projects</a>}
-                  <a className="navLink" href="/dashboard">Files</a>
+                  {session.account_type === 'admin' && <ActiveNavLink href="/admin/approve">Approvals</ActiveNavLink>}
+                  {session.account_type !== 'admin' && <ActiveNavLink href="/projects">Projects</ActiveNavLink>}
+                  <ActiveNavLink href="/dashboard">Files</ActiveNavLink>
                   <form className="inlineForm" action="/api/logout" method="post"><button className="navButton" type="submit">Sign out</button></form>
                 </>
               ) : (
-                <><a className="navLink authNavLink" href="/signup">Sign up</a><a className="navLink authNavLink" href="/login">Sign in</a></>
+                <><ActiveNavLink className="authNavLink" href="/signup" exact>Sign up</ActiveNavLink><ActiveNavLink className="authNavLink" href="/login" exact>Sign in</ActiveNavLink></>
               )}
             </div>
           </nav>
