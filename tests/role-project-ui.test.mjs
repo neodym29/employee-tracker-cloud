@@ -21,6 +21,21 @@ test('public header and role signup expose the new account journey', async () =>
   assert.doesNotMatch(signup, /company and first admin|Employee signup/i);
 });
 
+test('public auth navigation highlights only the current signup or sign-in route', async () => {
+  const [layout, signup, login, css] = await Promise.all([
+    read('app/layout.tsx'),
+    read('app/signup/page.tsx'),
+    read('app/login/page.tsx'),
+    read('app/globals.css'),
+  ]);
+  assert.match(layout, /className="navLink authNavLink"[^>]*href="\/signup"/);
+  assert.match(layout, /className="navLink authNavLink"[^>]*href="\/login"/);
+  assert.match(signup, /data-auth-page="signup"/);
+  assert.match(login, /data-auth-page="login"/);
+  assert.match(css, /body:has\(\[data-auth-page="signup"\]\)[\s\S]*a\[href="\/signup"\]/);
+  assert.match(css, /body:has\(\[data-auth-page="login"\]\)[\s\S]*a\[href="\/login"\]/);
+});
+
 test('admin approval UI uses platform approval routes for both decisions', async () => {
   const [page, client] = await Promise.all([read('app/admin/approve/page.tsx'), read('app/admin/approve/ApprovalClient.tsx')]);
   assert.match(page, /requirePlatformAdminSession/);

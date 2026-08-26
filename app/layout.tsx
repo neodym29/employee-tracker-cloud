@@ -24,7 +24,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   <form className="inlineForm" action="/api/logout" method="post"><button className="navButton" type="submit">Sign out</button></form>
                 </>
               ) : (
-                <><a className="navLink" href="/signup">Sign up</a><a className="navButton" href="/login">Sign in</a></>
+                <><a className="navLink authNavLink" href="/signup">Sign up</a><a className="navLink authNavLink" href="/login">Sign in</a></>
               )}
             </div>
           </nav>

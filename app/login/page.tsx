@@ -30,7 +30,7 @@ function LoginForm() {
   }
 
   return (
-    <section className="card">
+    <section className="card" data-auth-page="login">
       <span className="pill">Login</span>
       <h1>Sign in</h1>
       <p className="muted">Sign in after approval to manage projects, collaborate, and keep project work in one place.</p>

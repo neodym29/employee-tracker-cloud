@@ -33,7 +33,7 @@ export default function Signup() {
   }
 
   return (
-    <section className="card authCard">
+    <section className="card authCard" data-auth-page="signup">
       <span className="pill">Join Trace</span>
       <h1>Create your account</h1>
       <p className="muted">Choose how you will use Trace. Every new account is reviewed before sign in. The optional files-only dashboard shows file-change metadata from approved Hermes, Codex, or Claude agents and never file contents.</p>

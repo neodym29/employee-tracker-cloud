@@ -25,6 +25,9 @@ button, a, select, input { -webkit-tap-highlight-color: transparent; }
 .logo { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; color: #fff; background: var(--dark); font-size: 14px; font-weight: 800; box-shadow: 0 7px 18px rgba(30,31,27,.18); }
 .navActions { display: flex; align-items: center; gap: 8px; }
 .navLink { padding: 10px 13px; color: #56564f; font-size: 14px; font-weight: 600; }
+.authNavLink { border: 1px solid transparent; border-radius: 10px; }
+body:has([data-auth-page="signup"]) a[href="/signup"],
+body:has([data-auth-page="login"]) a[href="/login"] { color: #fff; background: var(--dark); border-color: var(--dark); }
 .navButton, .primaryButton, .secondaryButton, button, .button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 42px; border: 1px solid var(--dark); border-radius: 12px; padding: 10px 16px; color: #fff; background: var(--dark); font-weight: 690; cursor: pointer; transition: transform .18s ease, box-shadow .18s ease, background .18s ease; }
 .navButton { min-height: 38px; border-radius: 10px; padding: 8px 13px; font-size: 13px; }
 .primaryButton:hover, .navButton:hover, button:hover { transform: translateY(-1px); box-shadow: 0 10px 24px rgba(30,31,27,.16); }
@@ -196,6 +199,7 @@ button:disabled { cursor: not-allowed; opacity: .55; transform: none; box-shadow
 @media (max-width: 720px) {
   .nav { width: min(100% - 28px, 1180px); height: 64px; }
   .navLink { display: none; }
+  .authNavLink { display: inline-flex; padding: 7px 10px; }
   .navButton { min-height: 36px; padding: 7px 11px; }
   main { width: min(100% - 28px, 1180px); padding: 28px 0 56px; }
   .heroSimple { padding: 22px 0 40px; }
