@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 type Project = { id: string; title: string; description: string; status: string; membership_id?: string | null; membership_type?: 'invitation' | 'request' | null; membership_status?: string | null };
 type Engineer = { id: string; display_name: string };
+type Client = { id: string; display_name: string };
 type Props = { accountType: 'client' | 'engineer' };
 
 async function request(url: string, options?: RequestInit) {
@@ -16,12 +17,15 @@ async function request(url: string, options?: RequestInit) {
 export default function ProjectsClient({ accountType }: Props) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [engineers, setEngineers] = useState<Engineer[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState('open');
   const [inviteProject, setInviteProject] = useState('');
   const [engineerId, setEngineerId] = useState('');
+  const [clientId, setClientId] = useState('');
   const [busy, setBusy] = useState('');
+  const [proposalBusy, setProposalBusy] = useState(false);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
@@ -31,22 +35,32 @@ export default function ProjectsClient({ accountType }: Props) {
       if (accountType === 'client') {
         const people = await request('/api/engineers');
         setEngineers(people.engineers);
+      } else {
+        const people = await request('/api/clients');
+        setClients(people.clients);
       }
     } catch { setError('Projects are temporarily unavailable.'); }
   }, [accountType]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { if (!inviteProject && projects[0]) setInviteProject(projects[0].id); }, [projects, inviteProject]);
   useEffect(() => { if (!engineerId && engineers[0]) setEngineerId(engineers[0].id); }, [engineers, engineerId]);
+  useEffect(() => { if (!clientId && clients[0]) setClientId(clients[0].id); }, [clients, clientId]);
 
   const active = useMemo(() => projects.filter((project) => project.membership_status === 'active'), [projects]);
   const pending = useMemo(() => projects.filter((project) => project.membership_status === 'pending'), [projects]);
   const open = useMemo(() => projects.filter((project) => project.status === 'open' && !project.membership_status), [projects]);
 
   async function createProject(event: React.FormEvent) {
-    event.preventDefault(); setBusy('create'); setError('');
-    try { await request('/api/projects', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title, description, status }) }); setTitle(''); setDescription(''); await load(); }
+    event.preventDefault();
+    if (accountType === 'engineer') setProposalBusy(true);
+    else setBusy('create');
+    setError('');
+    try { await request('/api/projects', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(accountType === 'engineer' ? { clientId, title, description } : { title, description, status }) }); setTitle(''); setDescription(''); await load(); }
     catch (failure) { setError(failure instanceof Error ? failure.message : 'Project could not be created.'); }
-    setBusy('');
+    finally {
+      if (accountType === 'engineer') setProposalBusy(false);
+      else setBusy('');
+    }
   }
   async function invite(event: React.FormEvent) {
     event.preventDefault(); setBusy('invite'); setError('');
@@ -67,13 +81,14 @@ export default function ProjectsClient({ accountType }: Props) {
   const projectCard = (project: Project, action?: React.ReactNode) => <article className="projectCard" key={project.id}><div className="cardTop"><span className="statusBadge">{project.status}</span>{project.membership_status && <span className="statusBadge subtle">{project.membership_status}</span>}</div><h3>{project.title}</h3><p>{project.description || 'No description yet.'}</p><div className="rowActions">{(accountType === 'client' || project.membership_status === 'active') && <a className="secondaryButton" href={`/projects/${project.id}`}>Open workspace</a>}{action}</div></article>;
 
   return <div className="dashboardShell">
-    <div className="dashboardHeading"><div><span className="pill">{accountType} workspace</span><h1>Projects</h1><p>{accountType === 'client' ? 'Create a project and invite an approved engineer.' : 'Find open work and manage invitations.'}</p></div><a className="secondaryButton" href="/dashboard">Files dashboard</a></div>
+    <div className="dashboardHeading"><div><span className="pill">{accountType} workspace</span><h1>Projects</h1><p>{accountType === 'client' ? 'Create a project and invite an approved engineer.' : 'Propose a project to an approved client, find open work, and manage invitations.'}</p></div></div>
     {error && <p className="errorBanner" role="alert">{error}</p>}
     {accountType === 'client' ? <>
       <div className="projectGrid projectTools"><section className="card"><h2>Create project</h2><form onSubmit={createProject}><label>Title<input value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} required /></label><label>Description<textarea value={description} maxLength={4000} rows={4} onChange={(e) => setDescription(e.target.value)} /></label><label>Starting status<select value={status} onChange={(e) => setStatus(e.target.value)}><option value="open">Open</option><option value="draft">Draft</option></select></label><button disabled={busy === 'create'}>{busy === 'create' ? 'Creating...' : 'Create project'}</button></form></section>
       <section className="card"><h2>Available engineers</h2><p className="muted">Invite an approved engineer to one of your projects.</p>{Boolean(projects.length && engineers.length) ? <form onSubmit={invite}><label>Project<select value={inviteProject} onChange={(e) => setInviteProject(e.target.value)}>{projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select></label><label>Engineer<select value={engineerId} onChange={(e) => setEngineerId(e.target.value)}>{engineers.map((engineer) => <option key={engineer.id} value={engineer.id}>{engineer.display_name}</option>)}</select></label><button disabled={busy === 'invite'}>{busy === 'invite' ? 'Sending...' : 'Invite'}</button></form> : <p className="emptyLine">Create a project and wait for approved engineers to become available.</p>}</section></div>
       <section><div className="sectionHeading"><h2>Your projects</h2></div><div className="projectGrid">{projects.length ? projects.map((project) => projectCard(project)) : <p className="muted">No projects yet.</p>}</div></section>
     </> : <>
+      <section className="card projectTools"><h2>Add new project</h2><p className="muted">Propose a draft project. Workspace access remains locked pending client approval.</p>{clients.length ? <form onSubmit={createProject}><label>Client<select value={clientId} onChange={(e) => setClientId(e.target.value)} required>{clients.map((client) => <option key={client.id} value={client.id}>{client.display_name}</option>)}</select></label><label>Title<input value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} required /></label><label>Description<textarea value={description} maxLength={4000} rows={4} onChange={(e) => setDescription(e.target.value)} /></label><button disabled={proposalBusy}>{proposalBusy ? 'Proposing...' : 'Propose project'}</button></form> : <p className="emptyLine">No approved clients are available.</p>}</section>
       <section><div className="sectionHeading"><h2>Invited and requested</h2></div><div className="projectGrid">{pending.length ? pending.map((project) => projectCard(project, project.membership_type === 'invitation' ? <><button disabled={busy === project.id} onClick={() => act(project, 'accept')}>Accept</button><button className="secondaryButton" disabled={busy === project.id} onClick={() => act(project, 'decline')}>Decline</button></> : <span className="muted">Request sent</span>)) : <p className="muted">No pending invitations or requests.</p>}</div></section>
       <section><div className="sectionHeading"><h2>Active projects</h2></div><div className="projectGrid">{active.length ? active.map((project) => projectCard(project)) : <p className="muted">No active projects yet.</p>}</div></section>
       <section><div className="sectionHeading"><h2>Open projects</h2></div><div className="projectGrid">{open.length ? open.map((project) => projectCard(project, <button disabled={busy === project.id} onClick={() => act(project, 'request')}>Request to join</button>)) : <p className="muted">No open projects right now.</p>}</div></section>

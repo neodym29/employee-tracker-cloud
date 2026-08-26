@@ -19,7 +19,7 @@ export default function ApprovalClient({ initialApprovals, unavailable }: { init
   }
 
   return <div className="dashboardShell">
-    <div className="dashboardHeading"><div><span className="pill">Platform admin</span><h1>Account approvals</h1><p>Review pending client and engineer accounts.</p></div><a className="secondaryButton" href="/projects">Projects</a></div>
+    <div className="dashboardHeading"><div><span className="pill">Platform admin</span><h1>Account approvals</h1><p>Review pending client and engineer accounts.</p></div></div>
     {unavailable && <p className="errorBanner" role="alert">Approvals are temporarily unavailable.</p>}
     {error && <p className="errorBanner" role="alert">{error}</p>}
     <section className="dashboardPanel">

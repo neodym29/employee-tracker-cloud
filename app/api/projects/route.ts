@@ -7,6 +7,6 @@ export async function GET() {
   catch (error) { return apiErrorResponse(error); }
 }
 export async function POST(req: NextRequest) {
-  try { assertSameOrigin(req); const session=await requireApiSession('client'); return NextResponse.json({ ok:true, project:await createProject(session,await jsonBody(req)) },{status:201}); }
+  try { assertSameOrigin(req); const session=await requireApiSession(); return NextResponse.json({ ok:true, project:await createProject(session,await jsonBody(req)) },{status:201}); }
   catch (error) { return apiErrorResponse(error); }
 }

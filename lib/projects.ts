@@ -92,10 +92,89 @@ async function ready() {
   return getPool();
 }
 
-export async function createProject(session: SessionUser, input: { title?: unknown; description?: unknown; status?: unknown }) {
-  requireType(session, 'client');
+export async function createProject(session: SessionUser, input: { clientId?: unknown; title?: unknown; description?: unknown; status?: unknown }) {
   const title = text(input.title, 'Title', TITLE_MAX);
   const description = text(input.description ?? '', 'Description', DESCRIPTION_MAX, true);
+  if (session.account_type === 'engineer') {
+    const clientId = id(input.clientId, 'client id');
+    const pool = await ready();
+    const client: PoolClient = await pool.connect();
+    let transactionStarted = false;
+    try {
+      await client.query('begin');
+      transactionStarted = true;
+      // Serialize proposals for this engineer/client pair. The duplicate lookup must run
+      // after this transaction-scoped lock so concurrent retries cannot both insert.
+      await client.query('select pg_advisory_xact_lock(hashtext($1))', [`engineer-proposal:${session.id}:${clientId}`]);
+      const existingResult = await client.query(
+        `select p.id,p.client_id,p.title,p.description,p.status,p.created_at,p.updated_at,
+                pm.id as membership_id,pm.project_id as membership_project_id,
+                pm.user_id as membership_user_id,pm.membership_type,pm.membership_status,
+                pm.created_by as membership_created_by,pm.created_at as membership_created_at
+         from projects p join project_memberships pm on pm.project_id=p.id
+         where p.client_id=$1 and pm.user_id=$2 and p.title=$3 and p.status='draft'
+           and pm.membership_type='request' and pm.membership_status='pending' and pm.created_by=$2
+         order by p.created_at asc,p.id asc limit 1`,
+        [clientId, session.id, title],
+      );
+      const existing = existingResult.rows[0];
+      if (existing) {
+        const project = {
+          id: existing.id,
+          client_id: existing.client_id,
+          title: existing.title,
+          description: existing.description,
+          status: existing.status,
+          created_at: existing.created_at,
+          updated_at: existing.updated_at,
+        };
+        const membership = {
+          id: existing.membership_id,
+          project_id: existing.membership_project_id,
+          user_id: existing.membership_user_id,
+          membership_type: existing.membership_type,
+          membership_status: existing.membership_status,
+          created_by: existing.membership_created_by,
+          created_at: existing.membership_created_at,
+        };
+        await client.query('commit');
+        return { ...project, membership };
+      }
+
+      // Keep proposals non-public until the client reviews the pending membership request.
+      const projectResult = await client.query(
+        `insert into projects(client_id,title,description,status)
+         select id,$2,$3,$4 from app_users
+         where id=$1 and account_type='client' and approval_status='approved'
+         returning id,client_id,title,description,status,created_at,updated_at`,
+        [clientId, title, description, 'draft'],
+      );
+      const project = projectResult.rows[0];
+      if (!project) throw new ProjectServiceError('Proposal could not be created', 409, 'conflict');
+      const membershipResult = await client.query(
+        `insert into project_memberships(project_id,user_id,membership_type,membership_status,created_by)
+         values($1,$2,'request','pending',$2)
+         returning id,project_id,user_id,membership_type,membership_status,created_by,created_at`,
+        [project.id, session.id],
+      );
+      const membership = membershipResult.rows[0];
+      if (!membership) throw new ProjectServiceError('Proposal could not be created', 409, 'conflict');
+      await client.query('commit');
+      return { ...project, membership };
+    } catch (error) {
+      if (transactionStarted) {
+        try {
+          await client.query('rollback');
+        } catch {
+          // Preserve the primary transaction failure; a broken connection may reject rollback.
+        }
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  requireType(session, 'client');
   const status = String(input.status ?? 'draft');
   if (!STATUSES.has(status)) throw new ProjectServiceError('Invalid project status');
   const db = await ready();
@@ -185,6 +264,16 @@ export async function listAvailableEngineers(session: SessionUser) {
   return (await db.query(
     `select id,display_name from app_users
      where account_type='engineer' and approval_status='approved'
+     order by display_name asc,id asc`,
+  )).rows;
+}
+
+export async function listAvailableClients(session: SessionUser) {
+  requireType(session, 'engineer');
+  const db = await ready();
+  return (await db.query(
+    `select id,display_name from app_users
+     where account_type='client' and approval_status='approved'
      order by display_name asc,id asc`,
   )).rows;
 }
