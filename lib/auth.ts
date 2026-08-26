@@ -12,7 +12,8 @@ export type SessionUser = {
   company_domain: string;
 };
 
-const COOKIE_NAME = 'neodym_session';
+const COOKIE_NAME = 'trace_session_v2';
+const LEGACY_COOKIE_NAME = 'neodym_session';
 const SESSION_TOKEN_TTL_MS = 1000 * 60 * 60 * 12;
 
 function authSecret(): string {
@@ -61,6 +62,7 @@ export async function setSessionCookie(user: SessionUser) {
 export async function clearSessionCookie() {
   const jar = await cookies();
   jar.delete(COOKIE_NAME);
+  jar.delete(LEGACY_COOKIE_NAME);
 }
 
 async function getSessionUserFromDatabase(parsed: SessionUser): Promise<SessionUser | null> {
