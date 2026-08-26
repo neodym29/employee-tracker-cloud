@@ -20,7 +20,7 @@ test('schema migration never heuristically activates pending memberships', () =>
   const sql = read('migrations/007_project_creation_integrity.sql');
   const db = read('lib/db.ts');
   assert.doesNotMatch(sql, /update\s+project_memberships[\s\S]*membership_status\s*=\s*'active'/i);
-  assert.doesNotMatch(db, /update\s+project_memberships[\s\S]*membership_status\s*=\s*'active'/i);
+  assert.doesNotMatch(db, /set\s+membership_status\s*=\s*'active'/i);
 });
 
 test('ensureSchema mirrors migration 007 for upgraded and fresh databases', () => {
@@ -29,7 +29,7 @@ test('ensureSchema mirrors migration 007 for upgraded and fresh databases', () =
   assert.match(db, /creation_request_key uuid/i);
   assert.match(db, /creation_requested_by bigint/i);
   assert.match(db, /creation_payload_fingerprint text/i);
-  assert.doesNotMatch(db, /update\s+project_memberships[\s\S]*membership_status\s*=\s*'active'/i);
+  assert.doesNotMatch(db, /set\s+membership_status\s*=\s*'active'/i);
 });
 
 test('agent submit is single-flight, draft-safe, keyboard accessible, and follows new content', () => {

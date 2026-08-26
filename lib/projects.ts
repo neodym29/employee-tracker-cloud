@@ -48,7 +48,7 @@ function requirePlatformAdmin(session: SessionUser) {
 export function projectAccessSql(userParameter: string, projectAlias = 'p', membershipAlias = 'access_membership') {
   return {
     join: `left join project_memberships ${membershipAlias} on ${membershipAlias}.project_id=${projectAlias}.id and ${membershipAlias}.user_id=${userParameter} and ${membershipAlias}.membership_status='active'`,
-    predicate: `(${projectAlias}.client_id=${userParameter} or ${membershipAlias}.user_id=${userParameter})`,
+    predicate: `(${projectAlias}.approval_status='approved' and (${projectAlias}.client_id=${userParameter} or ${membershipAlias}.user_id=${userParameter}))`,
   };
 }
 
@@ -131,7 +131,7 @@ export async function createProject(session: SessionUser, input: { clientId?: un
   const status = engineerCreating ? 'draft' : String(input.status ?? 'draft');
   if (!STATUSES.has(status)) throw new ProjectServiceError('Invalid project status');
   const selectedEngineerIds = creationEngineerIds(input.engineerIds, !engineerCreating);
-  const creatorIds = engineerCreating ? [session.id] : selectedEngineerIds;
+  const counterpartIds = engineerCreating ? [session.id] : selectedEngineerIds;
   const payloadFingerprint = creationFingerprint({
     version: 1,
     accountType: session.account_type,
@@ -139,7 +139,7 @@ export async function createProject(session: SessionUser, input: { clientId?: un
     title,
     description,
     status,
-    engineerIds: creatorIds,
+    engineerIds: counterpartIds,
   });
 
   const pool = await ready();
@@ -150,35 +150,35 @@ export async function createProject(session: SessionUser, input: { clientId?: un
     transactionStarted = true;
     const inserted = engineerCreating
       ? await client.query(
-          `insert into projects(client_id,title,description,status,creation_requested_by,creation_request_key,creation_payload_fingerprint)
-           select id,$2,$3,$4,$5,$6::uuid,$7 from app_users
+          `insert into projects(client_id,title,description,status,approval_status,proposal_kind,creation_requested_by,creation_request_key,creation_payload_fingerprint)
+           select id,$2,$3,$4,'pending','engineer_client',$5,$6::uuid,$7 from app_users
            where id=$1 and account_type='client' and approval_status='approved'
            on conflict(creation_requested_by,creation_request_key) do nothing
-           returning id,client_id,title,description,status,created_at,updated_at,creation_payload_fingerprint`,
+           returning id,client_id,title,description,status,approval_status,created_at,updated_at,creation_payload_fingerprint`,
           [ownerId, title, description, status, session.id, creationRequestKey, payloadFingerprint],
         )
       : await client.query(
-          `insert into projects(client_id,title,description,status,creation_requested_by,creation_request_key,creation_payload_fingerprint)
-           values($1,$2,$3,$4,$5,$6::uuid,$7)
+          `insert into projects(client_id,title,description,status,approval_status,proposal_kind,creation_requested_by,creation_request_key,creation_payload_fingerprint)
+           values($1,$2,$3,$4,'approved',null,$5,$6::uuid,$7)
            on conflict(creation_requested_by,creation_request_key) do nothing
-           returning id,client_id,title,description,status,created_at,updated_at,creation_payload_fingerprint`,
+           returning id,client_id,title,description,status,approval_status,created_at,updated_at,creation_payload_fingerprint`,
           [ownerId, title, description, status, session.id, creationRequestKey, payloadFingerprint],
         );
 
     if (inserted.rows[0] && engineerCreating) {
       const membershipResult = await client.query(
-        `insert into project_memberships(project_id,user_id,membership_type,membership_status,created_by)
-         values($1,$2,'creator','active',$2)
-         returning id,project_id,user_id,membership_type,membership_status,created_by,created_at`,
+        `insert into project_memberships(project_id,user_id,membership_type,membership_status,is_project_proposal,created_by)
+         values($1,$2,'request','pending',true,$2)
+         returning id,project_id,user_id,membership_type,membership_status,is_project_proposal,created_by,created_at`,
         [inserted.rows[0].id, session.id],
       );
       if (membershipResult.rows.length !== 1) throw new ProjectServiceError('Project could not be created', 409, 'conflict');
     } else if (inserted.rows[0] && selectedEngineerIds.length) {
       const membershipResult = await client.query(
-        `insert into project_memberships(project_id,user_id,membership_type,membership_status,created_by)
-         select $1,u.id,'creator','active',$3 from app_users u
+        `insert into project_memberships(project_id,user_id,membership_type,membership_status,is_project_proposal,created_by)
+         select $1,u.id,'invitation','pending',false,$3 from app_users u
           where u.id=any($2::bigint[]) and u.account_type='engineer' and u.approval_status='approved'
-         returning id,project_id,user_id,membership_type,membership_status,created_by,created_at`,
+         returning id,project_id,user_id,membership_type,membership_status,is_project_proposal,created_by,created_at`,
         [inserted.rows[0].id, selectedEngineerIds, session.id],
       );
       if (membershipResult.rows.length !== selectedEngineerIds.length) {
@@ -189,7 +189,7 @@ export async function createProject(session: SessionUser, input: { clientId?: un
     // ON CONFLICT waits for a concurrent creator transaction. Bind the key to the
     // canonical payload before returning any replayed project or memberships.
     const canonicalResult = await client.query(
-      `select p.id,p.client_id,p.title,p.description,p.status,p.created_at,p.updated_at,p.creation_payload_fingerprint
+      `select p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.proposal_kind,p.created_at,p.updated_at,p.creation_payload_fingerprint
          from projects p
         where p.creation_requested_by=$1 and p.creation_request_key=$2::uuid`,
       [session.id, creationRequestKey],
@@ -201,13 +201,13 @@ export async function createProject(session: SessionUser, input: { clientId?: un
     }
 
     let memberships: Record<string, unknown>[] = [];
-    if (creatorIds.length) {
+    if (counterpartIds.length) {
       const membershipResult = await client.query(
-        `select id,project_id,user_id,membership_type,membership_status,created_by,created_at
+        `select id,project_id,user_id,membership_type,membership_status,is_project_proposal,created_by,created_at
            from project_memberships
-          where project_id=$1 and membership_type='creator' and membership_status='active'
+          where project_id=$1 and user_id=any($2::bigint[])
           order by user_id asc`,
-        [project.id],
+        [project.id, counterpartIds],
       );
       memberships = membershipResult.rows;
       const canonicalIds = memberships.map((membership) => String(membership.user_id)).sort((left, right) => {
@@ -215,8 +215,13 @@ export async function createProject(session: SessionUser, input: { clientId?: un
         const rightId = BigInt(right);
         return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
       });
-      if (canonicalIds.length !== creatorIds.length || canonicalIds.some((memberId, index) => memberId !== creatorIds[index])) {
-        throw new ProjectServiceError('Project creator memberships are inconsistent', 409, 'conflict');
+      const expectedType = engineerCreating ? 'request' : 'invitation';
+      if (
+        canonicalIds.length !== counterpartIds.length
+        || canonicalIds.some((memberId, index) => memberId !== counterpartIds[index])
+        || memberships.some((membership) => membership.membership_type !== expectedType)
+      ) {
+        throw new ProjectServiceError('Project counterpart memberships are inconsistent', 409, 'conflict');
       }
     }
     await client.query('commit');
@@ -243,7 +248,8 @@ export async function updateProject(session: SessionUser, projectId: unknown, in
   const db = await ready();
   const result = await db.query(
     `update projects set title=$3,description=$4,status=$5,updated_at=now()
-     where id=$1 and client_id=$2 returning id,client_id,title,description,status,created_at,updated_at`,
+     where id=$1 and client_id=$2 and approval_status='approved'
+     returning id,client_id,title,description,status,approval_status,created_at,updated_at`,
     [project, session.id, title, description, status],
   );
   if (!result.rows[0]) throw new ProjectServiceError('Project not found', 404, 'not_found');
@@ -255,7 +261,7 @@ export async function listProjects(session: SessionUser, options: ProjectReadOpt
   if (options.platformAudit) {
     requirePlatformAdmin(session);
     return (await db.query(
-      `select p.id,p.client_id,p.title,p.description,p.status,p.created_at,p.updated_at
+      `select p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.created_at,p.updated_at
        from projects p order by p.updated_at desc,p.id desc`,
     )).rows;
   }
@@ -263,18 +269,18 @@ export async function listProjects(session: SessionUser, options: ProjectReadOpt
     // Open projects are discoverable summaries. Pending and active membership state is
     // included so the UI can offer the correct action without granting workspace access.
     return (await db.query(
-      `select p.id,p.client_id,p.title,p.description,p.status,p.created_at,p.updated_at,
+      `select p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.created_at,p.updated_at,
               pm.id as membership_id,pm.membership_type,pm.membership_status
        from projects p
        left join project_memberships pm on pm.project_id=p.id and pm.user_id=$1
-       where p.status='open' or pm.user_id=$1
+       where (p.approval_status='approved' and p.status='open') or pm.user_id=$1
        order by p.updated_at desc,p.id desc`,
       [session.id],
     )).rows;
   }
   if (session.account_type === 'client') {
     return (await db.query(
-      `select p.id,p.client_id,p.title,p.description,p.status,p.created_at,p.updated_at,
+      `select p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.created_at,p.updated_at,
               null::bigint as membership_id,null::text as membership_type,null::text as membership_status
        from projects p where p.client_id=$1 order by p.updated_at desc,p.id desc`,
       [session.id],
@@ -288,7 +294,7 @@ export async function getProject(session: SessionUser, projectId: unknown, optio
   if (options.platformAudit) {
     requirePlatformAdmin(session);
     const auditResult = await db.query(
-      `select p.id,p.client_id,p.title,p.description,p.status,p.created_at,p.updated_at from projects p where p.id=$1`,
+      `select p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.created_at,p.updated_at from projects p where p.id=$1`,
       [id(projectId, 'project id')],
     );
     if (!auditResult.rows[0]) throw new ProjectServiceError('Project not found', 404, 'not_found');
@@ -296,7 +302,7 @@ export async function getProject(session: SessionUser, projectId: unknown, optio
   }
   const access = projectAccessSql('$2');
   const result = await db.query(
-    `select distinct p.id,p.client_id,p.title,p.description,p.status,p.created_at,p.updated_at
+    `select distinct p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.created_at,p.updated_at
      from projects p ${access.join}
      where p.id=$1 and ${access.predicate}`,
     [id(projectId, 'project id'), session.id],
@@ -329,10 +335,10 @@ export async function inviteEngineer(session: SessionUser, projectId: unknown, e
   requireType(session, 'client');
   const db = await ready();
   const result = await db.query(
-    `insert into project_memberships(project_id,user_id,membership_type,membership_status,created_by)
-     select p.id,u.id,'invitation','pending',$2
+    `insert into project_memberships(project_id,user_id,membership_type,membership_status,is_project_proposal,created_by)
+     select p.id,u.id,'invitation','pending',false,$2
      from projects p join app_users u on u.id=$3 and u.account_type='engineer' and u.approval_status='approved'
-     where p.id=$1 and p.client_id=$2
+     where p.id=$1 and p.client_id=$2 and p.approval_status='approved'
      on conflict(project_id,user_id) do nothing
      returning id,project_id,user_id,membership_type,membership_status,created_at`,
     [id(projectId, 'project id'), session.id, id(engineerId, 'engineer id')],
@@ -345,9 +351,9 @@ export async function requestMembership(session: SessionUser, projectId: unknown
   requireType(session, 'engineer');
   const db = await ready();
   const result = await db.query(
-    `insert into project_memberships(project_id,user_id,membership_type,membership_status,created_by)
-     select p.id,$2,'request','pending',$2 from projects p
-     where p.id=$1 and p.status='open'
+    `insert into project_memberships(project_id,user_id,membership_type,membership_status,is_project_proposal,created_by)
+     select p.id,$2,'request','pending',false,$2 from projects p
+     where p.id=$1 and p.status='open' and p.approval_status='approved'
      on conflict(project_id,user_id) do nothing
      returning id,project_id,user_id,membership_type,membership_status,created_at`,
     [id(projectId, 'project id'), session.id],
@@ -362,7 +368,8 @@ export async function listProjectMemberships(session: SessionUser, projectId: un
   const db = await ready();
   await assertProjectAccess(db, session, project, { ownerOnly: true });
   return (await db.query(
-    `select pm.id,pm.project_id,pm.user_id,u.display_name,pm.membership_type,pm.membership_status,pm.created_at,pm.responded_at
+    `select pm.id,pm.project_id,pm.user_id,u.display_name,pm.membership_type,pm.membership_status,pm.created_at,pm.responded_at,
+            coalesce(pm.is_project_proposal,false) as is_project_proposal
      from project_memberships pm join projects p on p.id=pm.project_id and p.client_id=$2
      join app_users u on u.id=pm.user_id where pm.project_id=$1 order by pm.created_at desc,pm.id desc`,
     [project, session.id],
@@ -373,29 +380,84 @@ export async function respondToMembership(session: SessionUser, projectId: unkno
   const project = id(projectId, 'project id');
   const membership = id(membershipId, 'membership id');
   const requestedAction = String(action ?? '');
-  const db = await ready();
-  let result;
-  if (session.account_type === 'engineer' && ['accept', 'decline'].includes(requestedAction)) {
-    result = await db.query(
-      `update project_memberships pm set membership_status=$4,responded_by=$3,responded_at=now()
-       from projects p where pm.id=$2 and pm.project_id=$1 and p.id=pm.project_id
-         and pm.user_id=$3 and pm.membership_type='invitation' and pm.membership_status='pending'
-       returning pm.id,pm.project_id,pm.user_id,pm.membership_status,pm.responded_at`,
-      [project, membership, session.id, requestedAction === 'accept' ? 'active' : 'declined'],
+  const engineerDecision = session.account_type === 'engineer' && ['accept', 'decline'].includes(requestedAction);
+  const clientDecision = session.account_type === 'client' && ['approve', 'reject'].includes(requestedAction);
+  if (!engineerDecision && !clientDecision) throw new ProjectServiceError('Invalid membership action');
+
+  const pool = await ready();
+  const client: PoolClient = await pool.connect();
+  try {
+    await client.query('begin');
+    const locked = await client.query(
+      `select pm.id,pm.project_id,pm.user_id,pm.membership_type,pm.membership_status,pm.is_project_proposal,pm.created_by,pm.responded_by,pm.responded_at,
+              p.client_id,p.status as project_status,p.approval_status,p.proposal_kind
+         from project_memberships pm join projects p on p.id=pm.project_id
+        where pm.id=$2 and pm.project_id=$1
+          and (($4='engineer' and pm.user_id=$3 and pm.membership_type='invitation')
+            or ($4='client' and p.client_id=$3 and pm.membership_type='request'))
+        for update of pm,p`,
+      [project, membership, session.id, session.account_type],
     );
-  } else if (session.account_type === 'client' && ['approve', 'reject'].includes(requestedAction)) {
-    result = await db.query(
-      `update project_memberships pm set membership_status=$4,responded_by=$3,responded_at=now()
-       from projects p where pm.id=$2 and pm.project_id=$1 and p.id=pm.project_id and p.client_id=$3
-         and pm.membership_type='request' and pm.membership_status='pending'
-       returning pm.id,pm.project_id,pm.user_id,pm.membership_status,pm.responded_at`,
-      [project, membership, session.id, requestedAction === 'approve' ? 'active' : 'rejected'],
+    const row = locked.rows[0];
+    if (!row) throw new ProjectServiceError('Membership not found', 404, 'not_found');
+
+    const targetStatus = requestedAction === 'accept' || requestedAction === 'approve' ? 'active'
+      : requestedAction === 'decline' ? 'declined' : 'rejected';
+    const isProposal = clientDecision && row.is_project_proposal === true && row.proposal_kind === 'engineer_client';
+
+    if (row.membership_status !== 'pending') {
+      if (row.membership_status !== targetStatus) {
+        throw new ProjectServiceError('Membership already received the opposite decision', 409, 'conflict');
+      }
+      if (isProposal) {
+        const expectedApproval = requestedAction === 'approve' ? 'approved' : 'rejected';
+        const rejectedProjectIsArchived = requestedAction !== 'reject' || row.project_status === 'archived';
+        if (row.approval_status !== expectedApproval || !rejectedProjectIsArchived) {
+          throw new ProjectServiceError('Project proposal is in an inconsistent terminal state', 409, 'conflict');
+        }
+      }
+      await client.query('commit');
+      return {
+        id: row.id, project_id: row.project_id, user_id: row.user_id,
+        membership_status: row.membership_status, responded_at: row.responded_at,
+        approval_status: row.approval_status, project_status: row.project_status,
+      };
+    }
+
+    let projectApproval = row.approval_status;
+    let projectStatus = row.project_status;
+    if (isProposal) {
+      if (row.approval_status !== 'pending') {
+        throw new ProjectServiceError('Project proposal has already been decided', 409, 'conflict');
+      }
+      projectApproval = requestedAction === 'approve' ? 'approved' : 'rejected';
+      projectStatus = requestedAction === 'approve' ? 'open' : 'archived';
+      const projectTransition = await client.query(
+        `update projects set approval_status=$3,status=$4,updated_at=now()
+          where id=$1 and client_id=$2 and approval_status='pending' and proposal_kind='engineer_client'
+          returning approval_status,status`,
+        [project, session.id, projectApproval, projectStatus],
+      );
+      if (!projectTransition.rows[0]) throw new ProjectServiceError('Project proposal has already been decided', 409, 'conflict');
+    } else if (clientDecision && row.approval_status !== 'approved') {
+      throw new ProjectServiceError('Membership request is not attached to an approved project', 409, 'conflict');
+    }
+
+    const updated = await client.query(
+      `update project_memberships set membership_status=$3,responded_by=$4,responded_at=now()
+        where id=$2 and project_id=$1 and membership_status='pending'
+        returning id,project_id,user_id,membership_status,responded_at`,
+      [project, membership, targetStatus, session.id],
     );
-  } else {
-    throw new ProjectServiceError('Invalid membership action');
+    if (!updated.rows[0]) throw new ProjectServiceError('Membership has already been decided', 409, 'conflict');
+    await client.query('commit');
+    return { ...updated.rows[0], approval_status: projectApproval, project_status: projectStatus };
+  } catch (error) {
+    try { await client.query('rollback'); } catch { /* Preserve the primary failure. */ }
+    throw error;
+  } finally {
+    client.release();
   }
-  if (!result.rows[0]) throw new ProjectServiceError('Membership not found', 404, 'not_found');
-  return result.rows[0];
 }
 
 export async function listRecords(session: SessionUser, projectId: unknown) {

@@ -33,11 +33,11 @@ function loadProjects(query) {
 
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
-test('client formation atomically creates ACTIVE creator memberships for every selected approved engineer', async () => {
+test('client formation atomically creates pending invitations for every selected approved engineer', async () => {
   const project = { id: '77', client_id: '10', title: 'Formation', description: 'Together', status: 'open', creation_payload_fingerprint: '' };
   const members = [
-    { id: '101', project_id: '77', user_id: '2', membership_type: 'creator', membership_status: 'active', created_by: '10' },
-    { id: '102', project_id: '77', user_id: '10', membership_type: 'creator', membership_status: 'active', created_by: '10' },
+    { id: '101', project_id: '77', user_id: '2', membership_type: 'invitation', membership_status: 'pending', created_by: '10' },
+    { id: '102', project_id: '77', user_id: '10', membership_type: 'invitation', membership_status: 'pending', created_by: '10' },
   ];
   let fingerprint = '';
   const { service, calls } = loadProjects(async (sql, values) => {
@@ -51,12 +51,12 @@ test('client formation atomically creates ACTIVE creator memberships for every s
     }
     if (/insert into project_memberships/i.test(sql)) {
       assert.match(sql, /account_type='engineer'[\s\S]*approval_status='approved'/i);
-      assert.match(sql, /'creator','active'/i);
+      assert.match(sql, /'invitation','pending'/i);
       assert.deepEqual(plain(values.slice(0, 3)), ['77', ['2', '10'], '10']);
       return { rows: members };
     }
     if (/from projects p/i.test(sql) && /creation_request_key/i.test(sql)) return { rows: [project] };
-    if (/from project_memberships/i.test(sql) && /membership_type='creator'/i) return { rows: members };
+    if (/from project_memberships/i.test(sql) && /user_id=any/i) return { rows: members };
     throw new Error(`Unexpected query: ${sql}`);
   });
 
@@ -99,8 +99,8 @@ test('one invalid or unapproved selected engineer rolls back the whole client fo
   assert.equal(calls.filter(({ sql }) => /^commit$/i.test(sql)).length, 0);
 });
 
-test('same request key rejects a materially different payload and exact replay returns canonical active memberships', async () => {
-  const members = [{ id: '101', project_id: '77', user_id: '20', membership_type: 'creator', membership_status: 'active', created_by: '10' }];
+test('same request key rejects a materially different payload and exact replay returns canonical pending invitations', async () => {
+  const members = [{ id: '101', project_id: '77', user_id: '20', membership_type: 'invitation', membership_status: 'pending', created_by: '10' }];
   let storedFingerprint = '';
   let attempts = 0;
   const { service } = loadProjects(async (sql, values) => {
@@ -112,7 +112,7 @@ test('same request key rejects a materially different payload and exact replay r
     }
     if (/insert into project_memberships/i.test(sql)) return { rows: members };
     if (/from projects p/i.test(sql) && /creation_request_key/i.test(sql)) return { rows: [{ id: '77', creation_payload_fingerprint: storedFingerprint }] };
-    if (/from project_memberships/i.test(sql) && /membership_type='creator'/i) return { rows: members };
+    if (/from project_memberships/i.test(sql) && /user_id=any/i) return { rows: members };
     throw new Error(`Unexpected query: ${sql}`);
   });
 
@@ -125,7 +125,7 @@ test('same request key rejects a materially different payload and exact replay r
   );
 });
 
-test('client creation UI truthfully selects co-formers and scopes idempotency keys to a stable payload fingerprint', () => {
+test('client creation UI truthfully selects invitees and scopes idempotency keys to a stable payload fingerprint', () => {
   assert.match(clientSource, /selectedEngineerIds/);
   assert.match(clientSource, /type="checkbox"/);
   assert.match(clientSource, /engineerIds:\s*sortedEngineerIds/);
@@ -133,5 +133,6 @@ test('client creation UI truthfully selects co-formers and scopes idempotency ke
   assert.match(clientSource, /JSON\.stringify/);
   assert.match(clientSource, /fingerprint[\s\S]*crypto\.randomUUID\(\)/);
   assert.match(clientSource, /sort\(\)/, 'selection order must not change the request identity');
-  assert.match(clientSource, /Form project team|Create with engineers/i);
+  assert.match(clientSource, /Invite engineers/i);
+  assert.match(clientSource, /pending invitations/i);
 });

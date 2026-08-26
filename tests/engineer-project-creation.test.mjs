@@ -68,9 +68,9 @@ test('approved-client discovery remains engineer-only', async () => {
   await assert.rejects(service.listAvailableClients(client), (error) => error?.status === 403);
 });
 
-test('engineer creation uses one transaction to create a client-owned project and ACTIVE creator membership', async () => {
+test('engineer creation uses one transaction to create a client-owned project and pending proposal request', async () => {
   const project = { id: '99', client_id: '10', title: 'Trace model', description: 'Build it', status: 'draft' };
-  const membership = { id: '101', project_id: '99', user_id: '20', membership_type: 'creator', membership_status: 'active', created_by: '20' };
+  const membership = { id: '101', project_id: '99', user_id: '20', membership_type: 'request', membership_status: 'pending', created_by: '20' };
   const { service, calls } = loadProjects(async (sql, values) => {
     if (/^begin$|^commit$|^rollback$/i.test(sql)) return { rows: [] };
     if (/insert into projects/i.test(sql)) {
@@ -83,19 +83,19 @@ test('engineer creation uses one transaction to create a client-owned project an
       return { rows: [project] };
     }
     if (/insert into project_memberships/i.test(sql)) {
-      assert.match(sql, /'creator','active'/i);
+      assert.match(sql, /'request','pending'/i);
       assert.deepEqual(Array.from(values), ['99', '20']);
       return { rows: [membership] };
     }
     if (/from projects p/i.test(sql) && /creation_request_key/i.test(sql)) return { rows: [project] };
-    if (/from project_memberships/i.test(sql) && /membership_type='creator'/i) return { rows: [membership] };
+    if (/from project_memberships/i.test(sql) && /user_id=any/i) return { rows: [membership] };
     throw new Error(`Unexpected query: ${sql}`);
   });
 
   const result = await service.createProject(engineer, { clientId: '10', title: ' Trace model ', description: ' Build it ', status: 'open', requestKey });
   const { creation_payload_fingerprint: _fingerprint, ...publicProject } = project;
   assert.deepEqual(JSON.parse(JSON.stringify(result)), { ...publicProject, memberships: [membership], membership });
-  assert.equal(result.id, '99', 'the new accessible dashboard ID must be returned immediately');
+  assert.equal(result.id, '99', 'the proposal ID must be returned for pending-state display');
   assert.equal(calls.filter(({ sql }) => /^begin$/i.test(sql)).length, 1);
   assert.equal(calls.filter(({ sql }) => /^commit$/i.test(sql)).length, 1);
   assert.equal(calls.filter(({ sql }) => /^rollback$/i.test(sql)).length, 0);
@@ -129,22 +129,22 @@ test('membership insertion failure rolls back and preserves the primary error', 
   assert.ok(calls.some(({ sql }) => /^rollback$/i.test(sql)));
 });
 
-test('ACTIVE creating engineer can immediately read the returned project workspace', async () => {
+test('pending creating engineer cannot read the returned project workspace', async () => {
   const project = { id: '99', client_id: '10', title: 'New project', description: '', status: 'draft' };
   const { service } = loadProjects(async (sql) => {
     assert.match(sql, /membership_status='active'/i);
-    if (/select distinct p\.id/i.test(sql)) return { rows: [project] };
+    if (/select distinct p\.id/i.test(sql)) return { rows: [] };
     throw new Error(`Unexpected query: ${sql}`);
   });
-  assert.deepEqual(await service.getProject(engineer, '99'), project);
+  await assert.rejects(service.getProject(engineer, '99'), (error) => error?.status === 404);
 });
 
-test('project POST returns the immediately usable project ID in its 201 body', async () => {
-  const route = loadRoute({ id: '99', membership: { membership_status: 'active' } });
+test('project POST returns the pending proposal in its 201 body', async () => {
+  const route = loadRoute({ id: '99', membership: { membership_status: 'pending' } });
   const response = await route.POST({});
   assert.equal(response.status, 201);
   assert.equal(response.value.project.id, '99');
-  assert.equal(response.value.project.membership.membership_status, 'active');
+  assert.equal(response.value.project.membership.membership_status, 'pending');
 });
 
 test('creation fails closed before database access when the request key is missing or malformed', async () => {
@@ -178,12 +178,12 @@ test('client creation uses durable request-key conflict handling and transaction
   assert.equal(calls.filter(({ sql }) => /creation_request_key/i.test(sql) && /from projects p/i.test(sql)).length, 2);
 });
 
-test('creation UI says Create project, never proposal language, and navigates to returned workspace', () => {
+test('engineer creation UI says project proposal and does not navigate before approval', () => {
   const ui = readFileSync(new URL('app/projects/ProjectsClient.tsx', root), 'utf8');
   assert.match(ui, /useRouter/);
-  assert.match(ui, /router\.push\(`\/projects\/\$\{data\.project\.id\}`\)/);
-  assert.match(ui, /Create project/);
-  assert.doesNotMatch(ui, /propos(?:e|al|ing)/i);
+  assert.match(ui, /Project proposal/);
+  assert.match(ui, /accountType === 'client'[\s\S]*router\.push\(`\/projects\/\$\{data\.project\.id\}`\)/);
+  assert.match(ui, /await load\(\)/);
   assert.match(ui, /\/api\/clients/);
   assert.match(ui, /Request to join/, 'joining existing projects remains available');
   assert.match(ui, /crypto\.randomUUID\(\)/, 'the browser must generate the request UUID');
