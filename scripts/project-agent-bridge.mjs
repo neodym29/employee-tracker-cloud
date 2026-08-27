@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const LIMITS = Object.freeze({ body: 1024 * 1024, output: 1024 * 1024, stderr: 64 * 1024, actions: 5, concurrency: 2, timeoutMs: 45_000 });
+export const LIMITS = Object.freeze({ body: 1024 * 1024, output: 1024 * 1024, stderr: 64 * 1024, actions: 5, concurrency: 2, timeoutMs: 180_000 });
 const ACTION_NAMES = new Set(['create_file', 'update_file', 'rename_file', 'delete_file']);
 const CODEX_BIN = process.env.CODEX_BIN || '/home/jerry/.npm-global/bin/codex';
 const fileIdSchema = { type: 'string', pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$' };

@@ -7,7 +7,7 @@ const url = (path) => new URL(`../${path}`, import.meta.url);
 const read = (path) => readFile(url(path), 'utf8');
 
 test('public header and role signup expose the new account journey', async () => {
-  const [layout, signup] = await Promise.all([read('app/layout.tsx'), read('app/signup/page.tsx')]);
+  const [layout, signup, logout] = await Promise.all([read('app/layout.tsx'), read('app/signup/page.tsx'), read('app/api/logout/route.ts')]);
   assert.match(layout, /href="\/signup"[^>]*>Sign up/);
   assert.match(layout, /currentSession/);
   assert.match(signup, /Client/);
@@ -18,6 +18,8 @@ test('public header and role signup expose the new account journey', async () =>
   assert.match(signup, /response\.status\s*===\s*409/, 'duplicate signup should get a dedicated safe UI path');
   assert.match(signup, /An account already exists for this email\. Sign in instead\./);
   assert.match(signup, /href="\/login"[^>]*>Sign in/);
+  assert.match(layout, /action="\/api\/logout\?next=\/login"[\s\S]*>Switch account</, 'authenticated users need one-click access to sign in as another account');
+  assert.match(logout, /next\s*===\s*['"]\/login['"]/, 'logout redirect must be allowlisted');
   assert.doesNotMatch(signup, /company and first admin|Employee signup/i);
 });
 

@@ -22,6 +22,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   {session.account_type === 'admin' && <ActiveNavLink href="/admin/approve">Approvals</ActiveNavLink>}
                   {session.account_type !== 'admin' && <ActiveNavLink href="/projects">Projects</ActiveNavLink>}
                   {session.role === 'admin' && <ActiveNavLink href="/dashboard">Files</ActiveNavLink>}
+                  <form className="inlineForm" action="/api/logout?next=/login" method="post"><button className="navButton" type="submit">Switch account</button></form>
                   <form className="inlineForm" action="/api/logout" method="post"><button className="navButton" type="submit">Sign out</button></form>
                 </>
               ) : (

@@ -3,5 +3,7 @@ import { clearSessionCookie } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
   await clearSessionCookie();
-  return NextResponse.redirect(new URL('/', req.url), 303);
+  const next = req.nextUrl.searchParams.get('next');
+  const destination = next === '/login' ? '/login' : '/';
+  return NextResponse.redirect(new URL(destination, req.url), 303);
 }

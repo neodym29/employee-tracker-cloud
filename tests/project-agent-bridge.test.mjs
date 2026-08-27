@@ -138,6 +138,10 @@ test('accepts only safe, bounded real-file action arguments', async () => {
   }
 });
 
+test('requires a long production deadline for project prompts', () => {
+  assert.equal(LIMITS.timeoutMs, 180_000);
+});
+
 test('requires a high-entropy-sized startup token', () => {
   assert.throws(() => createBridge({ token: 'short' }), /32-4096/);
 });

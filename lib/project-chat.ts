@@ -16,6 +16,8 @@ export const MAX_ACTIONS = 5;
 const MAX_CONCURRENCY = 2;
 const MAX_WAITERS = 16;
 const MAX_CONTEXT_ITEMS = 50;
+const BACKEND_TIMEOUT_MS = 180_000;
+const BACKEND_ATTEMPTS = 2;
 export const MAX_BACKEND_REQUEST_BYTES = 768 * 1024;
 export const MAX_BACKEND_BYTES = 1024 * 1024;
 const ACTION_INPUT_MAX_BYTES = 300 * 1024;
@@ -213,15 +215,27 @@ export async function readBoundedResponse(response: Pick<Response, 'body'>, cont
 async function callBackend(messages: BackendMessage[]) {
   const config = backendConfig();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30_000);
+  const timer = setTimeout(() => controller.abort(), BACKEND_TIMEOUT_MS);
   timer.unref();
   let release: undefined | (() => void);
   try {
     release = await acquireBackendSlot(controller.signal);
     const body = backendRequestBody(messages);
     if (Buffer.byteLength(body, 'utf8') > MAX_BACKEND_REQUEST_BYTES) throw new ProjectServiceError('Project context is too large', 413, 'context_too_large');
-    const response = await fetch(config.url, { method: 'POST', headers: { authorization: `Bearer ${config.token}`, 'content-type': 'application/json', accept: 'application/json' }, body, signal: controller.signal });
-    if (!response.ok) { controller.abort(); throw new ProjectServiceError('Chat backend request failed', 502, 'chat_backend_error'); }
+    let response: Response | undefined;
+    for (let attempt = 0; attempt < BACKEND_ATTEMPTS; attempt += 1) {
+      try {
+        response = await fetch(config.url, { method: 'POST', headers: { authorization: `Bearer ${config.token}`, 'content-type': 'application/json', accept: 'application/json' }, body, signal: controller.signal });
+      } catch (error) {
+        if (controller.signal.aborted || attempt === BACKEND_ATTEMPTS - 1) throw error;
+        continue;
+      }
+      if (response.ok) break;
+      const retryable = response.status >= 500 && attempt < BACKEND_ATTEMPTS - 1;
+      await response.body?.cancel().catch(() => undefined);
+      if (!retryable) throw new ProjectServiceError('Chat backend request failed', 502, 'chat_backend_error');
+    }
+    if (!response?.ok) throw new ProjectServiceError('Chat backend request failed', 502, 'chat_backend_error');
     const raw = await readBoundedResponse(response, controller);
     let parsed: unknown;
     try { parsed = JSON.parse(raw); } catch { throw new ProjectServiceError('Chat backend returned invalid JSON', 502, 'invalid_backend_response'); }
