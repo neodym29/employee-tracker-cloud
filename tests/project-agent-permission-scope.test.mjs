@@ -73,6 +73,14 @@ function loadChat(query, fetchImpl = async () => new Response(
   return { service: module.exports, calls };
 }
 
+test('project identity questions use only the authoritative description', () => {
+  const { service } = loadChat(async () => ({ rows: [] }));
+  const project = { title: 'claim structuring', description: 'claim formatting according to style of tom' };
+  assert.equal(service.answerProjectPurposeQuestion(project, 'what is this project?'), 'This project is about claim formatting according to style of tom.');
+  assert.equal(service.answerProjectPurposeQuestion(project, "What's this project about?"), 'This project is about claim formatting according to style of tom.');
+  assert.equal(service.answerProjectPurposeQuestion(project, 'Update the claims document'), null, 'substantive work must still use the project agent');
+});
+
 test('pending actions are private to the member whose chat proposed them', async () => {
   const pending = { id: '7', action_type: 'update_file', input: {}, status: 'pending', actor_user_id: actor.id };
   const { service, calls } = loadChat(async (sql, values) => {
