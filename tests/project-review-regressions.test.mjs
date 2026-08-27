@@ -58,6 +58,20 @@ test('agent submit is single-flight, draft-safe, keyboard accessible, and follow
   assert.match(ui, /useEffect\(\(\)\s*=>[\s\S]*conversationEndRef[\s\S]*\[messages,\s*actions,\s*receipts\]/);
 });
 
+test('agent work and file mutations expose visible accessible progress', () => {
+  const [ui, css] = [read('app/projects/[projectId]/WorkspaceClient.tsx'), read('app/globals.css')];
+  assert.match(ui, /busy\s*===\s*'agent'[\s\S]*agentWorking[\s\S]*Project agent is working/, 'the conversation must show an immediate agent working bubble');
+  assert.match(ui, /className="typingDots"[\s\S]*aria-hidden="true"/, 'the working bubble needs a familiar visible typing treatment');
+  assert.match(ui, /const\s+fileActivity\s*=\s*busy\s*===\s*'agent'[\s\S]*Updating files/, 'file activity must distinguish agent review from confirmed mutation');
+  assert.match(ui, /aria-busy=\{Boolean\(fileActivity\)\}/, 'the files panel must expose busy state semantically');
+  assert.match(ui, /fileLoadingState[\s\S]*loadingSpinner[\s\S]*fileActivity/, 'the files panel must show a visible loading indicator and status');
+  assert.match(ui, /`confirm:\$\{action\.id\}`/, 'confirmed changes must own a file-mutation busy state');
+  assert.match(ui, /`cancel:\$\{action\.id\}`/, 'cancellation must remain distinct from file mutation');
+  assert.match(css, /\.typingDots[\s\S]*animation/);
+  assert.match(css, /\.loadingSpinner[\s\S]*animation/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*animation:\s*none/);
+});
+
 test('agent file receipts use a defined success color and distinguish created output', () => {
   const [ui, css] = [read('app/projects/[projectId]/WorkspaceClient.tsx'), read('app/globals.css')];
   assert.match(css, /--green\s*:/);

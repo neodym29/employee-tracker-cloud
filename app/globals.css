@@ -205,6 +205,13 @@ pre { overflow: auto; border-radius: 12px; padding: 16px; color: #e9e9e5; backgr
 .message span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 10px; font-weight: 750; text-transform: uppercase; }
 .message.user span { color: #bbb; }
 .message p { margin: 0; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+.agentWorking { border: 1px solid #dedac8; background: #f8f7f2; }
+.agentWorkingBody { display: flex; align-items: center; gap: 9px; }
+.agentWorking .typingDots { display: inline-flex; align-items: center; gap: 3px; margin: 0; color: inherit; }
+.typingDots i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: typingPulse 1.15s ease-in-out infinite; }
+.typingDots i:nth-child(2) { animation-delay: .16s; }
+.typingDots i:nth-child(3) { animation-delay: .32s; }
+.agentWorkingBody p { color: var(--muted); font-size: 12px; font-weight: 650; }
 .actionList { display: grid; gap: 10px; padding: 0 18px 18px; }
 .actionList h3 { margin: 4px 0; font-size: 14px; }
 .proposedAction { border: 1px solid #ddd8f7; border-radius: 12px; padding: 13px; background: #f8f7fe; }
@@ -255,6 +262,9 @@ button:disabled { cursor: not-allowed; opacity: .55; transform: none; box-shadow
 .fileRailHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 19px 18px; border-bottom: 1px solid var(--line); }
 .fileRailHeader h2 { margin: 3px 0 0; font-size: 18px; }
 .fileRailHeader > span { min-width: 28px; border-radius: 999px; padding: 6px 8px; color: var(--muted); background: #f2f0e8; font-size: 10px; font-weight: 750; text-align: center; }
+.fileRailHeader .fileLoadingState { display: inline-flex; align-items: center; gap: 7px; min-width: 0; white-space: nowrap; }
+.loadingSpinner { width: 12px; height: 12px; flex: 0 0 auto; border: 2px solid #d2cebb; border-top-color: var(--accent); border-radius: 50%; animation: loadingSpin .8s linear infinite; }
+.fileRail[aria-busy="true"] .fileList { opacity: .68; }
 .fileList { display: grid; margin: 0; padding: 7px; list-style: none; }
 .fileList li { min-width: 0; display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 9px; border-radius: 12px; padding: 11px 10px; }
 .fileList li + li { border-top: 1px solid rgba(231,228,215,.75); }
@@ -268,6 +278,12 @@ button:disabled { cursor: not-allowed; opacity: .55; transform: none; box-shadow
 .fileEmpty > div { width: 42px; height: 42px; display: grid; place-items: center; margin-bottom: 12px; border: 1px dashed #cac5ac; border-radius: 13px; font-size: 21px; }
 .fileEmpty strong { color: var(--ink); font-size: 13px; }
 .fileEmpty p { max-width: 210px; margin: 6px 0 0; font-size: 11px; line-height: 1.5; }
+
+@keyframes typingPulse {
+  0%, 60%, 100% { opacity: .28; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+}
+@keyframes loadingSpin { to { transform: rotate(360deg); } }
 
 @media (max-width: 900px) {
   .heroSimple { grid-template-columns: 1fr; gap: 42px; }

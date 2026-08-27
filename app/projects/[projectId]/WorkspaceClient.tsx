@@ -116,7 +116,7 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
   }
 
   async function decideAction(action: AgentAction, decision: 'confirm' | 'cancel') {
-    setBusy(action.id);
+    setBusy(`${decision}:${action.id}`);
     setError('');
     try {
       const data = await api(`${base}/agent-actions/${action.id}/${decision}`, { method: 'POST' });
@@ -125,7 +125,7 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
         const receipt = receiptFor(data.action);
         if (receipt) setReceipts((current) => [...current, receipt]);
       }
-      await loadFiles();
+      if (decision === 'confirm') await loadFiles();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'The change could not be completed.');
     } finally { setBusy(''); }
@@ -164,6 +164,7 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
   }
 
   if (!project) return <section className="card"><p className="muted">Loading workspace...</p>{error && <p className="errorBanner" role="alert">{error}</p>}</section>;
+  const fileActivity = busy === 'agent' ? 'Agent reviewing files…' : busy.startsWith('confirm:') ? 'Updating files…' : '';
 
   return <div className="workspaceShell agentWorkspace">
     <a className="backLink" href="/projects">← Back to projects</a>
@@ -214,16 +215,19 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
           {messages.length ? messages.map((message) => <article className={`message ${message.role}`} key={message.id}>
             <span>{message.role === 'assistant' ? 'Project agent' : 'You'}</span><p>{message.body}</p>
           </article>) : <div className="conversationEmpty"><strong>What should we accomplish?</strong><p>Give the agent an outcome. It will work from authorized project data and keep its generated documents current.</p></div>}
+          {busy === 'agent' && <article className="message assistant agentWorking" role="status" aria-label="Project agent is working">
+            <span>Project agent</span><div className="agentWorkingBody"><span className="typingDots" aria-hidden="true"><i /><i /><i /></span><p>Project agent is working…</p></div>
+          </article>}
           {receipts.map((receipt) => <article className="fileReceipt" key={receipt.id}><span aria-hidden="true">✓</span><div><strong>{receipt.label}</strong><p>{receipt.detail}</p></div></article>)}
           <div ref={conversationEndRef} aria-hidden="true" />
         </div>
 
         {actions.length > 0 && <section className="actionList" aria-labelledby="pending-changes-title">
           <h3 id="pending-changes-title">Pending changes</h3>
-          {actions.map((action) => <article className="proposedAction" key={action.id}>
+          {actions.map((action) => { const actionBusy = busy === `confirm:${action.id}` || busy === `cancel:${action.id}`; return <article className="proposedAction" key={action.id}>
             <div><span className="changeKind">Agent proposal</span><strong>{action.action_type === 'update_file' ? 'Update file' : action.action_type === 'rename_file' ? 'Rename file' : 'Delete file'}</strong><p>{describeAction(action)}</p></div>
-            <div className="rowActions"><button disabled={busy === action.id} onClick={() => decideAction(action, 'confirm')}>{busy === action.id ? 'Working…' : 'Confirm'}</button><button disabled={busy === action.id} className="secondaryButton" onClick={() => decideAction(action, 'cancel')}>Cancel</button></div>
-          </article>)}
+            <div className="rowActions"><button disabled={actionBusy} onClick={() => decideAction(action, 'confirm')}>{busy === `confirm:${action.id}` ? 'Updating…' : 'Confirm'}</button><button disabled={actionBusy} className="secondaryButton" onClick={() => decideAction(action, 'cancel')}>{busy === `cancel:${action.id}` ? 'Canceling…' : 'Cancel'}</button></div>
+          </article>})}
         </section>}
 
         <form className="chatForm agentComposer" onSubmit={sendCommand} aria-busy={busy === 'agent'}>
@@ -234,8 +238,8 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
         </form>
       </section>
 
-      <aside className="fileRail dashboardPanel" aria-labelledby="generated-files-title">
-        <div className="fileRailHeader"><div><span className="sectionLabel">Agent output</span><h2 id="generated-files-title">Agent documents</h2></div><span>{files.length}</span></div>
+      <aside className="fileRail dashboardPanel" aria-labelledby="generated-files-title" aria-busy={Boolean(fileActivity)}>
+        <div className="fileRailHeader"><div><span className="sectionLabel">Agent output</span><h2 id="generated-files-title">Agent documents</h2></div>{fileActivity ? <span className="fileLoadingState" role="status"><span className="loadingSpinner" aria-hidden="true" />{fileActivity}</span> : <span>{files.length}</span>}</div>
         {files.length ? <ul className="fileList">{files.map((file) => <li key={file.file_id}>
           <div className="fileIcon" aria-hidden="true">↗</div>
           <div className="fileInfo"><strong title={file.path}>{file.path}</strong><span>Version {file.version} · {file.media_type} · {formatBytes(file.byte_size)}</span></div>
