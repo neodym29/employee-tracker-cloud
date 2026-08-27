@@ -128,12 +128,12 @@ export async function createProject(session: SessionUser, input: { clientId?: un
   }
   const engineerCreating = session.account_type === 'engineer';
   const ownerId = engineerCreating ? id(input.clientId, 'client id') : session.id;
-  const status = engineerCreating ? 'draft' : String(input.status ?? 'draft');
+  const status = engineerCreating ? 'open' : String(input.status ?? 'draft');
   if (!STATUSES.has(status)) throw new ProjectServiceError('Invalid project status');
   const selectedEngineerIds = creationEngineerIds(input.engineerIds, !engineerCreating);
   const counterpartIds = engineerCreating ? [session.id] : selectedEngineerIds;
   const payloadFingerprint = creationFingerprint({
-    version: 1,
+    version: 2,
     accountType: session.account_type,
     ownerId,
     title,
@@ -151,11 +151,11 @@ export async function createProject(session: SessionUser, input: { clientId?: un
     const inserted = engineerCreating
       ? await client.query(
           `insert into projects(client_id,title,description,status,approval_status,proposal_kind,creation_requested_by,creation_request_key,creation_payload_fingerprint)
-           select id,$2,$3,$4,'pending','engineer_client',$5,$6::uuid,$7 from app_users
+           select id,$2,$3,'open','approved',null,$4,$5::uuid,$6 from app_users
            where id=$1 and account_type='client' and approval_status='approved'
            on conflict(creation_requested_by,creation_request_key) do nothing
            returning id,client_id,title,description,status,approval_status,created_at,updated_at,creation_payload_fingerprint`,
-          [ownerId, title, description, status, session.id, creationRequestKey, payloadFingerprint],
+          [ownerId, title, description, session.id, creationRequestKey, payloadFingerprint],
         )
       : await client.query(
           `insert into projects(client_id,title,description,status,approval_status,proposal_kind,creation_requested_by,creation_request_key,creation_payload_fingerprint)
@@ -168,7 +168,7 @@ export async function createProject(session: SessionUser, input: { clientId?: un
     if (inserted.rows[0] && engineerCreating) {
       const membershipResult = await client.query(
         `insert into project_memberships(project_id,user_id,membership_type,membership_status,is_project_proposal,created_by)
-         values($1,$2,'request','pending',true,$2)
+         values($1,$2,'creator','active',false,$2)
          returning id,project_id,user_id,membership_type,membership_status,is_project_proposal,created_by,created_at`,
         [inserted.rows[0].id, session.id],
       );
@@ -176,7 +176,7 @@ export async function createProject(session: SessionUser, input: { clientId?: un
     } else if (inserted.rows[0] && selectedEngineerIds.length) {
       const membershipResult = await client.query(
         `insert into project_memberships(project_id,user_id,membership_type,membership_status,is_project_proposal,created_by)
-         select $1,u.id,'invitation','pending',false,$3 from app_users u
+         select $1,u.id,'creator','active',false,$3 from app_users u
           where u.id=any($2::bigint[]) and u.account_type='engineer' and u.approval_status='approved'
          returning id,project_id,user_id,membership_type,membership_status,is_project_proposal,created_by,created_at`,
         [inserted.rows[0].id, selectedEngineerIds, session.id],
@@ -215,11 +215,10 @@ export async function createProject(session: SessionUser, input: { clientId?: un
         const rightId = BigInt(right);
         return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
       });
-      const expectedType = engineerCreating ? 'request' : 'invitation';
       if (
         canonicalIds.length !== counterpartIds.length
         || canonicalIds.some((memberId, index) => memberId !== counterpartIds[index])
-        || memberships.some((membership) => membership.membership_type !== expectedType)
+        || memberships.some((membership) => membership.membership_type !== 'creator' || membership.membership_status !== 'active')
       ) {
         throw new ProjectServiceError('Project counterpart memberships are inconsistent', 409, 'conflict');
       }
@@ -389,8 +388,8 @@ export async function respondToMembership(session: SessionUser, projectId: unkno
   try {
     await client.query('begin');
     const locked = await client.query(
-      `select pm.id,pm.project_id,pm.user_id,pm.membership_type,pm.membership_status,pm.is_project_proposal,pm.created_by,pm.responded_by,pm.responded_at,
-              p.client_id,p.status as project_status,p.approval_status,p.proposal_kind
+      `select pm.id,pm.project_id,pm.user_id,pm.membership_type,pm.membership_status,pm.created_by,pm.responded_by,pm.responded_at,
+              p.client_id,p.status as project_status,p.approval_status
          from project_memberships pm join projects p on p.id=pm.project_id
         where pm.id=$2 and pm.project_id=$1
           and (($4='engineer' and pm.user_id=$3 and pm.membership_type='invitation')
@@ -403,19 +402,11 @@ export async function respondToMembership(session: SessionUser, projectId: unkno
 
     const targetStatus = requestedAction === 'accept' || requestedAction === 'approve' ? 'active'
       : requestedAction === 'decline' ? 'declined' : 'rejected';
-    const isProposal = clientDecision && row.is_project_proposal === true && row.proposal_kind === 'engineer_client';
-
     if (row.membership_status !== 'pending') {
       if (row.membership_status !== targetStatus) {
         throw new ProjectServiceError('Membership already received the opposite decision', 409, 'conflict');
       }
-      if (isProposal) {
-        const expectedApproval = requestedAction === 'approve' ? 'approved' : 'rejected';
-        const rejectedProjectIsArchived = requestedAction !== 'reject' || row.project_status === 'archived';
-        if (row.approval_status !== expectedApproval || !rejectedProjectIsArchived) {
-          throw new ProjectServiceError('Project proposal is in an inconsistent terminal state', 409, 'conflict');
-        }
-      }
+
       await client.query('commit');
       return {
         id: row.id, project_id: row.project_id, user_id: row.user_id,
@@ -424,22 +415,9 @@ export async function respondToMembership(session: SessionUser, projectId: unkno
       };
     }
 
-    let projectApproval = row.approval_status;
-    let projectStatus = row.project_status;
-    if (isProposal) {
-      if (row.approval_status !== 'pending') {
-        throw new ProjectServiceError('Project proposal has already been decided', 409, 'conflict');
-      }
-      projectApproval = requestedAction === 'approve' ? 'approved' : 'rejected';
-      projectStatus = requestedAction === 'approve' ? 'open' : 'archived';
-      const projectTransition = await client.query(
-        `update projects set approval_status=$3,status=$4,updated_at=now()
-          where id=$1 and client_id=$2 and approval_status='pending' and proposal_kind='engineer_client'
-          returning approval_status,status`,
-        [project, session.id, projectApproval, projectStatus],
-      );
-      if (!projectTransition.rows[0]) throw new ProjectServiceError('Project proposal has already been decided', 409, 'conflict');
-    } else if (clientDecision && row.approval_status !== 'approved') {
+    const projectApproval = row.approval_status;
+    const projectStatus = row.project_status;
+    if (clientDecision && row.approval_status !== 'approved') {
       throw new ProjectServiceError('Membership request is not attached to an approved project', 409, 'conflict');
     }
 

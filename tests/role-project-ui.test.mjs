@@ -61,15 +61,14 @@ test('role-aware projects matching UI supports client and engineer flows', async
   const [page, client] = await Promise.all([read('app/projects/page.tsx'), read('app/projects/ProjectsClient.tsx')]);
   assert.match(page, /requireApprovedSession/);
   assert.match(client, /Create project/);
-  assert.match(client, /Platform Admins approve accounts; project clients and engineers approve collaboration\./);
+  assert.match(client, /Platform Admins approve accounts; project owners decide later collaboration requests\./);
   assert.match(client, /Available engineers/);
   assert.match(client, /Invite/);
   assert.match(client, /Open projects/);
   assert.match(client, /Request to join/);
-  assert.match(client, /Awaiting client approval/);
   assert.match(client, /Join request sent/);
-  assert.match(client, /project\.approval_status === 'pending'/, 'proposal wording must be driven by project consent state');
-  assert.doesNotMatch(client, />Request sent</, 'generic request wording is ambiguous for engineer-created proposals');
+  assert.match(client, /router\.push\(`\/projects\/\$\{data\.project\.id\}`\)/);
+  assert.doesNotMatch(client, /project proposal|awaiting client approval|pending project proposals|rejected project proposals/i);
   assert.match(client, /Accept/);
   assert.match(client, /Decline/);
 });

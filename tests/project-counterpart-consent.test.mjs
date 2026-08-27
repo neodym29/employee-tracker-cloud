@@ -36,93 +36,92 @@ function loadProjects(query) {
   return { service: module.exports, calls };
 }
 
-test('client formation creates pending invitations, never active co-former memberships', async () => {
+test('client formation makes every selected approved engineer an active creator atomically', async () => {
   const project = { id: '77', client_id: '10', title: 'Formation', description: '', status: 'open', approval_status: 'approved', proposal_kind: null, creation_payload_fingerprint: '' };
-  const invitations = [
-    { id: '101', project_id: '77', user_id: '20', membership_type: 'invitation', membership_status: 'pending', is_project_proposal: false, created_by: '10' },
-    { id: '102', project_id: '77', user_id: '21', membership_type: 'invitation', membership_status: 'pending', is_project_proposal: false, created_by: '10' },
+  const creators = [
+    { id: '101', project_id: '77', user_id: '20', membership_type: 'creator', membership_status: 'active', is_project_proposal: false, created_by: '10' },
+    { id: '102', project_id: '77', user_id: '21', membership_type: 'creator', membership_status: 'active', is_project_proposal: false, created_by: '10' },
   ];
-  let accepted = false;
-  const { service } = loadProjects(async (sql, values) => {
+  const { service, calls } = loadProjects(async (sql, values) => {
     if (/^(begin|commit)$/i.test(sql)) return { rows: [] };
     if (/insert into projects/i.test(sql)) { project.creation_payload_fingerprint = values.at(-1); return { rows: [project] }; }
     if (/insert into project_memberships/i.test(sql)) {
-      assert.match(sql, /'invitation','pending'/i);
-      assert.doesNotMatch(sql, /'creator','active'/i);
+      assert.match(sql, /'creator','active'/i);
+      assert.doesNotMatch(sql, /'invitation','pending'/i);
       assert.match(sql, /account_type='engineer'[\s\S]*approval_status='approved'/i);
-      return { rows: invitations };
+      return { rows: creators };
     }
     if (/from projects p/i.test(sql) && /creation_request_key/i.test(sql)) return { rows: [project] };
-    if (/from project_memberships/i.test(sql)) return { rows: invitations };
-    if (/select distinct p\.id/i.test(sql)) {
-      assert.match(sql, /membership_status='active'/i);
-      return { rows: accepted ? [project] : [] };
-    }
-    if (/for update of pm,p/i.test(sql)) {
-      if (values[0] !== '77' || values[1] !== '101' || values[2] !== '20') return { rows: [] };
-      return { rows: [{ ...invitations[0], client_id: '10', project_status: 'open', approval_status: 'approved', proposal_kind: null, creation_requested_by: '10' }] };
-    }
-    if (/update project_memberships set/i.test(sql)) {
-      accepted = true;
-      return { rows: [{ ...invitations[0], membership_status: 'active' }] };
-    }
+    if (/from project_memberships/i.test(sql)) return { rows: creators };
     throw new Error(`Unexpected query: ${sql}`);
   });
   const result = await service.createProject(client, { title: 'Formation', status: 'open', engineerIds: ['20', '21'], requestKey });
-  assert.deepEqual(plain(result.memberships), invitations);
-  await assert.rejects(service.getProject(engineer, '77'), (error) => error?.status === 404);
-  await service.respondToMembership(engineer, '77', '101', 'accept');
-  assert.deepEqual(await service.getProject(engineer, '77'), project);
+  assert.deepEqual(plain(result.memberships), creators);
+  assert.equal(calls.filter(({ sql }) => /^commit$/i.test(sql)).length, 1);
+  assert.equal(calls.filter(({ sql }) => /^rollback$/i.test(sql)).length, 0);
 });
 
-test('engineer formation creates a pending request and cannot access workspace until owning client approves it', async () => {
-  const project = { id: '99', client_id: '10', title: 'Proposal', description: '', status: 'draft', approval_status: 'pending', proposal_kind: 'engineer_client', creation_payload_fingerprint: '' };
-  const membership = { id: '103', project_id: '99', user_id: '20', membership_type: 'request', membership_status: 'pending', is_project_proposal: true, created_by: '20' };
-  let approved = false;
+test('engineer formation immediately creates an approved open client-owned project and active creator membership', async () => {
+  const project = { id: '99', client_id: '10', title: 'Immediate project', description: '', status: 'open', approval_status: 'approved', proposal_kind: null, creation_payload_fingerprint: '' };
+  const creator = { id: '103', project_id: '99', user_id: '20', membership_type: 'creator', membership_status: 'active', is_project_proposal: false, created_by: '20' };
   const { service } = loadProjects(async (sql, values) => {
     if (/^(begin|commit)$/i.test(sql)) return { rows: [] };
-    if (/insert into projects/i.test(sql)) { project.creation_payload_fingerprint = values.at(-1); return { rows: [project] }; }
+    if (/insert into projects/i.test(sql)) {
+      assert.match(sql, /select id,[\s\S]*'open','approved',null/i);
+      assert.match(sql, /account_type='client'[\s\S]*approval_status='approved'/i);
+      project.creation_payload_fingerprint = values.at(-1);
+      return { rows: [project] };
+    }
     if (/insert into project_memberships/i.test(sql)) {
-      assert.match(sql, /'request','pending'/i);
-      assert.doesNotMatch(sql, /'creator','active'/i);
-      return { rows: [membership] };
+      assert.match(sql, /'creator','active',false/i);
+      assert.doesNotMatch(sql, /'request','pending'/i);
+      return { rows: [creator] };
     }
     if (/from projects p/i.test(sql) && /creation_request_key/i.test(sql)) return { rows: [project] };
-    if (/from project_memberships/i.test(sql) && !/for update of pm,p/i.test(sql)) return { rows: [{ ...membership, membership_status: approved ? 'active' : 'pending' }] };
-    if (/select distinct p\.id/i.test(sql)) {
-      assert.match(sql, /membership_status='active'/i);
-      return { rows: approved ? [project] : [] };
-    }
-    if (/for update of pm,p/i.test(sql)) {
-      if (values[2] !== '10') return { rows: [] };
-      return { rows: [{ ...membership, client_id: '10', project_status: project.status, approval_status: project.approval_status, proposal_kind: project.proposal_kind, creation_requested_by: '20' }] };
-    }
-    if (/update projects set approval_status/i.test(sql)) {
-      project.approval_status = values[2]; project.status = values[3];
-      return { rows: [{ approval_status: project.approval_status, status: project.status }] };
-    }
-    if (/update project_memberships set/i.test(sql)) {
-      approved = true;
-      return { rows: [{ ...membership, membership_status: 'active' }] };
-    }
+    if (/from project_memberships/i.test(sql)) return { rows: [creator] };
+    if (/select distinct p\.id/i.test(sql)) return { rows: [project] };
     throw new Error(`Unexpected query: ${sql}`);
   });
 
-  const created = await service.createProject(engineer, { clientId: '10', title: 'Proposal', requestKey });
-  assert.equal(created.membership.membership_status, 'pending');
-  await assert.rejects(service.getProject(engineer, '99'), (error) => error?.status === 404);
-  await assert.rejects(service.respondToMembership({ ...client, id: '11' }, '99', '103', 'approve'), (error) => error?.status === 404);
-  await service.respondToMembership(client, '99', '103', 'approve');
+  const created = await service.createProject(engineer, { clientId: '10', title: 'Immediate project', requestKey });
+  assert.equal(created.status, 'open');
+  assert.equal(created.approval_status, 'approved');
+  assert.equal(created.membership.membership_type, 'creator');
+  assert.equal(created.membership.membership_status, 'active');
   assert.deepEqual(await service.getProject(engineer, '99'), project);
 });
 
-test('projects UI names engineer creation as a proposal, does not navigate before consent, and exposes client request decisions', () => {
-  assert.match(projectsUi, /Project proposal/);
-  assert.match(projectsUi, /await load\(\)/);
-  assert.match(projectsUi, /accountType\s*===\s*'client'[\s\S]*router\.push/);
-  assert.doesNotMatch(projectsUi, /active workspace opens immediately after creation/i);
-  assert.match(projectsUi, /\/requests/);
-  assert.match(projectsUi, /decideMembership\(project\.id, membership\.id, 'approve'\)/);
-  assert.match(projectsUi, /decideMembership\(project\.id, membership\.id, 'reject'\)/);
-  assert.match(projectsUi, /Platform Admins approve accounts; project clients and engineers approve collaboration\./);
+test('invalid counterpart selection rolls back all immediate formation writes', async () => {
+  const { service, calls } = loadProjects(async (sql) => {
+    if (/^begin$|^rollback$/i.test(sql)) return { rows: [] };
+    if (/insert into projects/i.test(sql)) return { rows: [{ id: '77', creation_payload_fingerprint: 'a'.repeat(64) }] };
+    if (/insert into project_memberships/i.test(sql)) return { rows: [{ user_id: '20' }] };
+    throw new Error(`Unexpected query: ${sql}`);
+  });
+  await assert.rejects(
+    service.createProject(client, { title: 'Formation', engineerIds: ['20', '404'], requestKey }),
+    (error) => error?.status === 409 && error?.code === 'conflict',
+  );
+  assert.equal(calls.filter(({ sql }) => /^rollback$/i.test(sql)).length, 1);
+  assert.equal(calls.filter(({ sql }) => /^commit$/i.test(sql)).length, 0);
+});
+
+test('later invitations and ordinary open-project join requests remain pending', () => {
+  assert.match(projectSource, /inviteEngineer[\s\S]*'invitation','pending'/i);
+  assert.match(projectSource, /requestMembership[\s\S]*'request','pending'/i);
+  assert.match(projectSource, /respondToMembership/);
+  assert.match(projectsUi, /Request to join/);
+  assert.match(projectsUi, /Accept/);
+  assert.match(projectsUi, /Decline/);
+  assert.match(projectsUi, /Pending join requests/);
+});
+
+test('formation UI navigates both roles directly and contains no obsolete proposal approval copy or sections', () => {
+  assert.match(projectsUi, /router\.push\(`\/projects\/\$\{data\.project\.id\}`\)/);
+  assert.doesNotMatch(projectsUi, /accountType\s*===\s*'client'[\s\S]{0,200}router\.push/);
+  assert.match(projectsUi, /Select an approved client/);
+  assert.match(projectsUi, /Create project/);
+  assert.match(projectsUi, /Start project/);
+  assert.match(projectsUi, /Selected approved engineers join immediately as project creators/i);
+  assert.doesNotMatch(projectsUi, /project proposal|client approval|awaiting client approval|pending project proposals|rejected project proposals/i);
 });

@@ -7,15 +7,6 @@ import ts from 'typescript';
 
 const root = new URL('../', import.meta.url);
 const source = readFileSync(new URL('lib/projects.ts', root), 'utf8');
-const migration = readFileSync(new URL('migrations/010_project_proposal_approval.sql', root), 'utf8');
-const hardeningMigrationUrl = new URL('migrations/011_project_proposal_fail_closed.sql', root);
-const hardeningMigration = existsSync(hardeningMigrationUrl) ? readFileSync(hardeningMigrationUrl, 'utf8') : '';
-const compatibilityMigrationUrl = new URL('migrations/012_project_proposal_membership_compatibility.sql', root);
-const compatibilityMigration = existsSync(compatibilityMigrationUrl) ? readFileSync(compatibilityMigrationUrl, 'utf8') : '';
-const decisionCompatibilityMigrationUrl = new URL('migrations/013_project_proposal_decision_compatibility.sql', root);
-const decisionCompatibilityMigration = existsSync(decisionCompatibilityMigrationUrl) ? readFileSync(decisionCompatibilityMigrationUrl, 'utf8') : '';
-const enforcementMigrationUrl = new URL('migrations/014_project_approval_default_enforcement.sql', root);
-const enforcementMigration = existsSync(enforcementMigrationUrl) ? readFileSync(enforcementMigrationUrl, 'utf8') : '';
 const ensure = readFileSync(new URL('lib/db.ts', root), 'utf8');
 const clientUser = { id: '10', role: 'employee', account_type: 'client' };
 const engineerUser = { id: '20', role: 'employee', account_type: 'engineer' };
@@ -30,11 +21,6 @@ function serviceFor(row) {
         const authorized = (values[3] === 'client' && values[2] === row.client_id)
           || (values[3] === 'engineer' && values[2] === row.user_id);
         return { rows: authorized ? [{ ...row }] : [] };
-      }
-      if (/update projects set approval_status/i.test(sql)) {
-        if (row.approval_status !== 'pending') return { rows: [] };
-        row.approval_status = values[2]; row.project_status = values[3];
-        return { rows: [{ approval_status: row.approval_status, status: row.project_status }] };
       }
       if (/update project_memberships set/i.test(sql)) {
         if (row.membership_status !== 'pending') return { rows: [] };
@@ -59,93 +45,53 @@ function serviceFor(row) {
   return { service: module.exports, calls };
 }
 
-const proposal = () => ({
+const joinRequest = () => ({
   id: '103', project_id: '99', user_id: '20', client_id: '10', created_by: '20',
-  membership_type: 'request', membership_status: 'pending', creation_requested_by: '20',
-  approval_status: 'pending', proposal_kind: 'engineer_client', is_project_proposal: true, project_status: 'draft', responded_at: null,
+  membership_type: 'request', membership_status: 'pending', approval_status: 'approved',
+  project_status: 'open', responded_at: null,
 });
 
-test('proposal decisions atomically transition project and are replay safe', async () => {
-  const row = proposal();
+test('ordinary open-project join decisions remain owner-controlled, replay safe, and never transition the project', async () => {
+  const row = joinRequest();
   const { service, calls } = serviceFor(row);
+  await assert.rejects(service.respondToMembership({ ...clientUser, id: '11' }, '99', '103', 'approve'), (error) => error?.status === 404);
   const first = await service.respondToMembership(clientUser, '99', '103', 'approve');
   assert.equal(first.membership_status, 'active');
-  assert.equal(first.approval_status, 'approved');
-  assert.equal(first.project_status, 'open');
-  const replay = await service.respondToMembership(clientUser, '99', '103', 'approve');
-  assert.equal(replay.membership_status, 'active');
-  row.project_status = 'active';
-  const replayAfterLifecycleChange = await service.respondToMembership(clientUser, '99', '103', 'approve');
-  assert.equal(replayAfterLifecycleChange.membership_status, 'active');
-  assert.equal(replayAfterLifecycleChange.approval_status, 'approved');
+  assert.equal((await service.respondToMembership(clientUser, '99', '103', 'approve')).membership_status, 'active');
   await assert.rejects(service.respondToMembership(clientUser, '99', '103', 'reject'), (error) => error?.status === 409);
-  assert.equal(calls.filter(({ sql }) => /update projects set approval_status/i.test(sql)).length, 1);
-});
-
-test('proposal rejection is terminal, canonical on retry, and cross-client hidden', async () => {
-  const row = proposal();
-  const { service } = serviceFor(row);
-  await assert.rejects(service.respondToMembership({ ...clientUser, id: '11' }, '99', '103', 'reject'), (error) => error?.status === 404);
-  const rejected = await service.respondToMembership(clientUser, '99', '103', 'reject');
-  assert.equal(rejected.approval_status, 'rejected');
-  assert.equal(rejected.project_status, 'archived');
-  assert.equal((await service.respondToMembership(clientUser, '99', '103', 'reject')).membership_status, 'rejected');
-  await assert.rejects(service.respondToMembership(clientUser, '99', '103', 'approve'), (error) => error?.status === 409);
-});
-
-test('ordinary join decisions on an approved engineer-originated project never transition the project', async () => {
-  const row = { ...proposal(), is_project_proposal: false, created_by: '30', creation_requested_by: '20', approval_status: 'approved', project_status: 'open' };
-  const { service, calls } = serviceFor(row);
-  await service.respondToMembership(clientUser, '99', '103', 'approve');
   assert.equal(calls.some(({ sql }) => /update projects set approval_status/i.test(sql)), false);
-  assert.equal(row.project_status, 'open');
 });
 
-test('invitation decline is replay safe and opposite accept conflicts', async () => {
-  const row = { ...proposal(), membership_type: 'invitation', created_by: '10', creation_requested_by: '10', approval_status: 'approved', project_status: 'open' };
+test('later invitation decline remains engineer-controlled and replay safe', async () => {
+  const row = { ...joinRequest(), membership_type: 'invitation', created_by: '10' };
   const { service } = serviceFor(row);
   assert.equal((await service.respondToMembership(engineerUser, '99', '103', 'decline')).membership_status, 'declined');
   assert.equal((await service.respondToMembership(engineerUser, '99', '103', 'decline')).membership_status, 'declined');
   await assert.rejects(service.respondToMembership(engineerUser, '99', '103', 'accept'), (error) => error?.status === 409);
 });
 
-test('authorization is fail closed while reusable schema setup never rewrites legacy collaboration state heuristically', () => {
-  assert.match(source, /approval_status='approved'[\s\S]*client_id=.*membership/i);
-  assert.match(source, /p\.approval_status='approved' and p\.status='open'/i);
-  for (const text of [migration, ensure]) {
-    assert.match(text, /update projects set approval_status='approved' where approval_status is null/i);
-    assert.doesNotMatch(text, /set approval_status='pending',status='draft'/i);
-    assert.doesNotMatch(text, /set membership_type='request',membership_status='pending'/i);
-    assert.doesNotMatch(text, /set membership_type='invitation',membership_status='pending'/i);
-    assert.doesNotMatch(text, /update\s+(?:public\.)?projects[\s\S]{0,300}set approval_status='rejected',status='archived'[\s\S]{0,300}where[\s\S]{0,200}(creation_requested_by|proposal_kind\s+is\s+null)/i);
-    assert.doesNotMatch(text, /update\s+(?:public\.)?project_memberships[\s\S]{0,300}set membership_status='rejected'[\s\S]{0,300}where[\s\S]{0,200}(membership_type='creator'|created_by=user_id)/i);
-  }
-});
-test('schema and every writer require explicit approval state and an explicit proposal discriminator', () => {
-  assert.match(hardeningMigration, /alter table projects alter column approval_status drop default/i);
-  assert.match(compatibilityMigration, /alter table projects alter column approval_status set default 'approved'/i);
-  assert.match(enforcementMigration, /alter table projects alter column approval_status drop default/i);
-  assert.match(hardeningMigration, /add column if not exists proposal_kind text/i);
-  assert.match(compatibilityMigration, /project_memberships\s+add column if not exists is_project_proposal boolean not null default false/i);
-  assert.match(compatibilityMigration, /unique index[\s\S]*where is_project_proposal/i);
-  assert.match(decisionCompatibilityMigration, /create or replace function enforce_project_proposal_membership/i);
-  assert.match(decisionCompatibilityMigration, /new\.membership_status='active'[\s\S]*approval_status='approved'[\s\S]*status='open'/i);
-  assert.match(decisionCompatibilityMigration, /new\.membership_status='rejected'[\s\S]*approval_status='rejected'[\s\S]*status='archived'/i);
-  assert.match(decisionCompatibilityMigration, /before insert or update on (?:public\.)?project_memberships/i);
-  assert.match(hardeningMigration, /proposal_kind[\s\S]*approval_status='pending'[\s\S]*status='draft'/i);
-  assert.match(hardeningMigration, /proposal_kind[\s\S]*approval_status='rejected'[\s\S]*status='archived'/i);
-  assert.match(ensure, /approval_status text not null check/i);
-  assert.doesNotMatch(ensure, /alter table projects alter column approval_status drop default/i);
-  assert.match(ensure, /proposal_kind text/i);
-  assert.match(ensure, /is_project_proposal boolean not null default false/i);
-  assert.match(ensure, /create or replace function enforce_project_proposal_membership/i);
-  assert.match(ensure, /create trigger project_proposal_membership_guard/i);
-  assert.match(source, /insert into projects\(client_id,title,description,status,approval_status,proposal_kind/i);
-  assert.match(source, /insert into project_memberships\(project_id,user_id,membership_type,membership_status,is_project_proposal,created_by\)/i);
+test('immediate formation has no proposal writer or proposal decision state machine', () => {
+  assert.doesNotMatch(source, /'pending','engineer_client'/i);
+  assert.doesNotMatch(source, /'request','pending',true/i);
+  assert.doesNotMatch(source, /row\.is_project_proposal|isProposal|Project proposal has already been decided/i);
+  assert.match(source, /version:\s*2/, 'changed formation semantics must use a new request fingerprint version');
+  assert.match(source, /'approved',null/);
+  assert.match(source, /'creator','active',false/);
 });
 
-test('membership decisions use only the durable proposal discriminator, never legacy actor heuristics', () => {
-  assert.match(source, /coalesce\(pm\.is_project_proposal,false\) as is_project_proposal/i);
-  assert.match(source, /row\.is_project_proposal === true/);
-  assert.doesNotMatch(source, /approval_status='pending'[\s\S]*creation_requested_by=pm\.user_id[\s\S]*pm\.created_by=pm\.user_id[\s\S]*as is_project_proposal/i);
+test('authorization remains fail closed and reusable schema setup contains no data-specific repair', () => {
+  assert.match(source, /membership_status='active'/i);
+  assert.match(source, /approval_status='approved'/i);
+  assert.match(source, /p\.approval_status='approved' and p\.status='open'/i);
+  assert.doesNotMatch(ensure, /where\s+(?:p\.)?id\s*=\s*6\b/i);
+  assert.doesNotMatch(ensure, /set\s+membership_status\s*=\s*'active'[\s\S]*where[\s\S]*(proposal_kind|is_project_proposal)/i);
+});
+
+test('rolling compatibility retains the obsolete proposal trigger until old writers are drained', () => {
+  assert.match(ensure, /create or replace function enforce_project_proposal_membership/i);
+  assert.match(ensure, /create trigger project_proposal_membership_guard/i);
+  assert.doesNotMatch(ensure, /drop function if exists (?:public\.)?enforce_project_proposal_membership/i);
+  assert.doesNotMatch(ensure, /where\s+(?:p\.)?id\s*=\s*6\b/i);
+  assert.equal(existsSync(new URL('migrations/015_retire_project_proposal_workflow.sql', root)), false,
+    'trigger retirement must be a later drain-complete release, not this rolling-compatible writer');
 });
