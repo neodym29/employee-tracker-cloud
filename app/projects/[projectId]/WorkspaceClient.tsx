@@ -222,7 +222,7 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
 
         <form className="chatForm agentComposer" onSubmit={sendCommand} aria-busy={busy === 'agent'}>
           <label htmlFor="agent-command">Command the project agent</label>
-          <textarea id="agent-command" rows={4} maxLength={4000} value={agentCommand} onChange={(event) => setAgentCommand(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} disabled={!agentAvailable || busy === 'agent'} placeholder="Describe the outcome you want…" />
+          <textarea id="agent-command" rows={4} value={agentCommand} onChange={(event) => setAgentCommand(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} disabled={!agentAvailable || busy === 'agent'} placeholder="Describe the outcome you want…" />
           <div className="chatSubmit"><span role="status">{busy === 'agent' ? 'Agent is working…' : 'Enter to send · Shift+Enter for a new line'}</span><button disabled={!agentAvailable || busy === 'agent' || !agentCommand.trim()}>{busy === 'agent' ? 'Working…' : 'Run command'}</button></div>
         </form>
       </section>

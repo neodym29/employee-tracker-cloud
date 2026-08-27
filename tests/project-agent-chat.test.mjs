@@ -23,8 +23,8 @@ assert.match(service, /Boolean\(url\)\s*!==\s*Boolean\(token\)/, 'backend URL/to
 assert.match(service, /NODE_ENV\s*===\s*['"]production['"][\s\S]*protocol\s*!==\s*['"]https:['"]/, 'production backend must require HTTPS');
 assert.match(service, /AbortSignal\.timeout\(30_000\)|setTimeout\([\s\S]*30_000/, 'backend requests must time out');
 assert.match(service, /MAX_CONCURRENCY\s*=\s*2/);
-assert.match(service, /CHAT_MESSAGE_MAX\s*=\s*4000/);
-assert.match(service, /CHAT_ANSWER_MAX\s*=\s*8000/);
+assert.doesNotMatch(service, /CHAT_MESSAGE_MAX|CHAT_ANSWER_MAX/, 'free-form prompts and answers must not have arbitrary character caps');
+assert.doesNotMatch(read('app/projects/[projectId]/WorkspaceClient.tsx'), /<textarea[^>]*maxLength=/, 'project agent textarea must not impose a browser character cap');
 assert.match(service, /CHAT_HISTORY_LIMIT\s*=\s*20/);
 assert.match(service, /MAX_ACTIONS\s*=\s*5/);
 assert.match(service, /create_file[\s\S]*update_file[\s\S]*rename_file[\s\S]*delete_file/);

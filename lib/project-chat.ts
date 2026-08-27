@@ -11,8 +11,6 @@ import {
 import { ensureCanonicalProjectDocuments, loadProjectAgentStructuredData } from './project-agent-documents';
 import { ProjectServiceError, projectAccessSql } from './projects';
 
-export const CHAT_MESSAGE_MAX = 4000;
-export const CHAT_ANSWER_MAX = 8000;
 export const CHAT_HISTORY_LIMIT = 20;
 export const MAX_ACTIONS = 5;
 const MAX_CONCURRENCY = 2;
@@ -63,10 +61,10 @@ function positiveId(value: unknown, field: string) {
   return normalized;
 }
 
-function boundedText(value: unknown, field: string, max: number) {
+function requiredText(value: unknown, field: string) {
   if (typeof value !== 'string') throw new ProjectServiceError(`${field} is required`);
   const normalized = value.trim();
-  if (!normalized || normalized.length > max) throw new ProjectServiceError(`${field} must be between 1 and ${max} characters`);
+  if (!normalized) throw new ProjectServiceError(`${field} is required`);
   return normalized;
 }
 
@@ -177,7 +175,7 @@ export function buildBoundedBackendMessages(project: Record<string, unknown>, fi
   }
   const selectedHistory: BackendMessage[] = [];
   for (const row of historyRows.slice(0, CHAT_HISTORY_LIMIT)) {
-    const item = { role: String(row.role), content: String(row.body).slice(0, CHAT_ANSWER_MAX) };
+    const item = { role: String(row.role), content: String(row.body) };
     const candidateHistory = [item, ...selectedHistory];
     const candidate = [systemMessage(), ...candidateHistory, { role: 'user', content: message }];
     if (backendRequestBytes(candidate) <= MAX_BACKEND_REQUEST_BYTES) {
@@ -230,7 +228,7 @@ async function callBackend(messages: BackendMessage[]) {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new ProjectServiceError('Chat backend returned an invalid response', 502, 'invalid_backend_response');
     const result = parsed as Record<string, unknown>;
     exactKeys(result, ['answer', 'actions'], ['answer', 'actions']);
-    const answer = boundedText(result.answer, 'Answer', CHAT_ANSWER_MAX);
+    const answer = requiredText(result.answer, 'Answer');
     if (!Array.isArray(result.actions) || result.actions.length > MAX_ACTIONS) throw new ProjectServiceError('Chat backend returned invalid actions', 502, 'invalid_backend_response');
     return { answer, actions: result.actions.map(sanitizeAction) };
   } catch (error) {
@@ -307,7 +305,7 @@ export async function executeFileAction(client: PoolClient, project: string, ses
 
 export async function submitProjectChat(session: SessionUser, projectId: unknown, input: Record<string, unknown>) {
   const project = positiveId(projectId, 'project id');
-  const message = boundedText(input.message, 'Message', CHAT_MESSAGE_MAX);
+  const message = requiredText(input.message, 'Message');
   exactKeys(input, ['message'], ['message']);
   const db = await ready();
   // Bootstrap legacy workspaces under the same actor-bound access lock before any

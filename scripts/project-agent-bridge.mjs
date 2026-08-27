@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const LIMITS = Object.freeze({ body: 1024 * 1024, output: 1024 * 1024, stderr: 64 * 1024, answer: 8000, actions: 5, concurrency: 2, timeoutMs: 45_000 });
+export const LIMITS = Object.freeze({ body: 1024 * 1024, output: 1024 * 1024, stderr: 64 * 1024, actions: 5, concurrency: 2, timeoutMs: 45_000 });
 const ACTION_NAMES = new Set(['create_file', 'update_file', 'rename_file', 'delete_file']);
 const CODEX_BIN = process.env.CODEX_BIN || '/home/jerry/.npm-global/bin/codex';
 const fileIdSchema = { type: 'string', pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$' };
@@ -28,7 +28,7 @@ const actionObject = (type, required, properties) => ({
 const responseSchema = {
   $schema: 'http://json-schema.org/draft-07/schema#', type: 'object', additionalProperties: false, required: ['answer', 'actions'],
   properties: {
-    answer: { type: 'string', minLength: 1, maxLength: LIMITS.answer },
+    answer: { type: 'string', minLength: 1 },
     actions: { type: 'array', maxItems: LIMITS.actions, items: { anyOf: [
       actionObject('create_file', ['path', 'mediaType', 'content'], { path: pathSchema, mediaType: mediaTypeSchema, content: contentSchema }),
       actionObject('update_file', ['fileId', 'expectedVersion', 'content'], { fileId: fileIdSchema, expectedVersion: { type: 'integer', minimum: 1 }, content: contentSchema }),
@@ -55,7 +55,7 @@ function authorized(header, token) {
 
 function parseAndValidate(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 2 || !Object.hasOwn(value, 'answer') || !Object.hasOwn(value, 'actions')) throw new Error('invalid response object');
-  if (typeof value.answer !== 'string' || value.answer.trim().length === 0 || value.answer.length > LIMITS.answer) throw new Error('invalid answer');
+  if (typeof value.answer !== 'string' || value.answer.trim().length === 0) throw new Error('invalid answer');
   if (!Array.isArray(value.actions) || value.actions.length > LIMITS.actions) throw new Error('invalid actions');
   for (const action of value.actions) {
     if (!action || typeof action !== 'object' || Array.isArray(action) || Object.keys(action).sort().join(',') !== 'args,type' || !ACTION_NAMES.has(action.type) || !action.args || typeof action.args !== 'object' || Array.isArray(action.args)) throw new Error('invalid action');

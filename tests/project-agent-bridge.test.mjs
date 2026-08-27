@@ -87,6 +87,16 @@ test('caps concurrency at two and rejects excess work', async () => {
   } finally { await close(server); }
 });
 
+test('accepts long free-form answers within the transport envelope', async () => {
+  const longAnswer = 'x'.repeat(100_000);
+  const long = await fixture(async () => ({ answer: longAnswer, actions: [] }));
+  try {
+    const response = await request(long.url);
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).answer.length, longAnswer.length);
+  } finally { await close(long.server); }
+});
+
 test('aborts timed-out backend work and rejects malformed backend output', async () => {
   let aborted = false;
   const { server, url } = await fixture((_messages, { signal }) => new Promise((_resolve, reject) => signal.addEventListener('abort', () => { aborted = true; reject(new Error('aborted')); }, { once: true })), { timeoutMs: 30 });
