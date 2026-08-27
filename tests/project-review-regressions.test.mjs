@@ -60,6 +60,7 @@ test('agent submit is single-flight, draft-safe, keyboard accessible, and follow
 
 test('agent work and file mutations expose visible accessible progress', () => {
   const [ui, css] = [read('app/projects/[projectId]/WorkspaceClient.tsx'), read('app/globals.css')];
+  assert.match(ui, /agentState[\s\S]*busy\s*===\s*'agent'\s*\?\s*'Working'\s*:\s*agentAvailable\s*\?\s*'Ready'/, 'the agent presence label must agree with the in-flight conversation state');
   assert.match(ui, /busy\s*===\s*'agent'[\s\S]*agentWorking[\s\S]*Project agent is working/, 'the conversation must show an immediate agent working bubble');
   assert.match(ui, /className="typingDots"[\s\S]*aria-hidden="true"/, 'the working bubble needs a familiar visible typing treatment');
   assert.match(ui, /const\s+fileActivity\s*=\s*busy\s*===\s*'agent'[\s\S]*Updating files/, 'file activity must distinguish agent review from confirmed mutation');

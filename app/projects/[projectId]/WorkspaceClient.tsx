@@ -199,7 +199,7 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
         <header className="agentHeader">
           <div className="agentMark" aria-hidden="true">✦</div>
           <div><span className="sectionLabel">Working in this project</span><h2 id="project-agent-title">Project agent</h2></div>
-          <span className={`agentState ${agentAvailable ? 'online' : ''}`}>{agentAvailable ? 'Ready' : 'Offline'}</span>
+          <span className={`agentState ${agentAvailable ? 'online' : ''} ${busy === 'agent' ? 'working' : ''}`}>{busy === 'agent' ? 'Working' : agentAvailable ? 'Ready' : 'Offline'}</span>
         </header>
         <p className="agentCapability">I use your prompts and authorized structured project data to create, maintain, and organize project deliverables and canonical agent documents.</p>
 
