@@ -80,7 +80,8 @@ test('project workspace is agent-first, file-aware, and has no manual records or
   assert.match(workspace, /Project agent/);
   assert.match(workspace, /structured project data/i);
   assert.match(workspace, /canonical agent documents/i);
-  assert.match(workspace, /Starter commands/);
+  assert.match(workspace, /Starter prompts/);
+  assert.doesNotMatch(workspace, /Starter commands/);
   assert.match(workspace, /Agent documents/);
   assert.doesNotMatch(workspace, />Generated files</);
   assert.match(workspace, /\$\{base\}\/files/);

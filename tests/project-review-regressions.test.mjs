@@ -38,7 +38,13 @@ test('agent submit is single-flight, draft-safe, keyboard accessible, and follow
   assert.match(ui, /if\s*\(submissionPendingRef\.current\)\s*return/);
   assert.match(ui, /submissionPendingRef\.current\s*=\s*true/);
   assert.match(ui, /finally[\s\S]*submissionPendingRef\.current\s*=\s*false/);
-  assert.match(ui, /setAgentCommand\(\(current\)\s*=>\s*current\s*===\s*text\s*\?\s*''\s*:\s*current\)/, 'a reply must only clear the command that was actually sent');
+  assert.match(ui, /const\s+submittedDraft\s*=\s*agentCommand/);
+  assert.match(ui, /const\s+text\s*=\s*submittedDraft\.trim\(\)/);
+  assert.match(ui, /setAgentCommand\(\(current\)\s*=>\s*current\s*===\s*submittedDraft\s*\?\s*''\s*:\s*current\)/, 'a successful pasted prompt, including surrounding whitespace, must clear while preserving edits made in flight');
+  assert.match(ui, />Message the project agent</);
+  assert.match(ui, /Sending…/);
+  assert.match(ui, /\?\s*'Sending…'\s*:\s*'Send'/);
+  assert.doesNotMatch(ui, />Run command<|>Command the project agent<|>Starter commands</, 'chat UI must use familiar prompt/message terminology');
   assert.match(ui, /textarea[\s\S]*disabled=\{[^}]*agent/i);
   assert.match(ui, /aria-busy=\{[^}]*agent/i);
   assert.match(ui, /shiftKey/, 'Shift+Enter must remain a newline');

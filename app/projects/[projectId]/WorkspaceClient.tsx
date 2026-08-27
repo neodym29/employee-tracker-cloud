@@ -16,7 +16,7 @@ type AgentAction = {
 };
 type FileReceipt = { id: string; label: string; detail: string };
 
-const STARTER_COMMANDS = [
+const STARTER_PROMPTS = [
   'Create a concise project brief from our structured project data.',
   'Organize the current project data into a clear delivery plan.',
   'Update the canonical progress report and project statistics.',
@@ -133,7 +133,8 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
   async function sendCommand(event: React.FormEvent) {
     event.preventDefault();
     if (submissionPendingRef.current) return;
-    const text = agentCommand.trim();
+    const submittedDraft = agentCommand;
+    const text = submittedDraft.trim();
     if (!text) return;
     submissionPendingRef.current = true;
     setBusy('agent');
@@ -145,7 +146,7 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
       setActions((current) => [...current, ...returnedActions.filter((action) => action.status === 'pending')]);
       const created = returnedActions.map(receiptFor).filter((receipt): receipt is FileReceipt => Boolean(receipt));
       if (created.length) setReceipts((current) => [...current, ...created]);
-      setAgentCommand((current) => current === text ? '' : current);
+      setAgentCommand((current) => current === submittedDraft ? '' : current);
       await loadFiles();
     } catch (failure) {
       const message = failure instanceof Error ? failure.message : 'The agent is unavailable.';
@@ -198,9 +199,9 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
 
         {!agentAvailable && <div className="chatUnavailable" role="status"><strong>Agent unavailable</strong><p>The agent has not been configured for this workspace. Existing agent documents remain available.</p></div>}
 
-        {messages.length === 0 && <div className="starterPrompts" aria-label="Starter commands">
-          <strong>Starter commands</strong>
-          <div>{STARTER_COMMANDS.map((command) => <button type="button" key={command} onClick={() => setAgentCommand(command)} disabled={!agentAvailable}>{command}</button>)}</div>
+        {messages.length === 0 && <div className="starterPrompts" aria-label="Starter prompts">
+          <strong>Starter prompts</strong>
+          <div>{STARTER_PROMPTS.map((prompt) => <button type="button" key={prompt} onClick={() => setAgentCommand(prompt)} disabled={!agentAvailable}>{prompt}</button>)}</div>
         </div>}
 
         <div className="messageList agentConversation" aria-live="polite" aria-label="Conversation">
@@ -221,9 +222,9 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
         </section>}
 
         <form className="chatForm agentComposer" onSubmit={sendCommand} aria-busy={busy === 'agent'}>
-          <label htmlFor="agent-command">Command the project agent</label>
+          <label htmlFor="agent-command">Message the project agent</label>
           <textarea id="agent-command" rows={4} value={agentCommand} onChange={(event) => setAgentCommand(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} disabled={!agentAvailable || busy === 'agent'} placeholder="Describe the outcome you want…" />
-          <div className="chatSubmit"><span role="status">{busy === 'agent' ? 'Agent is working…' : 'Enter to send · Shift+Enter for a new line'}</span><button disabled={!agentAvailable || busy === 'agent' || !agentCommand.trim()}>{busy === 'agent' ? 'Working…' : 'Run command'}</button></div>
+          <div className="chatSubmit"><span role="status">{busy === 'agent' ? 'Sending…' : 'Enter to send · Shift+Enter for a new line'}</span><button disabled={!agentAvailable || busy === 'agent' || !agentCommand.trim()}>{busy === 'agent' ? 'Sending…' : 'Send'}</button></div>
         </form>
       </section>
 
