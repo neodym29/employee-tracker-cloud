@@ -26,7 +26,8 @@ assert.ok(existsSync(new URL('../app/login/page.tsx', import.meta.url)), 'login 
 assert.ok(existsSync(new URL('../app/api/login/route.ts', import.meta.url)), 'login API must exist');
 assert.ok(existsSync(new URL('../app/api/logout/route.ts', import.meta.url)), 'logout API must exist');
 
-assert.match(dashboardPage, /requireAdminSession|redirect\('\/login/, 'admin dashboard must require an admin session');
+assert.match(dashboardPage, /requireApprovedSession/, 'universal dashboard must require an approved session');
+assert.match(dashboardPage, /session\.role\s*===\s*'admin'\s*&&\s*session\.account_type\s*===\s*'admin'/, 'files dashboard data must require the platform admin role and account type pair');
 assert.match(approvePage, /requirePlatformAdminSession|requireAdminSession|redirect\('\/login/, 'approval page must require a platform admin session');
 assert.match(db, /resetExistingUserPassword/, 'setup recovery should be able to reset existing employee/admin passwords without raw storage');
 assert.match(bootstrapApi, /reset_user_password/, 'setup bootstrap should expose guarded password reset for approved existing users');
