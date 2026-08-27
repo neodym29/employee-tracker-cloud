@@ -49,6 +49,7 @@ function loadProjects() {
     require(specifier) {
       if (specifier === 'node:crypto') return crypto;
       if (specifier === './db') return { ensureSchema: async () => {}, getPool: () => pool };
+      if (specifier === './project-agent-documents') return { async loadProjectAgentStructuredData() { return { memberRoster: [], projectStatistics: {} }; }, async ensureCanonicalProjectDocuments() {} };
       throw new Error(`Unexpected import: ${specifier}`);
     },
     Buffer,

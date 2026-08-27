@@ -17,9 +17,9 @@ type AgentAction = {
 type FileReceipt = { id: string; label: string; detail: string };
 
 const STARTER_COMMANDS = [
-  'Create a concise project brief from everything we know.',
-  'Organize the current work into a clear delivery plan.',
-  'Review the project files and draft the next deliverable.',
+  'Create a concise project brief from our structured project data.',
+  'Organize the current project data into a clear delivery plan.',
+  'Update the canonical progress report and project statistics.',
 ] as const;
 
 async function api(url: string, options?: RequestInit) {
@@ -194,9 +194,9 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
           <div><span className="sectionLabel">Working in this project</span><h2 id="project-agent-title">Project agent</h2></div>
           <span className={`agentState ${agentAvailable ? 'online' : ''}`}>{agentAvailable ? 'Ready' : 'Offline'}</span>
         </header>
-        <p className="agentCapability">I can inspect project files, create, edit, and organize work, and carry a deliverable from request to finished file.</p>
+        <p className="agentCapability">I use your prompts and authorized structured project data to create, maintain, and organize project deliverables and canonical agent documents.</p>
 
-        {!agentAvailable && <div className="chatUnavailable" role="status"><strong>Agent unavailable</strong><p>The agent has not been configured for this workspace. Existing generated files remain available.</p></div>}
+        {!agentAvailable && <div className="chatUnavailable" role="status"><strong>Agent unavailable</strong><p>The agent has not been configured for this workspace. Existing agent documents remain available.</p></div>}
 
         {messages.length === 0 && <div className="starterPrompts" aria-label="Starter commands">
           <strong>Starter commands</strong>
@@ -207,7 +207,7 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
           <h3 className="srOnly">Conversation</h3>
           {messages.length ? messages.map((message) => <article className={`message ${message.role}`} key={message.id}>
             <span>{message.role === 'assistant' ? 'Project agent' : 'You'}</span><p>{message.body}</p>
-          </article>) : <div className="conversationEmpty"><strong>What should we accomplish?</strong><p>Give the agent an outcome. It will inspect the workspace and do the file work for you.</p></div>}
+          </article>) : <div className="conversationEmpty"><strong>What should we accomplish?</strong><p>Give the agent an outcome. It will work from authorized project data and keep its generated documents current.</p></div>}
           {receipts.map((receipt) => <article className="fileReceipt" key={receipt.id}><span aria-hidden="true">✓</span><div><strong>{receipt.label}</strong><p>{receipt.detail}</p></div></article>)}
           <div ref={conversationEndRef} aria-hidden="true" />
         </div>
@@ -228,12 +228,12 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
       </section>
 
       <aside className="fileRail dashboardPanel" aria-labelledby="generated-files-title">
-        <div className="fileRailHeader"><div><span className="sectionLabel">Agent output</span><h2 id="generated-files-title">Generated files</h2></div><span>{files.length}</span></div>
+        <div className="fileRailHeader"><div><span className="sectionLabel">Agent output</span><h2 id="generated-files-title">Agent documents</h2></div><span>{files.length}</span></div>
         {files.length ? <ul className="fileList">{files.map((file) => <li key={file.file_id}>
           <div className="fileIcon" aria-hidden="true">↗</div>
           <div className="fileInfo"><strong title={file.path}>{file.path}</strong><span>Version {file.version} · {file.media_type} · {formatBytes(file.byte_size)}</span></div>
           <a href={`${base}/files/${file.file_id}`} target="_blank" rel="noreferrer" aria-label={`Open or download ${file.path}`}>Open <span aria-hidden="true">↗</span></a>
-        </li>)}</ul> : <div className="fileEmpty"><div aria-hidden="true">＋</div><strong>No files yet</strong><p>Ask the agent to create the first file for this project.</p></div>}
+        </li>)}</ul> : <div className="fileEmpty"><div aria-hidden="true">✦</div><strong>Preparing agent documents</strong><p>Canonical agent documents are generated automatically from authorized project data.</p></div>}
       </aside>
     </main>
   </div>;

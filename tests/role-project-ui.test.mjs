@@ -78,16 +78,17 @@ test('project workspace is agent-first, file-aware, and has no manual records or
   const workspace = await read('app/projects/[projectId]/WorkspaceClient.tsx');
 
   assert.match(workspace, /Project agent/);
-  assert.match(workspace, /inspect project files/i);
-  assert.match(workspace, /create, edit, and organize/i);
+  assert.match(workspace, /structured project data/i);
+  assert.match(workspace, /canonical agent documents/i);
   assert.match(workspace, /Starter commands/);
-  assert.match(workspace, /Generated files/);
+  assert.match(workspace, /Agent documents/);
+  assert.doesNotMatch(workspace, />Generated files</);
   assert.match(workspace, /\$\{base\}\/files/);
   assert.match(workspace, /\$\{base\}\/files\/\$\{file\.file_id\}/);
   assert.match(workspace, /Version \{file\.version\}/);
   assert.match(workspace, /file\.media_type/);
   assert.match(workspace, /formatBytes\(file\.byte_size\)/);
-  assert.match(workspace, /ask the agent to create/i);
+  assert.doesNotMatch(workspace, /inspect project files|ask the agent to create the first file|provide remaining text/i);
   assert.match(workspace, /Conversation/);
   assert.match(workspace, /Pending changes/);
   assert.match(workspace, /describeAction/);

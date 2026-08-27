@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type { PoolClient } from 'pg';
 import type { SessionUser } from './auth';
 import { ensureSchema, getPool } from './db';
+import { ensureCanonicalProjectDocuments, loadProjectAgentStructuredData } from './project-agent-documents';
 
 export const TITLE_MAX = 120;
 export const DESCRIPTION_MAX = 4000;
@@ -222,6 +223,18 @@ export async function createProject(session: SessionUser, input: { clientId?: un
       ) {
         throw new ProjectServiceError('Project counterpart memberships are inconsistent', 409, 'conflict');
       }
+    }
+    if (inserted.rows[0]) {
+      // Formation outputs are created only after every creator membership is active.
+      // The creator actor id records provenance; these outputs are never uploads.
+      const structured = await loadProjectAgentStructuredData(client, String(project.id));
+      await ensureCanonicalProjectDocuments(
+        client,
+        project,
+        structured.memberRoster,
+        structured.projectStatistics,
+        session.id,
+      );
     }
     await client.query('commit');
     const { creation_payload_fingerprint: _fingerprint, ...publicProject } = project;

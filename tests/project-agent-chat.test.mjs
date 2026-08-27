@@ -33,7 +33,7 @@ assert.doesNotMatch(service, /child_process|execSync|spawn\(|storageKey|\bCodex\
 assert.match(service, /JSON\.parse/);
 assert.match(service, /Object\.keys[\s\S]*allowed|allowed[\s\S]*Object\.keys/i, 'action arguments must reject unknown keys');
 assert.match(service, /projectAccessSql/, 'chat authorization must use centralized project access');
-assert.match(service, /select distinct p\.id,p\.title,p\.description,p\.status/, 'context project fields must be explicitly selected');
+assert.match(service, /select p\.id,p\.client_id,p\.title,p\.description,p\.status/, 'context project fields must be explicitly selected under the access lock');
 assert.match(service, /project_files/);
 assert.match(service, /project_chat_messages/);
 assert.match(service, /role:\s*['"]system['"]/);

@@ -18,6 +18,7 @@ function loadChat() {
       if (specifier === 'node:crypto') return crypto;
       if (specifier === './db') return { ensureSchema: async () => {}, getPool: () => ({}) };
       if (specifier === './project-files') return { PROJECT_FILE_TOMBSTONE_MEDIA_TYPE: 'application/x.project-tombstone', validateProjectFileContent: (v) => v, validateProjectFileMediaType: (v) => v, validateProjectFilePath: (v) => v };
+      if (specifier === './project-agent-documents') return { async loadProjectAgentStructuredData() { return { memberRoster: [], projectStatistics: {} }; }, async ensureCanonicalProjectDocuments() {} };
       if (specifier === './projects') return { ProjectServiceError: class extends Error { constructor(message, status = 400, code = 'invalid_request') { super(message); this.status = status; this.code = code; } }, projectAccessSql: () => ({ join: '', predicate: 'true' }) };
       throw new Error(`unexpected import ${specifier}`);
     },

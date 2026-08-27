@@ -43,6 +43,7 @@ function loadChat(query, fetchImpl = async () => new Response(
         validateProjectFileMediaType(value) { return value; },
         validateProjectFileContent(value) { return value; },
       };
+      if (specifier === './project-agent-documents') return { async loadProjectAgentStructuredData() { return { memberRoster: [], projectStatistics: {} }; }, async ensureCanonicalProjectDocuments() {} };
       if (specifier === './projects') return {
         ProjectServiceError: class ProjectServiceError extends Error {
           constructor(message, status = 400, code = 'invalid_request') { super(message); this.status = status; this.code = code; }
@@ -105,15 +106,20 @@ test('a project member cannot confirm or cancel another member’s pending actio
 
 test('chat submission rechecks active project access in the write transaction after the backend returns', async () => {
   let initialAuthorizationSeen = false;
+  let authorizationChecks = 0;
   const { service, calls } = loadChat(async (sql, _values, target) => {
-    if (target === 'pool' && /select distinct p\.id,p\.title,p\.description,p\.status/i.test(sql)) {
-      initialAuthorizationSeen = true;
-      return { rows: [{ id: '2', title: 'Scoped project', description: '', status: 'active' }] };
+    if (target === 'client' && /select p\.id,p\.client_id,p\.title,p\.description,p\.status/i.test(sql)) {
+      authorizationChecks += 1;
+      if (authorizationChecks === 1) {
+        initialAuthorizationSeen = true;
+        return { rows: [{ id: '2', client_id: '10', title: 'Scoped project', description: '', status: 'active' }] };
+      }
+      return { rows: [] }; // access was revoked while backend ran
     }
+    if (target === 'client' && /from project_memberships pm/i.test(sql)) return { rows: [{ id: 'membership' }] };
     if (target === 'pool' && /from project_file_heads/i.test(sql)) return { rows: [] };
     if (target === 'pool' && /from project_chat_messages/i.test(sql)) return { rows: [] };
-    if (target === 'client' && /^\s*(begin|rollback)\s*$/i.test(sql)) return { rows: [] };
-    if (target === 'client' && /select (?:distinct )?p\.id/i.test(sql)) return { rows: [] }; // access was revoked while backend ran
+    if (target === 'client' && /^\s*(begin|commit|rollback)\s*$/i.test(sql)) return { rows: [] };
     if (target === 'client' && /insert into project_chat_messages|insert into project_agent_actions/i.test(sql)) {
       assert.fail('revoked member must not persist chat or proposed actions');
     }
