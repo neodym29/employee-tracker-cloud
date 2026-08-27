@@ -63,6 +63,7 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
   const [receipts, setReceipts] = useState<FileReceipt[]>([]);
   const [agentAvailable, setAgentAvailable] = useState(true);
   const [error, setError] = useState('');
+  const [chatError, setChatError] = useState('');
   const [busy, setBusy] = useState('');
   const [agentCommand, setAgentCommand] = useState('');
   const submissionPendingRef = useRef(false);
@@ -136,22 +137,26 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
     const submittedDraft = agentCommand;
     const text = submittedDraft.trim();
     if (!text) return;
+    const pendingId = `pending-${crypto.randomUUID()}`;
+    const pendingMessage: AgentMessage = { id: pendingId, role: 'user', body: text, created_at: new Date().toISOString() };
     submissionPendingRef.current = true;
     setBusy('agent');
-    setError('');
+    setChatError('');
+    setMessages((current) => [...current, pendingMessage]);
+    setAgentCommand((current) => current === submittedDraft ? '' : current);
     try {
       const data = await api(`${base}/chat`, jsonOptions({ message: text }));
-      setMessages((current) => [...current, data.userMessage, data.assistantMessage]);
+      setMessages((current) => [...current.filter((message) => message.id !== pendingId), data.userMessage, data.assistantMessage]);
       const returnedActions: AgentAction[] = data.actions || [];
       setActions((current) => [...current, ...returnedActions.filter((action) => action.status === 'pending')]);
       const created = returnedActions.map(receiptFor).filter((receipt): receipt is FileReceipt => Boolean(receipt));
       if (created.length) setReceipts((current) => [...current, ...created]);
-      setAgentCommand((current) => current === submittedDraft ? '' : current);
-      await loadFiles();
+      await loadFiles().catch(() => undefined);
     } catch (failure) {
       const message = failure instanceof Error ? failure.message : 'The agent is unavailable.';
-      setError(message);
-      if (/unavailable/i.test(message)) setAgentAvailable(false);
+      setMessages((current) => current.filter((message) => message.id !== pendingId));
+      setAgentCommand((current) => current ? current : submittedDraft);
+      setChatError(`${message} Your message was restored. Send again.`);
     } finally {
       submissionPendingRef.current = false;
       setBusy('');
@@ -225,6 +230,7 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
           <label htmlFor="agent-command">Message the project agent</label>
           <textarea id="agent-command" rows={4} value={agentCommand} onChange={(event) => setAgentCommand(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} disabled={!agentAvailable || busy === 'agent'} placeholder="Describe the outcome you want…" />
           <div className="chatSubmit"><span role="status">{busy === 'agent' ? 'Sending…' : 'Enter to send · Shift+Enter for a new line'}</span><button disabled={!agentAvailable || busy === 'agent' || !agentCommand.trim()}>{busy === 'agent' ? 'Sending…' : 'Send'}</button></div>
+          {chatError && <p className="errorBanner" role="alert">{chatError}</p>}
         </form>
       </section>
 

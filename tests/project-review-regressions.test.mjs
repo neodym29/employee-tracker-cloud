@@ -38,9 +38,13 @@ test('agent submit is single-flight, draft-safe, keyboard accessible, and follow
   assert.match(ui, /if\s*\(submissionPendingRef\.current\)\s*return/);
   assert.match(ui, /submissionPendingRef\.current\s*=\s*true/);
   assert.match(ui, /finally[\s\S]*submissionPendingRef\.current\s*=\s*false/);
-  assert.match(ui, /const\s+submittedDraft\s*=\s*agentCommand/);
-  assert.match(ui, /const\s+text\s*=\s*submittedDraft\.trim\(\)/);
-  assert.match(ui, /setAgentCommand\(\(current\)\s*=>\s*current\s*===\s*submittedDraft\s*\?\s*''\s*:\s*current\)/, 'a successful pasted prompt, including surrounding whitespace, must clear while preserving edits made in flight');
+  assert.match(ui, /const\s+pendingId\s*=\s*`pending-/);
+  assert.match(ui, /setMessages\(\(current\)\s*=>\s*\[\.\.\.current,\s*pendingMessage\]\)/, 'the sent message must appear optimistically');
+  assert.match(ui, /setAgentCommand\(\(current\)\s*=>\s*current\s*===\s*submittedDraft\s*\?\s*''\s*:\s*current\)/, 'submission must clear the exact pasted draft immediately');
+  assert.match(ui, /filter\(\(message\)\s*=>\s*message\.id\s*!==\s*pendingId\)/, 'success or failure must reconcile the optimistic message');
+  assert.match(ui, /setAgentCommand\(\(current\)\s*=>\s*current\s*\?\s*current\s*:\s*submittedDraft\)/, 'a failed send must restore the exact draft without overwriting newer input');
+  assert.match(ui, /loadFiles\(\)\.catch/, 'a document refresh failure must not turn a successful chat into a failed send');
+  assert.match(ui, /chatError[\s\S]*role="alert"/, 'chat errors must be visible beside the composer');
   assert.match(ui, />Message the project agent</);
   assert.match(ui, /Sending…/);
   assert.match(ui, /\?\s*'Sending…'\s*:\s*'Send'/);
