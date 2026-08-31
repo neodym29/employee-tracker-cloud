@@ -77,30 +77,25 @@ test('role-aware projects matching UI supports client and engineer flows', async
   assert.match(client, /Decline/);
 });
 
-test('project workspace is agent-first, file-aware, and has no manual records or artifact surfaces', async () => {
+test('project workspace combines analytics with a right-side agent and has no filesystem surface', async () => {
   for (const path of ['app/projects/[projectId]/page.tsx', 'app/projects/[projectId]/WorkspaceClient.tsx']) assert.ok(existsSync(url(path)));
   const workspace = await read('app/projects/[projectId]/WorkspaceClient.tsx');
 
   assert.match(workspace, /Project agent/);
   assert.match(workspace, /structured project data/i);
-  assert.match(workspace, /canonical agent documents/i);
   assert.match(workspace, /Starter prompts/);
   assert.doesNotMatch(workspace, /Starter commands/);
-  assert.match(workspace, /Agent documents/);
-  assert.doesNotMatch(workspace, />Generated files</);
-  assert.match(workspace, /\$\{base\}\/files/);
-  assert.match(workspace, /\$\{base\}\/files\/\$\{file\.file_id\}/);
-  assert.match(workspace, /Version \{file\.version\}/);
-  assert.match(workspace, /file\.media_type/);
-  assert.match(workspace, /formatBytes\(file\.byte_size\)/);
+  assert.match(workspace, /Project progress/);
+  assert.match(workspace, /What the client asked/);
+  assert.match(workspace, /Recent activity/);
+  assert.match(workspace, /chatRail/);
+  assert.doesNotMatch(workspace, /Agent documents|Generated files|\$\{base\}\/files|file\.path|formatBytes/);
   assert.doesNotMatch(workspace, /inspect project files|ask the agent to create the first file|provide remaining text/i);
   assert.match(workspace, /Conversation/);
   assert.match(workspace, /Pending changes/);
-  assert.match(workspace, /describeAction/);
   assert.match(workspace, /Confirm/);
   assert.match(workspace, /Cancel/);
-  assert.match(workspace, /File created/);
-  assert.match(workspace, /await loadFiles\(\)/, 'file manifests refresh after agent work');
+  assert.match(workspace, /await loadOverview\(\)/, 'analytics refresh after agent work');
   assert.match(workspace, /onKeyDown/, 'composer supports keyboard submission');
 
   assert.doesNotMatch(workspace, /Create record|Update record|Register artifact metadata|JSON body|SHA256|Size in bytes|Workspace health|Project assistant/);

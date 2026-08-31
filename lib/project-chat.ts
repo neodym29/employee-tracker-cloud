@@ -409,7 +409,7 @@ export async function confirmProjectAgentAction(session: SessionUser, projectId:
     const proposed = sanitizeAction({ type: claimed.rows[0].action_type, args: claimed.rows[0].input });
     if (proposed.type === 'create_file') throw new ProjectServiceError('Create actions are executed immediately', 409, 'conflict');
     const result = await executeFileAction(client, project, session, proposed.type, proposed.args);
-    const completed = await client.query(`update project_agent_actions set status='confirmed',confirmed_by=$3,confirmed_at=now(),result=$4::jsonb where project_id=$1 and id=$2 and actor_user_id=$3 and status='pending' returning id,action_type,input,status,confirmed_by,confirmed_at,result`, [project, action, session.id, JSON.stringify(result)]);
+    const completed = await client.query(`update project_agent_actions set status='confirmed',confirmed_by=$3,confirmed_at=now(),result=$4::jsonb where project_id=$1 and id=$2 and actor_user_id=$3 and status='pending' returning id,action_type,input,status,confirmed_by,confirmed_at,result,created_at`, [project, action, session.id, JSON.stringify(result)]);
     if (!completed.rows[0]) throw new ProjectServiceError('Pending action not found', 409, 'conflict');
     await client.query('commit');
     return completed.rows[0];
@@ -421,7 +421,7 @@ export async function cancelProjectAgentAction(session: SessionUser, projectId: 
   const action = positiveId(actionId, 'action id');
   const db = await ready();
   const access = projectAccessSql('$3');
-  const result = await db.query(`update project_agent_actions a set status='cancelled',confirmed_by=$3,confirmed_at=now(),result='{"cancelled":true}'::jsonb from projects p ${access.join} where p.id=a.project_id and a.project_id=$1 and a.id=$2 and a.actor_user_id=$3 and ${access.predicate} and a.status='pending' returning a.id,a.action_type,a.status,a.confirmed_by,a.confirmed_at,a.result`, [project, action, session.id]);
+  const result = await db.query(`update project_agent_actions a set status='cancelled',confirmed_by=$3,confirmed_at=now(),result='{"cancelled":true}'::jsonb from projects p ${access.join} where p.id=a.project_id and a.project_id=$1 and a.id=$2 and a.actor_user_id=$3 and ${access.predicate} and a.status='pending' returning a.id,a.action_type,a.status,a.confirmed_by,a.confirmed_at,a.result,a.created_at`, [project, action, session.id]);
   if (!result.rows[0]) throw new ProjectServiceError('Pending action not found', 404, 'not_found');
   return result.rows[0];
 }

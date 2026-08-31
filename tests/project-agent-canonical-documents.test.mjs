@@ -84,6 +84,7 @@ test('formation and first legacy chat bootstrap canonical outputs without adding
   assert.match(chat, /never ask[^.]*upload/i);
   assert.doesNotMatch(ui, /inspect project files|ask the agent to create the first file|provide remaining text/i);
   assert.match(ui, /structured project data/i);
-  assert.match(ui, /canonical agent documents/i);
+  assert.match(ui, /Project progress/);
+  assert.doesNotMatch(ui, /canonical agent documents|Agent documents|\/files/i, 'workspace must not expose generated output as a filesystem');
   assert.doesNotMatch(ui, /type=["']file["']|FormData|multipart/i, 'workspace must not introduce uploads');
 });

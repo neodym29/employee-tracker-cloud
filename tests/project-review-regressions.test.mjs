@@ -43,11 +43,11 @@ test('agent submit is single-flight, draft-safe, keyboard accessible, and follow
   assert.match(ui, /setAgentCommand\(\(current\)\s*=>\s*current\s*===\s*submittedDraft\s*\?\s*''\s*:\s*current\)/, 'submission must clear the exact pasted draft immediately');
   assert.match(ui, /filter\(\(message\)\s*=>\s*message\.id\s*!==\s*pendingId\)/, 'success or failure must reconcile the optimistic message');
   assert.match(ui, /setAgentCommand\(\(current\)\s*=>\s*current\s*\?\s*current\s*:\s*submittedDraft\)/, 'a failed send must restore the exact draft without overwriting newer input');
-  assert.match(ui, /loadFiles\(\)\.catch/, 'a document refresh failure must not turn a successful chat into a failed send');
+  assert.match(ui, /loadOverview\(\)\.catch/, 'an analytics refresh failure must not turn a successful chat into a failed send');
   assert.match(ui, /chatError[\s\S]*role="alert"/, 'chat errors must be visible beside the composer');
   assert.match(ui, />Message the project agent</);
-  assert.match(ui, /Sending…/);
-  assert.match(ui, /\?\s*'Sending…'\s*:\s*'Send'/);
+  assert.match(ui, /Sending\.\.\./);
+  assert.match(ui, /\?\s*'Sending\.\.\.'\s*:\s*'Send'/);
   assert.doesNotMatch(ui, />Run command<|>Command the project agent<|>Starter commands</, 'chat UI must use familiar prompt/message terminology');
   assert.match(ui, /textarea[\s\S]*disabled=\{[^}]*agent/i);
   assert.match(ui, /aria-busy=\{[^}]*agent/i);
@@ -55,30 +55,28 @@ test('agent submit is single-flight, draft-safe, keyboard accessible, and follow
   assert.match(ui, /requestSubmit\(\)/, 'plain Enter must submit through the form');
   assert.match(ui, /conversationEndRef/);
   assert.match(ui, /scrollIntoView/);
-  assert.match(ui, /useEffect\(\(\)\s*=>[\s\S]*conversationEndRef[\s\S]*\[messages,\s*actions,\s*receipts\]/);
+  assert.match(ui, /useEffect\(\(\)\s*=>[\s\S]*conversationEndRef[\s\S]*\[messages,\s*actions\]/);
 });
 
-test('agent work and file mutations expose visible accessible progress', () => {
+test('agent work and output mutations expose visible accessible progress without a filesystem panel', () => {
   const [ui, css] = [read('app/projects/[projectId]/WorkspaceClient.tsx'), read('app/globals.css')];
   assert.match(ui, /agentState[\s\S]*busy\s*===\s*'agent'\s*\?\s*'Working'\s*:\s*agentAvailable\s*\?\s*'Ready'/, 'the agent presence label must agree with the in-flight conversation state');
   assert.match(ui, /busy\s*===\s*'agent'[\s\S]*agentWorking[\s\S]*Project agent is working/, 'the conversation must show an immediate agent working bubble');
   assert.match(ui, /className="typingDots"[\s\S]*aria-hidden="true"/, 'the working bubble needs a familiar visible typing treatment');
-  assert.match(ui, /const\s+fileActivity\s*=\s*busy\s*===\s*'agent'[\s\S]*Updating files/, 'file activity must distinguish agent review from confirmed mutation');
-  assert.match(ui, /aria-busy=\{Boolean\(fileActivity\)\}/, 'the files panel must expose busy state semantically');
-  assert.match(ui, /fileLoadingState[\s\S]*loadingSpinner[\s\S]*fileActivity/, 'the files panel must show a visible loading indicator and status');
+  assert.match(ui, /agentComposer[\s\S]*aria-busy=\{busy\s*===\s*'agent'\}/, 'chat must expose busy state semantically');
+  assert.doesNotMatch(ui, /fileActivity|fileLoadingState|loadingSpinner|fileRail/, 'no filesystem progress rail may remain');
   assert.match(ui, /`confirm:\$\{action\.id\}`/, 'confirmed changes must own a file-mutation busy state');
   assert.match(ui, /`cancel:\$\{action\.id\}`/, 'cancellation must remain distinct from file mutation');
   assert.match(css, /\.typingDots[\s\S]*animation/);
-  assert.match(css, /\.loadingSpinner[\s\S]*animation/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*animation:\s*none/);
 });
 
-test('agent file receipts use a defined success color and distinguish created output', () => {
+test('confirmed output appears only as generic bounded timeline labels', () => {
   const [ui, css] = [read('app/projects/[projectId]/WorkspaceClient.tsx'), read('app/globals.css')];
   assert.match(css, /--green\s*:/);
-  assert.match(css, /\.fileReceipt[\s\S]*var\(--green\)/);
-  assert.match(ui, /action\.action_type\s*!==\s*'create_file'/);
-  assert.match(ui, /label:\s*'File created'/);
+  assert.match(ui, /Create project output/);
+  assert.match(ui, /Update project output/);
+  assert.doesNotMatch(ui, /fileReceipt|File created|action\.result|action\.input/);
 });
 
 test('project UI and services contain no Supabase client imports', () => {
