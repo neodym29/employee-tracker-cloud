@@ -86,7 +86,8 @@ test('project workspace combines analytics with a right-side agent and has no fi
   assert.match(workspace, /Starter prompts/);
   assert.doesNotMatch(workspace, /Starter commands/);
   assert.match(workspace, /Project progress/);
-  assert.match(workspace, /What the client asked/);
+  assert.match(workspace, /Client priorities/);
+  assert.doesNotMatch(workspace, /What the client asked|Shared chat/);
   assert.match(workspace, /Recent activity/);
   assert.match(workspace, /chatRail/);
   assert.doesNotMatch(workspace, /Agent documents|Generated files|\$\{base\}\/files|file\.path|formatBytes/);

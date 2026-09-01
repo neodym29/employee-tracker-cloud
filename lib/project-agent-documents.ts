@@ -21,8 +21,6 @@ export type ProjectAgentStatistics = {
   generatedDocuments: number;
   records: number;
   artifacts: number;
-  chatMessages: number;
-  pendingAgentActions: number;
 };
 
 type Queryable = { query: (sql: string, values?: unknown[]) => Promise<{ rows: Array<Record<string, any>> }> };
@@ -65,11 +63,11 @@ export function buildCanonicalProjectDocuments(
     },
     {
       path: 'progress-reports/latest.md', mediaType: 'text/markdown',
-      content: `# Latest progress report\n\n## Project\n\n**${title}**\n\n${description}\n\n## Current state\n\n- Status: ${status}\n- Active members: ${count(aggregateStatistics.activeMembers)}\n- Pending agent actions: ${count(aggregateStatistics.pendingAgentActions)}\n\n## Next update\n\nThe project agent maintains this report from authorized project activity when relevant.\n`,
+      content: `# Latest progress report\n\n## Project\n\n**${title}**\n\n${description}\n\n## Current state\n\n- Status: ${status}\n- Active members: ${count(aggregateStatistics.activeMembers)}\n\n## Next update\n\nThe project agent maintains this report from authorized project activity when relevant.\n`,
     },
     {
       path: 'statistics.md', mediaType: 'text/markdown',
-      content: `# Project statistics\n\nProject: **${title}**\n\n- Active members: ${count(aggregateStatistics.activeMembers)}\n- Active engineers: ${count(aggregateStatistics.activeEngineers)}\n- Clients: ${count(aggregateStatistics.clients)}\n- Generated documents: ${count(aggregateStatistics.generatedDocuments)}\n- Records: ${count(aggregateStatistics.records)}\n- Artifacts: ${count(aggregateStatistics.artifacts)}\n- Chat messages: ${count(aggregateStatistics.chatMessages)}\n- Pending agent actions: ${count(aggregateStatistics.pendingAgentActions)}\n`,
+      content: `# Project statistics\n\nProject: **${title}**\n\n- Active members: ${count(aggregateStatistics.activeMembers)}\n- Active engineers: ${count(aggregateStatistics.activeEngineers)}\n- Clients: ${count(aggregateStatistics.clients)}\n- Generated documents: ${count(aggregateStatistics.generatedDocuments)}\n- Records: ${count(aggregateStatistics.records)}\n- Artifacts: ${count(aggregateStatistics.artifacts)}\n`,
     },
   ];
 }
@@ -96,9 +94,7 @@ export async function loadProjectAgentStructuredData(db: Queryable, projectId: s
          1 as clients,
          (select count(*) from project_file_heads h where h.project_id=$1 and h.deleted_at is null) as generated_documents,
          (select count(*) from project_records r where r.project_id=$1) as records,
-         (select count(*) from project_artifacts a where a.project_id=$1) as artifacts,
-         (select count(*) from project_chat_messages m where m.project_id=$1) as chat_messages,
-         (select count(*) from project_agent_actions a where a.project_id=$1 and a.status='pending') as pending_agent_actions`,
+         (select count(*) from project_artifacts a where a.project_id=$1) as artifacts`,
       [projectId],
     ),
   ]);
@@ -112,8 +108,6 @@ export async function loadProjectAgentStructuredData(db: Queryable, projectId: s
       generatedDocuments: count(row.generated_documents),
       records: count(row.records),
       artifacts: count(row.artifacts),
-      chatMessages: count(row.chat_messages),
-      pendingAgentActions: count(row.pending_agent_actions),
     } as ProjectAgentStatistics,
   };
 }

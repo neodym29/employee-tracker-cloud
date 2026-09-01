@@ -45,7 +45,10 @@ test('canonical output definitions are exact markdown paths derived from safe st
   assert.match(all, /Active engineers[^\n]*1/i);
   assert.match(all, /Records[^\n]*3/i);
   assert.match(all, /Artifacts[^\n]*2/i);
+  assert.doesNotMatch(all, /Chat messages|Pending agent actions/i, 'shared documents must not expose actor-private activity counts');
   assert.doesNotMatch(all, /@|email|secret/i, 'documents must not expose or solicit private fields');
+  const source = read('lib/project-agent-documents.ts');
+  assert.doesNotMatch(source, /count\(\*\) from project_chat_messages|count\(\*\) from project_agent_actions[^\n]*pending/i, 'shared structured data must never aggregate private chat or pending actions');
 });
 
 test('bootstrap locks each exact path and inserts only missing immutable version-one outputs', async () => {

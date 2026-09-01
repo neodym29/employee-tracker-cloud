@@ -3,8 +3,8 @@ import type { SessionUser } from './auth';
 import { ensureSchema, getPool } from './db';
 import { ProjectServiceError, projectAccessSql } from './projects';
 
-export const CLIENT_REQUEST_LIMIT = 3;
-export const CLIENT_REQUEST_BODY_MAX = 240;
+export const CLIENT_PRIORITY_LIMIT = 3;
+export const CLIENT_PRIORITY_MAX = 160;
 export const PROGRESS_SUMMARY_MAX = 240;
 const TIMELINE_LIMIT = 8;
 const TIMELINE_LABEL_MAX = 320;
@@ -18,7 +18,7 @@ export type ProjectOverview = {
   progress: { percent: number; summary: string; version: number; updatedAt: string };
   clientName: string;
   analytics: { activeEngineerCount: number; confirmedActionCount: number; pendingActionCount: number; totalChatCount: number };
-  clientRequests: Array<{ id: string; body: string; createdAt: string }>;
+  clientPriorities: Array<{ id: string; summary: string; createdAt: string }>;
   timeline: TimelineItem[];
 };
 
@@ -65,14 +65,14 @@ export async function getProjectOverview(session: SessionUser, projectId: unknow
          join app_users engineer on engineer.id=engineer_members.user_id and engineer.account_type='engineer'
          where engineer_members.project_id=p.id and engineer_members.membership_status='active') as active_engineer_count,
        (select count(*) from project_agent_actions confirmed_actions where confirmed_actions.project_id=p.id and confirmed_actions.status='confirmed') as confirmed_action_count,
-       (select count(*) from project_agent_actions pending_actions where pending_actions.project_id=p.id and pending_actions.status='pending') as pending_action_count,
-       (select count(*) from project_chat_messages all_chat where all_chat.project_id=p.id and all_chat.role in ('user','assistant')) as total_chat_count,
-       coalesce((select json_agg(request_row order by request_row.created_at desc) from (
-         select message.id,message.body,message.created_at
-         from project_chat_messages message
-         where message.project_id=p.id and message.user_id=p.client_id and message.role='user'
-         order by message.created_at desc,message.id desc limit ${CLIENT_REQUEST_LIMIT}
-       ) request_row),'[]'::json) as client_requests,
+       (select count(*) from project_agent_actions pending_actions where pending_actions.project_id=p.id and pending_actions.actor_user_id=$2 and pending_actions.status='pending') as pending_action_count,
+       (select count(*) from project_chat_messages all_chat where all_chat.project_id=p.id and all_chat.user_id=$2 and all_chat.role in ('user','assistant')) as total_chat_count,
+       coalesce((select json_agg(priority_row order by priority_row.created_at desc) from (
+         select priority.id,priority.summary,priority.created_at
+         from project_client_request_summaries priority
+         where priority.project_id=p.id
+         order by priority.created_at desc,priority.id desc limit ${CLIENT_PRIORITY_LIMIT}
+       ) priority_row),'[]'::json) as client_priorities,
        coalesce((select json_agg(timeline_row order by timeline_row.created_at desc) from (
          select event.id,left(regexp_replace(event.label,'[[:cntrl:]]',' ','g'),${TIMELINE_LABEL_MAX}) as label,event.created_at from (
            select 'action:' || action.id as id,
@@ -112,7 +112,7 @@ export async function getProjectOverview(session: SessionUser, projectId: unknow
     progress: { percent: Number.isInteger(percent) && percent >= 0 && percent <= 100 ? percent : 0, summary: boundedSafeText(row.progress_summary, PROGRESS_SUMMARY_MAX), version: Number.isSafeInteger(version) && version > 0 ? version : 1, updatedAt: timestamp(row.progress_updated_at) },
     clientName: String(row.client_name ?? ''),
     analytics: { activeEngineerCount: count(row.active_engineer_count), confirmedActionCount: count(row.confirmed_action_count), pendingActionCount: count(row.pending_action_count), totalChatCount: count(row.total_chat_count) },
-    clientRequests: jsonRows(row.client_requests).slice(0, CLIENT_REQUEST_LIMIT).map((request) => ({ id: String(request.id), body: String(request.body ?? '').trim().slice(0, CLIENT_REQUEST_BODY_MAX), createdAt: timestamp(request.created_at) })),
+    clientPriorities: jsonRows(row.client_priorities).slice(0, CLIENT_PRIORITY_LIMIT).map((priority) => ({ id: String(priority.id), summary: boundedSafeText(priority.summary, CLIENT_PRIORITY_MAX), createdAt: timestamp(priority.created_at) })),
     timeline: jsonRows(row.timeline).slice(0, TIMELINE_LIMIT).map((item) => ({ id: String(item.id), label: boundedSafeText(item.label, TIMELINE_LABEL_MAX), createdAt: timestamp(item.created_at) })),
   };
 }

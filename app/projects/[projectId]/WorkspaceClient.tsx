@@ -12,7 +12,7 @@ type Overview = {
   progress: { percent: number; summary: string; version: number; updatedAt: string };
   clientName: string;
   analytics: { activeEngineerCount: number; confirmedActionCount: number; pendingActionCount: number; totalChatCount: number };
-  clientRequests: Array<{ id: string; body: string; createdAt: string }>;
+  clientPriorities: Array<{ id: string; summary: string; createdAt: string }>;
   timeline: Array<{ id: string; label: string; createdAt: string }>;
 };
 
@@ -129,7 +129,7 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
   const { project, analytics } = overview;
   const actionTotal = analytics.confirmedActionCount + analytics.pendingActionCount;
   const actionPercent = actionTotal ? Math.round((analytics.confirmedActionCount / actionTotal) * 100) : 0;
-  const latestRequest = overview.clientRequests[0];
+  const latestPriority = overview.clientPriorities[0];
 
   return <div className="workspaceShell agentWorkspace">
     <a className="backLink" href="/projects">← Back to projects</a>
@@ -142,7 +142,7 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
             <span className="sectionLabel">Project overview</span>
             <h1 id="project-overview-title">{project.title}</h1>
             {project.description && <p>{project.description}</p>}
-            {latestRequest && <blockquote><span>Latest client request</span>{latestRequest.body}</blockquote>}
+            {latestPriority && <blockquote><span>Latest client priority</span>{latestPriority.summary}</blockquote>}
           </div>
           <div className="projectContextMeta">
             <span className="statusBadge">{overview.stage.label}</span>
@@ -181,9 +181,9 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
         </section>
 
         <div className="overviewLists">
-          <section className="dashboardPanel overviewList" aria-labelledby="client-requests-title">
-            <div className="overviewSectionHeader"><div><span className="sectionLabel">Shared chat</span><h2 id="client-requests-title">What the client asked</h2></div></div>
-            {overview.clientRequests.length ? <ul>{overview.clientRequests.map((request) => <li key={request.id}><p>{request.body}</p><time dateTime={request.createdAt}>{formatTimestamp(request.createdAt)}</time></li>)}</ul> : <p className="emptyOverview">No client requests in project chat yet.</p>}
+          <section className="dashboardPanel overviewList" aria-labelledby="client-priorities-title">
+            <div className="overviewSectionHeader"><div><span className="sectionLabel">Work brief</span><h2 id="client-priorities-title">Client priorities</h2></div></div>
+            {overview.clientPriorities.length ? <ul>{overview.clientPriorities.map((priority) => <li key={priority.id}><p>{priority.summary}</p><time dateTime={priority.createdAt}>{formatTimestamp(priority.createdAt)}</time></li>)}</ul> : <p className="emptyOverview">No client priorities have been recorded yet.</p>}
           </section>
           <section className="dashboardPanel overviewList" aria-labelledby="recent-activity-title">
             <div className="overviewSectionHeader"><div><span className="sectionLabel">Timeline</span><h2 id="recent-activity-title">Recent activity</h2></div></div>

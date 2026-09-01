@@ -8,8 +8,9 @@ import { createBridge, LIMITS, runCodex } from '../scripts/project-agent-bridge.
 
 const TOKEN = 'test-token-that-is-at-least-thirty-two-bytes-long';
 const validBody = { messages: [{ role: 'user', content: 'hello' }], response_format: { type: 'json_object' } };
+const validV2Body = { ...validBody, contract_version: 2 };
 
-async function fixture(backend = async () => ({ answer: 'ok', actions: [] }), options = {}) {
+async function fixture(backend = async () => ({ answer: 'ok', actions: [], requestSummary: null }), options = {}) {
   const server = createBridge({ token: TOKEN, backend, ...options });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -33,13 +34,18 @@ async function close(server) {
   await once(server, 'close');
 }
 
-test('serves the exact backend contract on loopback and passes only messages', async () => {
+test('serves versioned contracts so bridge-first rollout and app rollback remain safe', async () => {
   let received;
-  const { server, url } = await fixture(async (messages) => { received = messages; return { answer: 'Safe answer', actions: [{ type: 'delete_file', args: { fileId: '12345678-1234-4234-8234-123456789abc', expectedVersion: 2 } }] }; });
+  const fileAction = { type: 'delete_file', args: { fileId: '12345678-1234-4234-8234-123456789abc', expectedVersion: 2 } };
+  const progressAction = { type: 'update_project_progress', args: { percent: 50, summary: 'Half complete', expectedVersion: 2 } };
+  const { server, url } = await fixture(async (messages) => { received = messages; return { answer: 'Safe answer', actions: [fileAction, progressAction], requestSummary: 'Deliverable requested.' }; });
   try {
-    const response = await request(url);
+    const legacyResponse = await request(url);
+    assert.equal(legacyResponse.status, 200);
+    assert.deepEqual(await legacyResponse.json(), { answer: 'Safe answer', actions: [fileAction] }, 'v1 callers cannot safely attest explicit progress intent');
+    const response = await request(url, { body: JSON.stringify(validV2Body) });
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { answer: 'Safe answer', actions: [{ type: 'delete_file', args: { fileId: '12345678-1234-4234-8234-123456789abc', expectedVersion: 2 } }] });
+    assert.deepEqual(await response.json(), { answer: 'Safe answer', actions: [fileAction, progressAction], requestSummary: 'Deliverable requested.' });
     assert.deepEqual(received, validBody.messages);
     assert.equal(response.headers.get('cache-control'), 'no-store');
   } finally { await close(server); }
@@ -47,13 +53,15 @@ test('serves the exact backend contract on loopback and passes only messages', a
 
 test('strictly gates route, method, media type, bearer token, and request shape', async () => {
   let calls = 0;
-  const { server, url } = await fixture(async () => { calls += 1; return { answer: 'ok', actions: [] }; });
+  const { server, url } = await fixture(async () => { calls += 1; return { answer: 'ok', actions: [], requestSummary: null }; });
   try {
     assert.equal((await fetch(`${url}/other`)).status, 404);
     assert.equal((await fetch(`${url}/chat`)).status, 405);
     assert.equal((await request(url, { headers: { authorization: `Bearer ${TOKEN}x` } })).status, 401);
     assert.equal((await request(url, { headers: { 'content-type': 'text/plain' } })).status, 415);
     assert.equal((await request(url, { body: JSON.stringify({ ...validBody, extra: true }) })).status, 400);
+    assert.equal((await request(url, { body: JSON.stringify({ ...validBody, contract_version: 1 }) })).status, 400);
+    assert.equal((await request(url, { body: JSON.stringify({ ...validBody, contract_version: 2, extra: true }) })).status, 400);
     assert.equal((await request(url, { body: '{' })).status, 400);
     assert.equal(calls, 0);
   } finally { await close(server); }
@@ -61,7 +69,7 @@ test('strictly gates route, method, media type, bearer token, and request shape'
 
 test('rejects bodies over 128KB without invoking backend', async () => {
   let called = false;
-  const { server, url } = await fixture(async () => { called = true; return { answer: 'no', actions: [] }; });
+  const { server, url } = await fixture(async () => { called = true; return { answer: 'no', actions: [], requestSummary: null }; });
   try {
     const body = JSON.stringify({ ...validBody, messages: [{ role: 'user', content: 'x'.repeat(LIMITS.body) }] });
     const response = await request(url, { body });
@@ -72,7 +80,7 @@ test('rejects bodies over 128KB without invoking backend', async () => {
 
 test('caps concurrency at two and rejects excess work', async () => {
   const releases = [];
-  const backend = () => new Promise((resolve) => releases.push(() => resolve({ answer: 'ok', actions: [] })));
+  const backend = () => new Promise((resolve) => releases.push(() => resolve({ answer: 'ok', actions: [], requestSummary: null })));
   const { server, url } = await fixture(backend);
   try {
     const first = request(url);
@@ -89,7 +97,7 @@ test('caps concurrency at two and rejects excess work', async () => {
 
 test('accepts long free-form answers within the transport envelope', async () => {
   const longAnswer = 'x'.repeat(100_000);
-  const long = await fixture(async () => ({ answer: longAnswer, actions: [] }));
+  const long = await fixture(async () => ({ answer: longAnswer, actions: [], requestSummary: null }));
   try {
     const response = await request(long.url);
     assert.equal(response.status, 200);
@@ -109,11 +117,16 @@ test('aborts timed-out backend work and rejects malformed backend output', async
   const bad = await fixture(async () => ({ answer: 'ok', actions: [], extra: true }));
   try { assert.equal((await request(bad.url)).status, 502); } finally { await close(bad.server); }
 
-  const badArgs = await fixture(async () => ({ answer: 'ok', actions: [{ type: 'delete_file', args: { fileId: '12345678-1234-4234-8234-123456789abc', expectedVersion: 1, unexpected: true } }] }));
+  const badArgs = await fixture(async () => ({ answer: 'ok', actions: [{ type: 'delete_file', args: { fileId: '12345678-1234-4234-8234-123456789abc', expectedVersion: 1, unexpected: true } }], requestSummary: null }));
   try { assert.equal((await request(badArgs.url)).status, 502); } finally { await close(badArgs.server); }
 
-  const legacy = await fixture(async () => ({ answer: 'ok', actions: [{ type: 'create_record', args: { title: 'legacy', recordType: 'note', body: '{}' } }] }));
+  const legacy = await fixture(async () => ({ answer: 'ok', actions: [{ type: 'create_record', args: { title: 'legacy', recordType: 'note', body: '{}' } }], requestSummary: null }));
   try { assert.equal((await request(legacy.url)).status, 502); } finally { await close(legacy.server); }
+
+  for (const requestSummary of ['', 'x'.repeat(161), 'line\nbreak']) {
+    const invalidSummary = await fixture(async () => ({ answer: 'ok', actions: [], requestSummary }));
+    try { assert.equal((await request(invalidSummary.url)).status, 502); } finally { await close(invalidSummary.server); }
+  }
 });
 
 test('accepts only safe, bounded project action arguments', async () => {
@@ -124,7 +137,7 @@ test('accepts only safe, bounded project action arguments', async () => {
     { type: 'delete_file', args: { fileId: '12345678-1234-4234-8234-123456789abc', expectedVersion: 3 } },
     { type: 'update_project_progress', args: { percent: 47, summary: 'Production progress confirmation passed.', expectedVersion: 1 } },
   ];
-  const good = await fixture(async () => ({ answer: 'file work', actions }));
+  const good = await fixture(async () => ({ answer: 'file work', actions, requestSummary: 'Deliverable requested.' }));
   try { assert.equal((await request(good.url)).status, 200); } finally { await close(good.server); }
 
   for (const badAction of [
@@ -141,7 +154,7 @@ test('accepts only safe, bounded project action arguments', async () => {
     { type: 'update_project_progress', args: { percent: 47, summary: 'Invalid', expectedVersion: 0 } },
     { type: 'update_project_progress', args: { percent: 47, summary: 'Invalid', expectedVersion: 1, extra: true } },
   ]) {
-    const bad = await fixture(async () => ({ answer: 'no', actions: [badAction] }));
+    const bad = await fixture(async () => ({ answer: 'no', actions: [badAction], requestSummary: null }));
     try { assert.equal((await request(bad.url)).status, 502); } finally { await close(bad.server); }
   }
 });
@@ -157,7 +170,7 @@ test('requires a high-entropy-sized startup token', () => {
 test('fixture subprocess gets local-auth HOME but no ambient database, API, token, or sentinel secrets', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'bridge-env-test-'));
   const fixture = join(dir, 'fixture.mjs');
-  await writeFile(fixture, `#!/usr/bin/env node\nimport {writeFileSync} from 'node:fs';\nconst out=process.argv[process.argv.indexOf('--output-last-message')+1];\nwriteFileSync(out,JSON.stringify({answer:process.env.SENTINEL_BRIDGE_SECRET?'LEAKED':'safe:'+Boolean(process.env.HOME),actions:[]}));\n`);
+  await writeFile(fixture, `#!/usr/bin/env node\nimport {writeFileSync} from 'node:fs';\nconst out=process.argv[process.argv.indexOf('--output-last-message')+1];\nwriteFileSync(out,JSON.stringify({answer:process.env.SENTINEL_BRIDGE_SECRET?'LEAKED':'safe:'+Boolean(process.env.HOME),actions:[],requestSummary:null}));\n`);
   await chmod(fixture, 0o700);
   Object.assign(process.env, { SENTINEL_BRIDGE_SECRET: 'must-not-reach-child', DATABASE_URL: 'postgres://secret', INGEST_API_KEY: 'secret', CHAT_BACKEND_TOKEN: 'secret' });
   try {

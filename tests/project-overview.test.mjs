@@ -22,9 +22,9 @@ test('overview service and authenticated endpoint exist with project-scoped acce
 
 test('overview uses an explicit narrow DTO and excludes sensitive project output data', () => {
   const service = readFileSync(url(servicePath), 'utf8');
-  assert.match(service, /CLIENT_REQUEST_LIMIT\s*=\s*3/);
-  assert.match(service, /CLIENT_REQUEST_BODY_MAX\s*=\s*240/);
-  assert.match(service, /slice\(0,\s*CLIENT_REQUEST_BODY_MAX\)/);
+  assert.match(service, /CLIENT_PRIORITY_LIMIT\s*=\s*3/);
+  assert.match(service, /CLIENT_PRIORITY_MAX\s*=\s*160/);
+  assert.match(service, /boundedSafeText\(priority\.summary,\s*CLIENT_PRIORITY_MAX\)/);
   assert.match(service, /Created[\s\S]*path[\s\S]*version/i);
   assert.match(service, /Progress changed from[\s\S]*% to[\s\S]*%/);
   assert.doesNotMatch(service, /select\s+\*/i);
@@ -38,7 +38,7 @@ test('overview mapping is bounded, factual, and archived does not imply completi
   const row = {
     id: '7', title: 'Launch', description: 'Ship the portal', status: 'active', progress_percent: 47, progress_summary: 'API integration underway', progress_version: 4, progress_updated_at: '2026-01-02T12:00:00Z', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z',
     client_name: 'Client One', active_engineer_count: '2', confirmed_action_count: '3', pending_action_count: '1', total_chat_count: '9',
-    client_requests: [{ id: '4', body: `  ${'x'.repeat(300)}  `, created_at: '2026-01-03T00:00:00Z' }],
+    client_priorities: [{ id: '4', summary: `  ${'x'.repeat(300)}  `, created_at: '2026-01-03T00:00:00Z' }],
     timeline: [{ id: 'action:3', label: 'Updated progress-reports/latest.md to version 3', created_at: '2026-01-04T00:00:00Z' }],
   };
   const pool = { async query(sql, values) { queries.push({ sql, values }); return { rows: [row] }; } };
@@ -57,8 +57,8 @@ test('overview mapping is bounded, factual, and archived does not imply completi
   assert.equal(overview.progress.percent, 47);
   assert.equal(overview.progress.summary, 'API integration underway');
   assert.equal(overview.progress.version, 4);
-  assert.equal(overview.clientRequests.length, 1);
-  assert.equal(overview.clientRequests[0].body.length, 240);
+  assert.equal(overview.clientPriorities.length, 1);
+  assert.equal(overview.clientPriorities[0].summary.length, 160);
   assert.deepEqual(Object.keys(overview.analytics).sort(), ['activeEngineerCount', 'confirmedActionCount', 'pendingActionCount', 'totalChatCount']);
   assert.equal(module.exports.projectStage('archived').closed, true);
   assert.equal(module.exports.projectStage('completed').closed, true);
@@ -76,7 +76,7 @@ test('workspace renders overview first and a sticky right chat without filesyste
   assert.match(workspace, /\/overview/);
   assert.match(workspace, /Project progress/);
   assert.match(workspace, /Action completion/);
-  assert.match(workspace, /What the client asked/);
+  assert.match(workspace, /Client priorities/);
   assert.match(workspace, /Recent activity/);
   assert.match(workspace, /overviewPanel[\s\S]*chatRail/);
   assert.match(workspace, /<div className="workspaceGrid agentGrid">/);
