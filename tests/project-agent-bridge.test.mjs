@@ -116,12 +116,13 @@ test('aborts timed-out backend work and rejects malformed backend output', async
   try { assert.equal((await request(legacy.url)).status, 502); } finally { await close(legacy.server); }
 });
 
-test('accepts only safe, bounded real-file action arguments', async () => {
+test('accepts only safe, bounded project action arguments', async () => {
   const actions = [
     { type: 'create_file', args: { path: 'src/report.txt', mediaType: 'text/plain', content: 'hello' } },
     { type: 'update_file', args: { fileId: '12345678-1234-4234-8234-123456789abc', expectedVersion: 1, content: '# updated' } },
     { type: 'rename_file', args: { fileId: '12345678-1234-4234-8234-123456789abc', expectedVersion: 2, path: 'docs/report.md' } },
     { type: 'delete_file', args: { fileId: '12345678-1234-4234-8234-123456789abc', expectedVersion: 3 } },
+    { type: 'update_project_progress', args: { percent: 47, summary: 'Production progress confirmation passed.', expectedVersion: 1 } },
   ];
   const good = await fixture(async () => ({ answer: 'file work', actions }));
   try { assert.equal((await request(good.url)).status, 200); } finally { await close(good.server); }
@@ -132,6 +133,13 @@ test('accepts only safe, bounded real-file action arguments', async () => {
     { type: 'update_file', args: { fileId: '12345678-1234-4234-8234-123456789abc', expectedVersion: 0, content: 'x' } },
     { type: 'update_file', args: { fileId: '12345678-1234-4234-8234-123456789abc', expectedVersion: 1, mediaType: 'text/markdown', content: 'x' } },
     { type: 'create_file', args: { path: 'big.txt', mediaType: 'text/plain', content: 'x'.repeat(262145) } },
+    { type: 'update_project_progress', args: { percent: -1, summary: 'Invalid', expectedVersion: 1 } },
+    { type: 'update_project_progress', args: { percent: 101, summary: 'Invalid', expectedVersion: 1 } },
+    { type: 'update_project_progress', args: { percent: 47, summary: '', expectedVersion: 1 } },
+    { type: 'update_project_progress', args: { percent: 47, summary: 'x'.repeat(241), expectedVersion: 1 } },
+    { type: 'update_project_progress', args: { percent: 47, summary: 'line\nbreak', expectedVersion: 1 } },
+    { type: 'update_project_progress', args: { percent: 47, summary: 'Invalid', expectedVersion: 0 } },
+    { type: 'update_project_progress', args: { percent: 47, summary: 'Invalid', expectedVersion: 1, extra: true } },
   ]) {
     const bad = await fixture(async () => ({ answer: 'no', actions: [badAction] }));
     try { assert.equal((await request(bad.url)).status, 502); } finally { await close(bad.server); }
