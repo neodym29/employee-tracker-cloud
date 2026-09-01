@@ -85,7 +85,7 @@ test('workspace renders overview first and a sticky right chat without filesyste
   assert.doesNotMatch(workspace, /message\.role === 'assistant' \? 'Project agent' : 'You'/);
   assert.match(css, /\.agentGrid\s*\{[^}]*grid-template-columns:\s*minmax\(0,1fr\)\s+minmax\(360px,410px\)/s);
   assert.match(css, /\.chatRail\s*\{[^}]*position:\s*sticky[^}]*max-height:\s*calc\(100dvh\s*-\s*180px\)/s);
-  assert.match(css, /\.actionList\s*\{[^}]*flex:\s*0\s+0\s+auto[^}]*max-height:\s*210px[^}]*overflow-y:\s*auto/s, 'pending confirmations must remain visibly reachable instead of shrinking behind the composer');
+  assert.match(css, /\.actionList\s*\{[^}]*flex:\s*0\s+0\s+auto[^}]*max-height:\s*320px[^}]*overflow-y:\s*auto/s, 'two pending confirmations must remain fully visible instead of shrinking or hiding controls behind the composer');
   assert.match(css, /@media\s*\(max-width:\s*900px\)[\s\S]*\.agentGrid\s*\{[^}]*grid-template-columns:\s*minmax\(0,1fr\)/);
   assert.doesNotMatch(css, /\.fileRail\s*\{\s*order:\s*-1/);
 });
