@@ -5,10 +5,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 type Project = { id: string; title: string; description: string; status: 'draft' | 'open' | 'active' | 'completed' | 'archived'; createdAt: string; updatedAt: string };
 type Membership = { id: string; display_name: string; membership_type: 'request' | 'invitation' | 'creator'; membership_status: string };
 type AgentMessage = { id: string; role: 'user' | 'assistant'; body: string; created_at: string };
-type AgentAction = { id: string; action_type: 'create_file' | 'update_file' | 'rename_file' | 'delete_file'; status: string; created_at: string };
+type AgentAction = { id: string; action_type: 'create_file' | 'update_file' | 'rename_file' | 'delete_file' | 'update_project_progress'; status: string; description: string; created_at: string };
 type Overview = {
   project: Project;
-  stage: { label: string; percent: number; closed: boolean };
+  stage: { label: string; closed: boolean };
+  progress: { percent: number; summary: string; version: number; updatedAt: string };
   clientName: string;
   analytics: { activeEngineerCount: number; confirmedActionCount: number; pendingActionCount: number; totalChatCount: number };
   clientRequests: Array<{ id: string; body: string; createdAt: string }>;
@@ -36,12 +37,6 @@ function formatTimestamp(value: string) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
 }
 
-function actionLabel(action: AgentAction) {
-  if (action.action_type === 'update_file') return 'Update project output';
-  if (action.action_type === 'rename_file') return 'Rename project output';
-  if (action.action_type === 'delete_file') return 'Remove project output';
-  return 'Create project output';
-}
 
 export default function WorkspaceClient({ projectId, accountType }: { projectId: string; accountType: 'client' | 'engineer' }) {
   const base = `/api/projects/${projectId}`;
@@ -94,8 +89,7 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
     setError('');
     try {
       await api(`${base}/agent-actions/${action.id}/${decision}`, { method: 'POST' });
-      setActions((current) => current.filter((item) => item.id !== action.id));
-      await loadOverview();
+      await loadWorkspace();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'The change could not be completed.');
     } finally { setBusy(''); }
@@ -169,9 +163,10 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
         </details>}
 
         <section className="dashboardPanel progressPanel" aria-labelledby="project-progress-title">
-          <div className="overviewSectionHeader"><div><span className="sectionLabel">Delivery stage</span><h2 id="project-progress-title">Project progress</h2></div><strong>{overview.stage.closed && project.status === 'archived' ? 'Closed' : `${overview.stage.percent}%`}</strong></div>
-          <div className="progressTrack" role="progressbar" aria-label="Project stage progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={overview.stage.percent}><span style={{ width: `${overview.stage.percent}%` }} /></div>
-          <p>{project.status === 'archived' ? 'This project is archived. Archived status does not mean delivery was completed.' : `${overview.stage.label} stage based on the current project status.`}</p>
+          <div className="overviewSectionHeader"><div><span className="sectionLabel">Delivery progress</span><h2 id="project-progress-title">Project progress</h2></div><strong>{overview.progress.percent}%</strong></div>
+          <div className="progressTrack" role="progressbar" aria-label="Project delivery progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={overview.progress.percent}><span style={{ width: `${overview.progress.percent}%` }} /></div>
+          <p>{overview.progress.summary}</p>
+          {overview.progress.updatedAt && <time dateTime={overview.progress.updatedAt}>Progress updated {formatTimestamp(overview.progress.updatedAt)}</time>}
           <div className="actionProgress">
             <div><strong>Action completion</strong><span>{actionTotal ? `${analytics.confirmedActionCount} of ${actionTotal} confirmed` : 'No agent actions yet'}</span></div>
             <div className="progressTrack compact" role="progressbar" aria-label="Action completion" aria-valuemin={0} aria-valuemax={100} aria-valuenow={actionPercent}><span style={{ width: `${actionPercent}%` }} /></div>
@@ -214,7 +209,7 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
           <div ref={conversationEndRef} aria-hidden="true" />
         </div>
 
-        {actions.length > 0 && <section className="actionList" aria-labelledby="pending-changes-title"><h3 id="pending-changes-title">Pending changes</h3>{actions.map((action) => { const actionBusy = busy === `confirm:${action.id}` || busy === `cancel:${action.id}`; return <article className="proposedAction" key={action.id}><div><span className="changeKind">Agent proposal</span><strong>{actionLabel(action)}</strong><p>Review this project output change before it runs.</p></div><div className="rowActions"><button disabled={actionBusy} onClick={() => decideAction(action, 'confirm')}>{busy === `confirm:${action.id}` ? 'Updating...' : 'Confirm'}</button><button disabled={actionBusy} className="secondaryButton" onClick={() => decideAction(action, 'cancel')}>{busy === `cancel:${action.id}` ? 'Canceling...' : 'Cancel'}</button></div></article>; })}</section>}
+        {actions.length > 0 && <section className="actionList" aria-labelledby="pending-changes-title"><h3 id="pending-changes-title">Pending changes</h3>{actions.map((action) => { const actionBusy = busy === `confirm:${action.id}` || busy === `cancel:${action.id}`; return <article className="proposedAction" key={action.id}><div><span className="changeKind">Agent proposal</span><strong>{action.description}</strong><p>Review this specific project change before it runs.</p></div><div className="rowActions"><button disabled={actionBusy} onClick={() => decideAction(action, 'confirm')}>{busy === `confirm:${action.id}` ? 'Updating...' : 'Confirm'}</button><button disabled={actionBusy} className="secondaryButton" onClick={() => decideAction(action, 'cancel')}>{busy === `cancel:${action.id}` ? 'Canceling...' : 'Cancel'}</button></div></article>; })}</section>}
 
         <form className="chatForm agentComposer" onSubmit={sendCommand} aria-busy={busy === 'agent'}>
           <label htmlFor="agent-command">Message the project agent</label>

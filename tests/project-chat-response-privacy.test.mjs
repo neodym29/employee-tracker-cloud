@@ -16,13 +16,14 @@ function loadDto() {
   return module.exports;
 }
 
-test('public agent action DTO strips paths, content, and internal payloads', () => {
+test('public agent action DTO strips internal payloads and exposes only the server-produced safe description', () => {
   const { toPublicAgentAction } = loadDto();
   const value = toPublicAgentAction({
     id: 17,
     action_type: 'update_file',
     status: 'pending',
     created_at: new Date('2026-08-31T00:00:00.000Z'),
+    description: 'Update progress-reports/latest.md from version 2 to version 3',
     input: { path: 'private/report.md', content: 'secret input' },
     output: { content: 'secret output' },
     result: { path: 'private/report.md', sha256: 'hidden' },
@@ -32,9 +33,10 @@ test('public agent action DTO strips paths, content, and internal payloads', () 
     id: '17',
     action_type: 'update_file',
     status: 'pending',
+    description: 'Update progress-reports/latest.md from version 2 to version 3',
     created_at: '2026-08-31T00:00:00.000Z',
   });
-  assert.doesNotMatch(JSON.stringify(value), /private|secret|path|content|input|output|result|sha256|actor/i);
+  assert.doesNotMatch(JSON.stringify(value), /private|secret|content|input|output|result|sha256|actor/i);
 });
 
 test('chat and action routes apply the public DTO at every browser response boundary', () => {

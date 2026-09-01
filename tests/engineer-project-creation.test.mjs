@@ -78,8 +78,10 @@ test('engineer creation uses one transaction to create an immediately open clien
       assert.match(sql, /from app_users/i);
       assert.match(sql, /account_type='client'[\s\S]*approval_status='approved'/i);
       assert.match(sql, /creation_request_key/i);
+      assert.match(sql, /progress_percent\s*,\s*progress_summary/i);
       assert.deepEqual(Array.from(values).slice(0, 5), ['10', 'Trace model', 'Build it', '20', requestKey]);
       assert.match(values[5], /^[a-f0-9]{64}$/);
+      assert.match(sql, /select[\s\S]*30\s*,\s*'Project is open for delivery\.'/i);
       project.creation_payload_fingerprint = values[5];
       return { rows: [project] };
     }
@@ -177,6 +179,33 @@ test('client creation uses durable request-key conflict handling and transaction
   assert.equal((await service.createProject(client, input)).id, '77');
   assert.equal(calls.filter(({ sql }) => /insert into projects/i.test(sql)).length, 2);
   assert.equal(calls.filter(({ sql }) => /creation_request_key/i.test(sql) && /from projects p/i.test(sql)).length, 2);
+});
+
+test('client creation explicitly persists the deterministic initial progress for every status', async () => {
+  const expected = {
+    draft: [10, 'Project is in draft.'],
+    open: [30, 'Project is open for delivery.'],
+    active: [65, 'Project delivery is active.'],
+    completed: [100, 'Project delivery is complete.'],
+    archived: [0, 'Project is archived.'],
+  };
+  for (const [status, progress] of Object.entries(expected)) {
+    const project = { id: '77', client_id: '10', title: `${status} project`, description: '', status };
+    const { service } = loadProjects(async (sql, values) => {
+      if (/^begin$|^commit$/i.test(sql)) return { rows: [] };
+      if (/insert into projects/i.test(sql)) {
+        assert.match(sql, /progress_percent\s*,\s*progress_summary/i);
+        const [percent, summary] = progress;
+        assert.match(sql, new RegExp(`when '${status}' then ${percent}`, 'i'));
+        assert.match(sql, new RegExp(`when '${status}' then '${summary.replaceAll('.', '\\.')}'`, 'i'));
+        project.creation_payload_fingerprint = values[6];
+        return { rows: [project] };
+      }
+      if (/from projects p/i.test(sql) && /creation_request_key/i.test(sql)) return { rows: [project] };
+      throw new Error(`Unexpected query: ${sql}`);
+    });
+    assert.equal((await service.createProject(client, { title: `${status} project`, status, requestKey })).status, status);
+  }
 });
 
 test('engineer creation UI starts a project and navigates immediately', () => {

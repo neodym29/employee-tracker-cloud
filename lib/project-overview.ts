@@ -5,14 +5,17 @@ import { ProjectServiceError, projectAccessSql } from './projects';
 
 export const CLIENT_REQUEST_LIMIT = 3;
 export const CLIENT_REQUEST_BODY_MAX = 240;
+export const PROGRESS_SUMMARY_MAX = 240;
 const TIMELINE_LIMIT = 8;
+const TIMELINE_LABEL_MAX = 320;
 
 type ProjectStatus = 'draft' | 'open' | 'active' | 'completed' | 'archived';
 type TimelineItem = { id: string; label: string; createdAt: string };
 
 export type ProjectOverview = {
   project: { id: string; title: string; description: string; status: ProjectStatus; createdAt: string; updatedAt: string };
-  stage: { label: string; percent: number; closed: boolean };
+  stage: { label: string; closed: boolean };
+  progress: { percent: number; summary: string; version: number; updatedAt: string };
   clientName: string;
   analytics: { activeEngineerCount: number; confirmedActionCount: number; pendingActionCount: number; totalChatCount: number };
   clientRequests: Array<{ id: string; body: string; createdAt: string }>;
@@ -20,11 +23,11 @@ export type ProjectOverview = {
 };
 
 export function projectStage(status: string) {
-  if (status === 'draft') return { label: 'Draft', percent: 10, closed: false };
-  if (status === 'open') return { label: 'Open', percent: 30, closed: false };
-  if (status === 'active') return { label: 'Active', percent: 65, closed: false };
-  if (status === 'completed') return { label: 'Completed', percent: 100, closed: true };
-  return { label: 'Archived', percent: 0, closed: true };
+  if (status === 'draft') return { label: 'Draft', closed: false };
+  if (status === 'open') return { label: 'Open', closed: false };
+  if (status === 'active') return { label: 'Active', closed: false };
+  if (status === 'completed') return { label: 'Completed', closed: true };
+  return { label: 'Archived', closed: true };
 }
 
 function count(value: unknown) {
@@ -33,7 +36,12 @@ function count(value: unknown) {
 }
 
 function timestamp(value: unknown) {
-  return value instanceof Date ? value.toISOString() : String(value ?? '');
+  const date = value instanceof Date ? value : new Date(String(value ?? ''));
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+}
+
+function boundedSafeText(value: unknown, limit: number) {
+  return String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, limit);
 }
 
 function jsonRows(value: unknown): Array<Record<string, unknown>> {
@@ -51,7 +59,7 @@ export async function getProjectOverview(session: SessionUser, projectId: unknow
   const db = getPool();
   const access = projectAccessSql('$2');
   const result = await db.query(
-    `select p.id,p.title,p.description,p.status,p.created_at,p.updated_at,
+    `select p.id,p.title,p.description,p.status,p.progress_percent,p.progress_summary,p.progress_version,p.progress_updated_at,p.created_at,p.updated_at,
        client.display_name as client_name,
        (select count(*) from project_memberships engineer_members
          join app_users engineer on engineer.id=engineer_members.user_id and engineer.account_type='engineer'
@@ -66,13 +74,14 @@ export async function getProjectOverview(session: SessionUser, projectId: unknow
          order by message.created_at desc,message.id desc limit ${CLIENT_REQUEST_LIMIT}
        ) request_row),'[]'::json) as client_requests,
        coalesce((select json_agg(timeline_row order by timeline_row.created_at desc) from (
-         select event.id,event.label,event.created_at from (
+         select event.id,left(regexp_replace(event.label,'[[:cntrl:]]',' ','g'),${TIMELINE_LABEL_MAX}) as label,event.created_at from (
            select 'action:' || action.id as id,
              case action.action_type
-               when 'create_file' then 'Created project output'
-               when 'update_file' then 'Updated project output'
-               when 'rename_file' then 'Renamed project output'
-               when 'delete_file' then 'Removed project output'
+               when 'create_file' then 'Created ' || left(coalesce(action.result->>'path','project output'),180) || ' at version ' || coalesce(action.result->>'version','1')
+               when 'update_file' then 'Updated ' || left(coalesce(action.result->>'path','project output'),180) || ' to version ' || coalesce(action.result->>'version','?')
+               when 'rename_file' then 'Renamed output to ' || left(coalesce(action.result->>'path','project output'),180) || ' at version ' || coalesce(action.result->>'version','?')
+               when 'delete_file' then 'Removed ' || left(coalesce(action.result->>'path','project output'),180) || ' at version ' || coalesce(action.result->>'version','?')
+               when 'update_project_progress' then 'Progress changed from ' || coalesce(action.result->>'fromPercent','?') || '% to ' || coalesce(action.result->>'toPercent','?') || '%: ' || left(coalesce(action.result->>'toSummary',''),240)
                else 'Changed project output'
              end as label,
              coalesce(action.confirmed_at,action.created_at) as created_at
@@ -95,12 +104,15 @@ export async function getProjectOverview(session: SessionUser, projectId: unknow
   const row = result.rows[0];
   if (!row) throw new ProjectServiceError('Project not found', 404, 'not_found');
   const status = String(row.status) as ProjectStatus;
+  const percent = Number(row.progress_percent);
+  const version = Number(row.progress_version);
   return {
     project: { id: String(row.id), title: String(row.title ?? ''), description: String(row.description ?? ''), status, createdAt: timestamp(row.created_at), updatedAt: timestamp(row.updated_at) },
     stage: projectStage(status),
+    progress: { percent: Number.isInteger(percent) && percent >= 0 && percent <= 100 ? percent : 0, summary: boundedSafeText(row.progress_summary, PROGRESS_SUMMARY_MAX), version: Number.isSafeInteger(version) && version > 0 ? version : 1, updatedAt: timestamp(row.progress_updated_at) },
     clientName: String(row.client_name ?? ''),
     analytics: { activeEngineerCount: count(row.active_engineer_count), confirmedActionCount: count(row.confirmed_action_count), pendingActionCount: count(row.pending_action_count), totalChatCount: count(row.total_chat_count) },
     clientRequests: jsonRows(row.client_requests).slice(0, CLIENT_REQUEST_LIMIT).map((request) => ({ id: String(request.id), body: String(request.body ?? '').trim().slice(0, CLIENT_REQUEST_BODY_MAX), createdAt: timestamp(request.created_at) })),
-    timeline: jsonRows(row.timeline).slice(0, TIMELINE_LIMIT).map((item) => ({ id: String(item.id), label: String(item.label), createdAt: timestamp(item.created_at) })),
+    timeline: jsonRows(row.timeline).slice(0, TIMELINE_LIMIT).map((item) => ({ id: String(item.id), label: boundedSafeText(item.label, TIMELINE_LABEL_MAX), createdAt: timestamp(item.created_at) })),
   };
 }

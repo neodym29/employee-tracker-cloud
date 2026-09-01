@@ -25,8 +25,8 @@ test('overview uses an explicit narrow DTO and excludes sensitive project output
   assert.match(service, /CLIENT_REQUEST_LIMIT\s*=\s*3/);
   assert.match(service, /CLIENT_REQUEST_BODY_MAX\s*=\s*240/);
   assert.match(service, /slice\(0,\s*CLIENT_REQUEST_BODY_MAX\)/);
-  assert.match(service, /Created project output/);
-  assert.match(service, /Updated project output/);
+  assert.match(service, /Created[\s\S]*path[\s\S]*version/i);
+  assert.match(service, /Progress changed from[\s\S]*% to[\s\S]*%/);
   assert.doesNotMatch(service, /select\s+\*/i);
   assert.doesNotMatch(service, /\b(?:input|output|result|content|path|email|storage_key|sha256|manifest)\b\s*[:,]/i);
 });
@@ -36,10 +36,10 @@ test('overview mapping is bounded, factual, and archived does not imply completi
   const source = readFileSync(url(servicePath), 'utf8');
   const queries = [];
   const row = {
-    id: '7', title: 'Launch', description: 'Ship the portal', status: 'active', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z',
+    id: '7', title: 'Launch', description: 'Ship the portal', status: 'active', progress_percent: 47, progress_summary: 'API integration underway', progress_version: 4, progress_updated_at: '2026-01-02T12:00:00Z', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z',
     client_name: 'Client One', active_engineer_count: '2', confirmed_action_count: '3', pending_action_count: '1', total_chat_count: '9',
     client_requests: [{ id: '4', body: `  ${'x'.repeat(300)}  `, created_at: '2026-01-03T00:00:00Z' }],
-    timeline: [{ id: 'action:3', label: 'Updated project output', created_at: '2026-01-04T00:00:00Z' }],
+    timeline: [{ id: 'action:3', label: 'Updated progress-reports/latest.md to version 3', created_at: '2026-01-04T00:00:00Z' }],
   };
   const pool = { async query(sql, values) { queries.push({ sql, values }); return { rows: [row] }; } };
   const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
@@ -54,12 +54,14 @@ test('overview mapping is bounded, factual, and archived does not imply completi
   assert.equal(queries.length, 1, 'overview should use one fully authorized query');
   assert.match(queries[0].sql, /project_memberships access_membership/);
   assert.deepEqual(Array.from(queries[0].values), ['7', '11']);
-  assert.equal(overview.stage.percent, 65);
+  assert.equal(overview.progress.percent, 47);
+  assert.equal(overview.progress.summary, 'API integration underway');
+  assert.equal(overview.progress.version, 4);
   assert.equal(overview.clientRequests.length, 1);
   assert.equal(overview.clientRequests[0].body.length, 240);
   assert.deepEqual(Object.keys(overview.analytics).sort(), ['activeEngineerCount', 'confirmedActionCount', 'pendingActionCount', 'totalChatCount']);
-  assert.equal(module.exports.projectStage('archived').percent, 0);
-  assert.equal(module.exports.projectStage('completed').percent, 100);
+  assert.equal(module.exports.projectStage('archived').closed, true);
+  assert.equal(module.exports.projectStage('completed').closed, true);
 });
 
 test('overview normalizes nullable project copy without rendering database nulls', () => {

@@ -278,6 +278,10 @@ async function ensureSchemaNow() {
       id bigserial primary key, client_id bigint not null references app_users(id),
       title text not null check(length(title) between 1 and 120), description text not null default '' check(length(description)<=4000),
       status text not null default 'draft' check(status in ('draft','open','active','completed','archived')),
+      progress_percent integer not null default 10 check(progress_percent between 0 and 100),
+      progress_summary text not null default 'Project is in draft.' check(length(progress_summary) between 1 and 240 and progress_summary !~ '[[:cntrl:]]'),
+      progress_version integer not null default 1 check(progress_version > 0),
+      progress_updated_at timestamptz not null default now(),
       approval_status text not null check(approval_status in ('pending','approved','rejected')),
       proposal_kind text check(proposal_kind is null or proposal_kind='engineer_client'),
       creation_request_key uuid, creation_requested_by bigint references app_users(id),
@@ -334,18 +338,36 @@ async function ensureSchemaNow() {
       id bigserial primary key, project_id bigint not null references projects(id) on delete cascade, actor_user_id bigint references app_users(id),
       action_type text not null, input jsonb not null default '{}'::jsonb, output jsonb,
       status text not null default 'pending' check(status in ('pending','confirmed','cancelled')),
-      confirmed_by bigint references app_users(id), confirmed_at timestamptz, result jsonb,
+      confirmed_by bigint references app_users(id), confirmed_at timestamptz, result jsonb, display_description text,
       created_at timestamptz not null default now()
     );
     alter table project_agent_actions add column if not exists status text not null default 'pending';
     alter table project_agent_actions add column if not exists confirmed_by bigint references app_users(id);
     alter table project_agent_actions add column if not exists confirmed_at timestamptz;
     alter table project_agent_actions add column if not exists result jsonb;
+    alter table project_agent_actions add column if not exists display_description text;
     alter table projects add column if not exists creation_request_key uuid;
     alter table projects add column if not exists creation_requested_by bigint references app_users(id);
     alter table projects add column if not exists creation_payload_fingerprint text;
     alter table projects add column if not exists approval_status text;
     alter table projects add column if not exists proposal_kind text;
+    alter table projects add column if not exists progress_percent integer;
+    alter table projects add column if not exists progress_summary text;
+    alter table projects add column if not exists progress_version integer;
+    alter table projects add column if not exists progress_updated_at timestamptz;
+    update projects set
+      progress_percent=case status when 'draft' then 10 when 'open' then 30 when 'active' then 65 when 'completed' then 100 else 0 end,
+      progress_summary=case status when 'draft' then 'Project is in draft.' when 'open' then 'Project is open for delivery.' when 'active' then 'Project delivery is active.' when 'completed' then 'Project delivery is complete.' else 'Project is archived.' end,
+      progress_version=1,progress_updated_at=coalesce(updated_at,created_at,now())
+      where progress_percent is null or progress_summary is null or progress_version is null or progress_updated_at is null;
+    alter table projects alter column progress_percent set default 10;
+    alter table projects alter column progress_summary set default 'Project is in draft.';
+    alter table projects alter column progress_version set default 1;
+    alter table projects alter column progress_updated_at set default now();
+    alter table projects alter column progress_percent set not null;
+    alter table projects alter column progress_summary set not null;
+    alter table projects alter column progress_version set not null;
+    alter table projects alter column progress_updated_at set not null;
     alter table project_memberships add column if not exists is_project_proposal boolean not null default false;
     update projects set approval_status='approved' where approval_status is null;
     alter table projects alter column approval_status set not null;
@@ -387,6 +409,19 @@ async function ensureSchemaNow() {
       end if;
       if not exists (select 1 from pg_constraint where conname='projects_proposal_actor_check' and conrelid='projects'::regclass) then
         alter table projects add constraint projects_proposal_actor_check check(proposal_kind is null or creation_requested_by is not null);
+      end if;
+      if not exists (select 1 from pg_constraint where conname='projects_progress_percent_check' and conrelid='projects'::regclass) then
+        alter table projects add constraint projects_progress_percent_check check(progress_percent between 0 and 100);
+      end if;
+      if not exists (select 1 from pg_constraint where conname='projects_progress_summary_check' and conrelid='projects'::regclass) then
+        alter table projects add constraint projects_progress_summary_check check(length(progress_summary) between 1 and 240 and progress_summary !~ '[[:cntrl:]]');
+      end if;
+      if not exists (select 1 from pg_constraint where conname='projects_progress_version_check' and conrelid='projects'::regclass) then
+        alter table projects add constraint projects_progress_version_check check(progress_version > 0);
+      end if;
+      if not exists (select 1 from pg_constraint where conname='project_agent_actions_display_description_check' and conrelid='project_agent_actions'::regclass) then
+        alter table project_agent_actions add constraint project_agent_actions_display_description_check
+          check(display_description is null or (length(display_description) between 1 and 320 and display_description !~ '[[:cntrl:]]'));
       end if;
       if not exists (select 1 from pg_constraint where conname='project_memberships_proposal_shape_check' and conrelid='project_memberships'::regclass) then
         alter table project_memberships add constraint project_memberships_proposal_shape_check
@@ -508,6 +543,7 @@ async function ensureSchemaNow() {
       if old.status='pending' and new.status in ('confirmed','cancelled')
          and new.id=old.id and new.project_id=old.project_id and new.actor_user_id is not distinct from old.actor_user_id
          and new.action_type=old.action_type and new.input=old.input and new.created_at=old.created_at
+         and new.display_description is not distinct from old.display_description
          and new.output is not distinct from old.output and new.confirmed_by=old.actor_user_id
          and new.confirmed_at is not null and new.result is not null then
         return new;

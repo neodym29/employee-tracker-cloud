@@ -131,6 +131,7 @@ export async function createProject(session: SessionUser, input: { clientId?: un
   const ownerId = engineerCreating ? id(input.clientId, 'client id') : session.id;
   const status = engineerCreating ? 'open' : String(input.status ?? 'draft');
   if (!STATUSES.has(status)) throw new ProjectServiceError('Invalid project status');
+
   const selectedEngineerIds = creationEngineerIds(input.engineerIds, !engineerCreating);
   const counterpartIds = engineerCreating ? [session.id] : selectedEngineerIds;
   const payloadFingerprint = creationFingerprint({
@@ -151,16 +152,18 @@ export async function createProject(session: SessionUser, input: { clientId?: un
     transactionStarted = true;
     const inserted = engineerCreating
       ? await client.query(
-          `insert into projects(client_id,title,description,status,approval_status,proposal_kind,creation_requested_by,creation_request_key,creation_payload_fingerprint)
-           select id,$2,$3,'open','approved',null,$4,$5::uuid,$6 from app_users
+          `insert into projects(client_id,title,description,status,approval_status,proposal_kind,creation_requested_by,creation_request_key,creation_payload_fingerprint,progress_percent,progress_summary)
+           select id,$2,$3,'open','approved',null,$4,$5::uuid,$6,30,'Project is open for delivery.' from app_users
            where id=$1 and account_type='client' and approval_status='approved'
            on conflict(creation_requested_by,creation_request_key) do nothing
            returning id,client_id,title,description,status,approval_status,created_at,updated_at,creation_payload_fingerprint`,
           [ownerId, title, description, session.id, creationRequestKey, payloadFingerprint],
         )
       : await client.query(
-          `insert into projects(client_id,title,description,status,approval_status,proposal_kind,creation_requested_by,creation_request_key,creation_payload_fingerprint)
-           values($1,$2,$3,$4,'approved',null,$5,$6::uuid,$7)
+          `insert into projects(client_id,title,description,status,approval_status,proposal_kind,creation_requested_by,creation_request_key,creation_payload_fingerprint,progress_percent,progress_summary)
+           values($1,$2,$3,$4,'approved',null,$5,$6::uuid,$7,
+             case $4 when 'draft' then 10 when 'open' then 30 when 'active' then 65 when 'completed' then 100 when 'archived' then 0 end,
+             case $4 when 'draft' then 'Project is in draft.' when 'open' then 'Project is open for delivery.' when 'active' then 'Project delivery is active.' when 'completed' then 'Project delivery is complete.' when 'archived' then 'Project is archived.' end)
            on conflict(creation_requested_by,creation_request_key) do nothing
            returning id,client_id,title,description,status,approval_status,created_at,updated_at,creation_payload_fingerprint`,
           [ownerId, title, description, status, session.id, creationRequestKey, payloadFingerprint],

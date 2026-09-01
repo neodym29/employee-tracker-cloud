@@ -71,11 +71,12 @@ test('agent work and output mutations expose visible accessible progress without
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*animation:\s*none/);
 });
 
-test('confirmed output appears only as generic bounded timeline labels', () => {
-  const [ui, css] = [read('app/projects/[projectId]/WorkspaceClient.tsx'), read('app/globals.css')];
+test('confirmed output uses server-produced bounded timeline details without exposing mutation payloads', () => {
+  const [ui, css, overview] = [read('app/projects/[projectId]/WorkspaceClient.tsx'), read('app/globals.css'), read('lib/project-overview.ts')];
   assert.match(css, /--green\s*:/);
-  assert.match(ui, /Create project output/);
-  assert.match(ui, /Update project output/);
+  assert.match(overview, /Created ['"]?\s*\|\|\s*left|when 'create_file' then 'Created /);
+  assert.match(overview, /when 'update_file' then 'Updated /);
+  assert.match(overview, /when 'update_project_progress' then 'Progress changed from /);
   assert.doesNotMatch(ui, /fileReceipt|File created|action\.result|action\.input/);
 });
 

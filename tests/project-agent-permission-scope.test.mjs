@@ -82,9 +82,10 @@ test('project identity questions use only the authoritative description', () => 
 });
 
 test('pending actions are private to the member whose chat proposed them', async () => {
-  const pending = { id: '7', action_type: 'update_file', input: {}, status: 'pending', actor_user_id: actor.id };
-  const { service, calls } = loadChat(async (sql, values) => {
-    if (/select p\.id from projects/i.test(sql)) return { rows: [{ id: '2' }] };
+  const pending = { id: '7', action_type: 'update_file', status: 'pending', actor_user_id: actor.id, description: 'Legacy project output change', created_at: '2026-09-01T00:00:00Z' };
+  const { service, calls } = loadChat(async (sql) => {
+    if (/^\s*(begin|commit)\s*$/i.test(sql)) return { rows: [] };
+    if (/select p\.id,p\.client_id/i.test(sql)) return { rows: [{ id: '2', client_id: actor.id }] };
     if (/from project_chat_messages/i.test(sql)) return { rows: [] };
     if (/from project_agent_actions/i.test(sql)) return { rows: [pending] };
     throw new Error(`Unexpected query: ${sql}`);
@@ -95,6 +96,34 @@ test('pending actions are private to the member whose chat proposed them', async
   const actionRead = calls.find((call) => /from project_agent_actions/i.test(call.sql));
   assert.match(actionRead.sql, /actor_user_id\s*=\s*\$2/i);
   assert.deepEqual(Array.from(actionRead.values), ['2', actor.id]);
+  assert.equal(actionRead.target, 'client', 'authorization and protected action reads must share one transaction');
+  assert.equal(calls.find((call) => /from project_chat_messages/i.test(call.sql)).target, 'client');
+  assert.match(calls.find((call) => /select p\.id,p\.client_id/i.test(call.sql)).sql, /for share of p/i);
+  assert.ok(calls.some((call) => call.target === 'client' && /^\s*commit\s*$/i.test(call.sql)));
+});
+
+test('chat submission keeps the access lock through every protected context read, then commits before calling the backend', async () => {
+  let backendCalled = false;
+  const { service, calls } = loadChat(async (sql, _values, target) => {
+    if (/^\s*(begin|commit)\s*$/i.test(sql)) return { rows: [] };
+    if (/select p\.id,p\.client_id/i.test(sql)) return { rows: [{ id: '2', client_id: actor.id, title: 'Atomic', description: '', status: 'active', progress_percent: 50, progress_summary: 'Half', progress_version: 1 }] };
+    if (/from project_file_heads/i.test(sql) || /from project_chat_messages/i.test(sql)) {
+      assert.equal(target, 'client');
+      return { rows: [] };
+    }
+    if (/insert into project_chat_messages/i.test(sql)) return { rows: [{ id: '1', role: 'user', body: 'Inspect', created_at: '2026-09-01T00:00:00Z' }] };
+    throw new Error(`Unexpected query: ${sql}`);
+  }, async () => {
+    backendCalled = true;
+    const initialCommit = calls.findIndex((call) => /^\s*commit\s*$/i.test(call.sql));
+    const contextRead = calls.findIndex((call) => /from project_chat_messages/i.test(call.sql));
+    assert.ok(initialCommit > contextRead, 'context transaction must commit only after protected reads');
+    return new Response(JSON.stringify({ answer: 'Done', actions: [] }), { status: 200 });
+  });
+
+  await service.submitProjectChat(actor, '2', { message: 'Inspect' });
+  assert.equal(backendCalled, true);
+  assert.equal(calls.filter((call) => /select p\.id,p\.client_id/i.test(call.sql)).length, 2, 'writes must reauthorize after the external call');
 });
 
 test('a project member cannot confirm or cancel another member’s pending action', async () => {
@@ -125,8 +154,8 @@ test('chat submission rechecks active project access in the write transaction af
       return { rows: [] }; // access was revoked while backend ran
     }
     if (target === 'client' && /from project_memberships pm/i.test(sql)) return { rows: [{ id: 'membership' }] };
-    if (target === 'pool' && /from project_file_heads/i.test(sql)) return { rows: [] };
-    if (target === 'pool' && /from project_chat_messages/i.test(sql)) return { rows: [] };
+    if (target === 'client' && /from project_file_heads/i.test(sql)) return { rows: [] };
+    if (target === 'client' && /from project_chat_messages/i.test(sql)) return { rows: [] };
     if (target === 'client' && /^\s*(begin|commit|rollback)\s*$/i.test(sql)) return { rows: [] };
     if (target === 'client' && /insert into project_chat_messages|insert into project_agent_actions/i.test(sql)) {
       assert.fail('revoked member must not persist chat or proposed actions');

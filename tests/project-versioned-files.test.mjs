@@ -84,14 +84,15 @@ test('listing and download resolve one exact latest non-tombstone version with c
   assert.ok(calls.filter((call) => /from project_file_heads/i.test(call.sql)).every((call) => /current_version/i.test(call.sql)));
 });
 
-test('project agent exposes only file actions, auto-confirms create, and versions mutations', () => {
+test('project agent exposes only bounded output and progress actions, auto-confirms create, and versions mutations', () => {
   const source = read('lib/project-chat.ts');
-  assert.match(source, /ACTION_TYPES\s*=\s*\[['"]create_file['"],\s*['"]update_file['"],\s*['"]rename_file['"],\s*['"]delete_file['"]\]/);
+  assert.match(source, /ACTION_TYPES\s*=\s*\[['"]create_file['"],\s*['"]update_file['"],\s*['"]rename_file['"],\s*['"]delete_file['"],\s*['"]update_project_progress['"]\]/);
   assert.doesNotMatch(source, /case ['"](?:create_record|update_record|register_artifact|delete_record)['"]/);
   assert.match(source, /create_file[\s\S]*status[^\n]*confirmed/i);
   assert.match(source, /update_file[\s\S]*expectedVersion[\s\S]*insert into project_files/i);
   assert.match(source, /rename_file[\s\S]*expectedVersion[\s\S]*insert into project_files/i);
   assert.match(source, /delete_file[\s\S]*expectedVersion[\s\S]*insert into project_files/i);
+  assert.match(source, /update_project_progress[\s\S]*expectedVersion[\s\S]*progress_version/i);
   assert.match(source, /project_file_heads[\s\S]*current_version/i);
   assert.match(source, /hiddenProjectState|hidden project state/i);
   assert.doesNotMatch(source, /storageKey|child_process|execSync|spawn\(/);
