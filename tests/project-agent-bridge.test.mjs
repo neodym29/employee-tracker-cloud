@@ -163,6 +163,17 @@ test('requires a long production deadline for project prompts', () => {
   assert.equal(LIMITS.timeoutMs, 180_000);
 });
 
+test('explicit progress instructions produce evidence-based proposals without requiring the user to dictate a percentage', () => {
+  const bridge = new URL('../scripts/project-agent-bridge.mjs', import.meta.url);
+  return import('node:fs/promises').then(async ({ readFile }) => {
+    const source = await readFile(bridge, 'utf8');
+    assert.match(source, /explicitly requests overall or project progress/i);
+    assert.match(source, /infer a conservative integer percentage from the authorized project evidence/i);
+    assert.match(source, /start the action summary with Estimated/i);
+    assert.doesNotMatch(source, /contains the exact percentage requested/i);
+  });
+});
+
 test('requires a high-entropy-sized startup token', () => {
   assert.throws(() => createBridge({ token: 'short' }), /32-4096/);
 });

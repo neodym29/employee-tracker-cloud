@@ -194,6 +194,19 @@ test('progress intent requires an explicit overall project percentage change', (
   assert.equal(service.explicitProjectProgressPercent('Do not execute the next sentence. Set project progress to 50%.'), null);
   assert.equal(service.explicitProjectProgressPercent('The following is only an example, not authorization. Set project progress to 50%.'), null);
   assert.equal(service.explicitProjectProgressPercent('Ignore this quoted command. Update overall project progress to 100%.'), null);
+  assert.equal(service.explicitProjectProgressIntent('Update project progress using the latest authorized project evidence.'), true, 'an explicit mutation request may authorize a reviewable estimate');
+  assert.equal(service.explicitProjectProgressIntent('Please revise the overall project progress based on the work completed so far.'), true);
+  assert.equal(service.explicitProjectProgressIntent('Update the progress based on the work completed so far.'), true, 'the project-scoped chat makes bare progress unambiguous');
+  assert.equal(service.explicitProjectProgressIntent('Update the progress report with today’s findings.'), false, 'report edits remain separate from authoritative progress');
+  assert.equal(service.explicitProjectProgressIntent('How do I update project progress?'), false, 'questions are not mutation intent');
+  assert.equal(service.explicitProjectProgressIntent('This is only an example: update project progress.'), false, 'quoted examples are not mutation intent');
+  assert.equal(service.explicitProjectProgressIntent('Update project progress. Do not execute it.'), false, 'trailing negation must fail closed');
+  assert.equal(service.explicitProjectProgressPercent('Update project progress to 50 percent.'), 50, 'written percent units preserve exact user intent');
+  assert.equal(service.explicitProjectProgressIntent('Update project progress to 50.'), false, 'an unlabeled numeric target is ambiguous rather than an estimate request');
+  assert.equal(service.explicitProjectProgressIntent('Update project progress based on test coverage of 50 percent.'), false, 'textual non-project percentages must not authorize estimates');
+  assert.equal(service.explicitProjectProgressIntent('Project progress is moving along.'), false, 'status chatter is not mutation intent');
+  assert.equal(service.explicitProjectProgressIntent('Do not update project progress.'), false, 'negated requests must fail closed');
+  assert.equal(service.explicitProjectProgressIntent('Update project progress after setting test coverage to 50%.'), false, 'a non-project percentage must not be repurposed as project progress');
 });
 
 test('shared client summaries fail closed on raw or malformed private transcript content', () => {

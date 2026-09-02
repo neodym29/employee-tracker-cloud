@@ -85,9 +85,13 @@ test('workspace renders overview first and a sticky right chat without filesyste
   assert.doesNotMatch(workspace, /\/files|ProjectFile|fileRail|fileList|FileReceipt|Open or download|Agent documents/);
   assert.match(workspace, /Project member/);
   assert.doesNotMatch(workspace, /message\.role === 'assistant' \? 'Project agent' : 'You'/);
-  assert.match(css, /\.agentGrid\s*\{[^}]*grid-template-columns:\s*minmax\(0,1fr\)\s+minmax\(360px,410px\)/s);
-  assert.match(css, /\.chatRail\s*\{[^}]*position:\s*sticky[^}]*max-height:\s*calc\(100dvh\s*-\s*180px\)/s);
+  assert.match(css, /\.agentWorkspace\s*\{[^}]*width:\s*min\(1520px,calc\(100vw\s*-\s*64px\)\)[^}]*max-width:\s*none/s, 'desktop workspace must use the available viewport instead of inheriting the narrow main cap');
+  assert.match(css, /\.agentGrid\s*\{[^}]*grid-template-columns:\s*minmax\(0,1fr\)\s+minmax\(440px,520px\)/s, 'project chat must be a readable primary surface on wide screens');
+  assert.match(css, /\.message p\s*\{[^}]*font-size:\s*15px[^}]*line-height:\s*1\.6/s, 'chat copy must be comfortably readable');
+  assert.match(css, /\.agentCapability\s*\{[^}]*font-size:\s*13px/s);
+  assert.match(css, /\.agentComposer textarea\s*\{[^}]*font-size:\s*15px/s);
+  assert.match(css, /\.chatRail\s*\{[^}]*position:\s*sticky[^}]*max-height:\s*calc\(100dvh\s*-\s*100px\)/s);
   assert.match(css, /\.actionList\s*\{[^}]*flex:\s*0\s+0\s+auto[^}]*max-height:\s*320px[^}]*overflow-y:\s*auto/s, 'two pending confirmations must remain fully visible instead of shrinking or hiding controls behind the composer');
-  assert.match(css, /@media\s*\(max-width:\s*900px\)[\s\S]*\.agentGrid\s*\{[^}]*grid-template-columns:\s*minmax\(0,1fr\)/);
+  assert.match(css, /@media\s*\(max-width:\s*1100px\)[\s\S]*\.agentGrid\s*\{[^}]*grid-template-columns:\s*minmax\(0,1fr\)/);
   assert.doesNotMatch(css, /\.fileRail\s*\{\s*order:\s*-1/);
 });

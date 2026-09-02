@@ -37,7 +37,7 @@ test('backend contract uses a closed request-summary taxonomy and persistence is
   assert.match(service, /contract_version:\s*2/);
   assert.match(service, /REQUEST_SUMMARY_MAX\s*=\s*160/);
   assert.match(service, /lockedProject\.client_id\s*===\s*session\.id[\s\S]*project_client_request_summaries\(project_id,source_message_id,summary\)/);
-  assert.match(service, /explicitProjectProgressPercent\(String\(claimed\.rows\[0\]\.source_message_body\)\)/i);
+  assert.match(service, /const sourceMessage[^\n]*source_message_body[\s\S]*explicitProjectProgressPercent\(sourceMessage\)[\s\S]*explicitProjectProgressIntent\(sourceMessage\)/i);
   assert.match(bridge, /required:\s*\['answer', 'actions', 'requestSummary'\]/);
   assert.match(bridge, /requestSummarySchema[\s\S]*maxLength:\s*160/);
   assert.match(bridge, /requestSummarySchema[\s\S]*enum:/);
@@ -56,12 +56,14 @@ test('overview reads only summaries, scopes private chat and pending counts to a
   assert.doesNotMatch(workspace, /Shared chat|No client requests in project chat|What the client asked/);
 });
 
-test('progress proposals require an explicit overall percentage and 100 percent confirmation requires completed status', () => {
+test('progress proposals require explicit mutation intent, preserve exact percentages, and gate 100 percent on completed status', () => {
   const service = read('lib/project-chat.ts');
   const bridge = read('scripts/project-agent-bridge.mjs');
   assert.match(service, /explicitProjectProgressPercent/);
-  assert.match(service, /action\.type !== 'update_project_progress'[\s\S]*explicitPercent !== null[\s\S]*action\.args\.percent\) === explicitPercent/);
+  assert.match(service, /explicitProjectProgressIntent/);
+  assert.match(service, /action\.type !== 'update_project_progress'[\s\S]*progressIntent[\s\S]*explicitPercent === null[^\n]*Number\(action\.args\.percent\) === explicitPercent/);
+  assert.match(service, /explicitPercent !== null[^\n]*Estimated/i, 'inferred progress must be visibly labeled as an estimate');
   assert.match(service, /did not propose an overall project progress change/i);
   assert.match(service, /Number\(proposed\.args\.percent\) === 100[\s\S]*lockedProject\.status[^\n]*completed[\s\S]*409/i);
-  assert.match(bridge, /100% only after the client marks the project completed/i);
+  assert.match(bridge, /Never infer 100%; 100% is valid only when the client explicitly requests it after marking the project completed/i);
 });
