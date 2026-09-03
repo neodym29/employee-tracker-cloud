@@ -378,6 +378,44 @@ async function ensureSchemaNow() {
     alter table project_agent_actions add column if not exists result jsonb;
     alter table project_agent_actions add column if not exists display_description text;
     alter table project_agent_actions add column if not exists source_message_id bigint;
+    create table if not exists project_tracemini_repository_matches (
+      project_id bigint primary key references projects(id) on delete cascade,
+      config_generation bigint not null check(config_generation>0), config_revision bigint not null check(config_revision>0),
+      repository_id text check(repository_id is null or (length(repository_id) between 1 and 200 and repository_id !~ '[[:cntrl:]]')),
+      repository_name text check(repository_name is null or (length(repository_name) between 1 and 160 and repository_name !~ '[[:cntrl:]]')),
+      repository_key text check(repository_key is null or (length(repository_key) between 1 and 1024 and repository_key !~ '[[:cntrl:]]')),
+      match_status text not null check(match_status in ('matched','unmatched','ambiguous')), matched_at timestamptz, updated_at timestamptz not null default now(),
+      check((match_status='matched' and repository_id is not null and repository_name is not null and repository_key is not null and matched_at is not null) or (match_status<>'matched' and repository_id is null and repository_name is null and repository_key is null and matched_at is null))
+    );
+    create index if not exists idx_project_tracemini_repository_matches_status on project_tracemini_repository_matches(project_id,match_status);
+    create table if not exists project_tracemini_evidence (
+      project_id bigint not null references projects(id) on delete cascade, evidence_key text not null check(evidence_key ~ '^[a-f0-9]{64}$'),
+      config_generation bigint not null check(config_generation > 0), config_revision bigint not null check(config_revision > 0),
+      repository_id text not null check(length(repository_id) between 1 and 200 and repository_id !~ '[[:cntrl:]]'),
+      repository_key text not null check(length(repository_key) between 1 and 1024 and repository_key !~ '[[:cntrl:]]'), newest_occurred_at timestamptz not null,
+      proposed_action_id bigint not null references project_agent_actions(id), created_at timestamptz not null default now(),
+      constraint project_tracemini_evidence_future_skew_check check(newest_occurred_at <= created_at + interval '5 minutes'), primary key(project_id,evidence_key)
+    );
+    alter table project_tracemini_evidence add column if not exists config_generation bigint;
+    alter table project_tracemini_evidence add column if not exists config_revision bigint;
+    alter table project_tracemini_evidence add column if not exists repository_key text;
+    do $$ begin
+      if not exists (select 1 from pg_constraint where conname='project_tracemini_evidence_identity_check') then
+        alter table project_tracemini_evidence add constraint project_tracemini_evidence_identity_check check(
+          (config_generation is null and config_revision is null and repository_key is null) or
+          (config_generation > 0 and config_revision > 0 and repository_key is not null
+            and length(repository_key) between 1 and 1024 and repository_key !~ '[[:cntrl:]]')) not valid;
+      end if;
+      if not exists (select 1 from pg_constraint where conname='project_tracemini_evidence_future_skew_check') then
+        alter table project_tracemini_evidence add constraint project_tracemini_evidence_future_skew_check
+          check(newest_occurred_at <= created_at + interval '5 minutes') not valid;
+      end if;
+    end $$;
+    create index if not exists idx_project_tracemini_evidence_action on project_tracemini_evidence(proposed_action_id);
+    create index if not exists idx_project_tracemini_evidence_watermark on project_tracemini_evidence(project_id,config_generation,config_revision,repository_id,repository_key,newest_occurred_at desc);
+    create or replace function prevent_project_tracemini_evidence_mutation() returns trigger language plpgsql as $$ begin raise exception 'TraceMini evidence rows are immutable'; end $$;
+    drop trigger if exists prevent_project_tracemini_evidence_update on project_tracemini_evidence;
+    create trigger prevent_project_tracemini_evidence_update before update or delete on project_tracemini_evidence for each row execute function prevent_project_tracemini_evidence_mutation();
     alter table projects add column if not exists creation_request_key uuid;
     alter table projects add column if not exists creation_requested_by bigint references app_users(id);
     alter table projects add column if not exists creation_payload_fingerprint text;
@@ -387,6 +425,8 @@ async function ensureSchemaNow() {
     alter table projects add column if not exists progress_summary text;
     alter table projects add column if not exists progress_version integer;
     alter table projects add column if not exists progress_updated_at timestamptz;
+    alter table projects add column if not exists git_remote_url text;
+    alter table projects add column if not exists git_repository_key text;
     update projects set
       progress_percent=case status when 'draft' then 10 when 'open' then 30 when 'active' then 65 when 'completed' then 100 else 0 end,
       progress_summary=case status when 'draft' then 'Project is in draft.' when 'open' then 'Project is open for delivery.' when 'active' then 'Project delivery is active.' when 'completed' then 'Project delivery is complete.' else 'Project is archived.' end,
@@ -400,6 +440,15 @@ async function ensureSchemaNow() {
     alter table projects alter column progress_summary set not null;
     alter table projects alter column progress_version set not null;
     alter table projects alter column progress_updated_at set not null;
+    do $$ begin
+      if not exists (select 1 from pg_constraint where conname='projects_git_link_pair_check') then
+        alter table projects add constraint projects_git_link_pair_check check(
+          (git_remote_url is null and git_repository_key is null) or
+          (git_remote_url is not null and git_repository_key is not null and length(git_remote_url) between 1 and 2048 and length(git_repository_key) between 1 and 1024 and git_remote_url !~ '[[:cntrl:]]' and git_repository_key !~ '[[:cntrl:]]'));
+      end if;
+    end $$;
+    drop trigger if exists require_new_project_git_link_before_insert on projects;
+    drop function if exists require_new_project_git_link();
     alter table project_memberships add column if not exists is_project_proposal boolean not null default false;
     update projects set approval_status='approved' where approval_status is null;
     alter table projects alter column approval_status set not null;

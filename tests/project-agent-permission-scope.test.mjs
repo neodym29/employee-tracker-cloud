@@ -132,7 +132,7 @@ test('chat submission keeps the access lock through every protected context read
 test('a project member cannot confirm or cancel another member’s pending action', async () => {
   for (const operation of ['confirmProjectAgentAction', 'cancelProjectAgentAction']) {
     const { service, calls } = loadChat(async (sql) => {
-      if (/^\s*(begin|rollback)\s*$/i.test(sql)) return { rows: [] };
+      if (/^\s*(begin|rollback)\s*$/i.test(sql) || /pg_advisory_xact_lock/i.test(sql)) return { rows: [] };
       if (/select p\.id,p\.client_id/i.test(sql)) return { rows: [{ id: '2', client_id: actor.id }] };
       if (/project_agent_actions/i.test(sql)) return { rows: [] };
       throw new Error(`Unexpected query: ${sql}`);
@@ -252,7 +252,7 @@ test('one completed task cannot persist an inferred whole-project progress actio
 
 test('legacy pending progress action without source evidence is rejected before project mutation', async () => {
   const { service, calls } = loadChat(async (sql) => {
-    if (/^\s*(begin|rollback)\s*$/i.test(sql)) return { rows: [] };
+    if (/^\s*(begin|rollback)\s*$/i.test(sql) || /pg_advisory_xact_lock/i.test(sql)) return { rows: [] };
     if (/select p\.id,p\.client_id/i.test(sql)) return { rows: [{ id: '2', client_id: actor.id, status: 'active', progress_percent: 30, progress_summary: 'In progress', progress_version: 1 }] };
     if (/from project_agent_actions a left join project_chat_messages source/i.test(sql)) return { rows: [{ id: '7', action_type: 'update_project_progress', input: { percent: 100, summary: 'Done', expectedVersion: 1 }, status: 'pending', source_message_id: null, source_message_body: null }] };
     if (/update projects set progress_percent/i.test(sql)) assert.fail('guard must run before the project mutation');
@@ -261,6 +261,57 @@ test('legacy pending progress action without source evidence is rejected before 
 
   await assert.rejects(service.confirmProjectAgentAction(actor, '2', '7'), (error) => error?.status === 409 && /authorization could not be verified/i.test(error.message));
   assert.ok(calls.some((call) => /^\s*rollback\s*$/i.test(call.sql)));
+});
+
+test('owner can confirm an immutable TraceMini evidence-backed proposal without fabricated chat intent', async () => {
+  const owner = { id: '31', role: 'user', account_type: 'client' };
+  const { service, calls } = loadChat(async (sql, values) => {
+    if (/^\s*(begin|commit)\s*$/i.test(sql) || /pg_advisory_xact_lock/i.test(sql)) return { rows: [] };
+    if (/select p\.id,p\.client_id/i.test(sql)) return { rows: [{ id: '2', client_id: owner.id, status: 'active', progress_percent: 30, progress_summary: 'In progress', progress_version: 4 }] };
+    if (/from project_agent_actions a left join project_chat_messages source/i.test(sql)) return { rows: [{ id: '7', action_type: 'update_project_progress', input: { percent: 50, summary: 'TraceMini observed 1 new Git event for widget; latest was commit at 2026-01-01T00:00:00.000Z.', expectedVersion: 4 }, status: 'pending', source_message_id: null, source_message_body: null, tracemini_evidence_action_id: '7' }] };
+    if (/select evidence\.evidence_key/i.test(sql)) return { rows: [{ evidence_key: 'a'.repeat(64) }] };
+    if (/update projects set progress_percent/i.test(sql)) return { rows: [{ progress_percent: 50, progress_summary: values[2], progress_version: 5, progress_updated_at: '2026-01-01T00:01:00Z' }] };
+    if (/update project_agent_actions set status='confirmed'/i.test(sql)) return { rows: [{ id: '7', action_type: 'update_project_progress', status: 'confirmed' }] };
+    if (/insert into project_chat_messages/i.test(sql)) return { rows: [] };
+    throw new Error(`Unexpected query: ${sql}`);
+  });
+
+  const result = await service.confirmProjectAgentAction(owner, '2', '7');
+  assert.equal(result.status, 'confirmed');
+  assert.ok(calls.some((call) => /left join project_tracemini_evidence/i.test(call.sql)), 'confirmation must prove system provenance from immutable evidence');
+  const currentCheck = calls.find((call) => /select evidence\.evidence_key/i.test(call.sql));
+  assert.match(currentCheck.sql, /i\.enabled=true/);
+  assert.match(currentCheck.sql, /evidence\.config_generation=i\.config_generation[\s\S]*evidence\.config_revision=i\.config_revision/);
+  assert.match(currentCheck.sql, /m\.config_generation=i\.config_generation[\s\S]*m\.config_revision=i\.config_revision/);
+  assert.match(currentCheck.sql, /m\.match_status='matched'/);
+  assert.match(currentCheck.sql, /evidence\.repository_id=m\.repository_id[\s\S]*evidence\.repository_key=m\.repository_key/);
+  assert.match(currentCheck.sql, /m\.repository_key=p\.git_repository_key/);
+  assert.match(currentCheck.sql, /for update of i,m/);
+  const advisoryIndex = calls.findIndex((call) => /pg_advisory_xact_lock/i.test(call.sql));
+  const projectIndex = calls.findIndex((call) => /select p\.id,p\.client_id/i.test(call.sql));
+  assert.ok(advisoryIndex >= 0 && advisoryIndex < projectIndex, 'confirmation must use proposal creation lock order: advisory, then project/integration/match');
+  assert.equal(calls.filter((call) => /update projects set progress_percent/i.test(call.sql)).length, 1);
+});
+
+test('TraceMini confirmation rejects every stale integration and repository identity before mutation', async () => {
+  const owner = { id: '31', role: 'user', account_type: 'client' };
+  const staleCases = [
+    'integration removed', 'integration disabled', 'configuration generation changed', 'configuration revision changed',
+    'match became unmatched', 'match became ambiguous', 'repository id relinked', 'repository key relinked', 'project Git key changed',
+  ];
+  for (const staleCase of staleCases) {
+    const { service, calls } = loadChat(async (sql) => {
+      if (/^\s*(begin|rollback)\s*$/i.test(sql) || /pg_advisory_xact_lock/i.test(sql)) return { rows: [] };
+      if (/select p\.id,p\.client_id/i.test(sql)) return { rows: [{ id: '2', client_id: owner.id, status: 'active', progress_percent: 30, progress_summary: 'In progress', progress_version: 4 }] };
+      if (/from project_agent_actions a left join project_chat_messages source/i.test(sql)) return { rows: [{ id: '7', action_type: 'update_project_progress', input: { percent: 50, summary: 'TraceMini observed 1 new Git event for widget; latest was commit at 2026-01-01T00:00:00.000Z.', expectedVersion: 4 }, source_message_id: null, tracemini_evidence_action_id: '7' }] };
+      if (/select evidence\.evidence_key/i.test(sql)) return { rows: [] }; // the locked exact-current join fails for this stale case
+      if (/update projects set progress_percent|update project_agent_actions set status='confirmed'/i.test(sql)) assert.fail(`${staleCase} must not mutate progress or action state`);
+      throw new Error(`Unexpected query for ${staleCase}: ${sql}`);
+    });
+    await assert.rejects(service.confirmProjectAgentAction(owner, '2', '7'), (error) => error?.status === 409 && error?.code === 'conflict' && /stale/i.test(error.message), staleCase);
+    assert.ok(calls.some((call) => /^\s*rollback\s*$/i.test(call.sql)), staleCase);
+    assert.equal(calls.some((call) => /update projects set progress_percent|update project_agent_actions set status='confirmed'/i.test(call.sql)), false, staleCase);
+  }
 });
 
 test('client actionable request stores only a bounded source-linked summary and private assistant row', async () => {

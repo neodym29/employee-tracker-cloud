@@ -16,6 +16,8 @@ function loadTs(path, stubs = {}, globals = {}) {
     if (specifier === 'server-only') return {};
     if (specifier in stubs) return stubs[specifier];
     if (specifier === 'node:crypto' || specifier === 'crypto') return requireNodeCrypto;
+    if (specifier === './git-remote') return loadTs('lib/git-remote.ts');
+    if (specifier === './tracemini-progress') return { proposeProgress: () => null, traceMiniEvidenceKey: () => '0'.repeat(64) };
     throw new Error(`Unexpected import: ${specifier}`);
   } };
   vm.runInNewContext(javascript, sandbox, { filename: path });
@@ -36,6 +38,14 @@ const owner = { id: '1', role: 'employee', account_type: 'client' };
 const engineer = { id: '2', role: 'employee', account_type: 'engineer' };
 const admin = { id: '3', role: 'admin', account_type: 'admin' };
 
+function normalizeLinked(mod, input, members = []) {
+  const activity = (input.activity || []).map((event) => ({ repository_id: 'linked-repository', ...event }));
+  return mod.normalizeTraceMiniData({
+    dashboard: { events: activity, repositories: [{ id: 'linked-repository', name: 'app', normalized_remote: 'https://github.com/acme/widget.git' }], stats: {}, timeline: [] },
+    settings: input.settings || {}, agents: input.agents || [], reports: input.reports || [],
+  }, members, 'github.com/acme/widget');
+}
+
 test('management authorization permits owner clients and strict admins but rejects employees/engineers', () => {
   const mod = loadTs(service, { './db': {}, './projects': {}, './tracemini-adapter': {}, './tracemini-crypto': {}, './tracemini-normalize': {} });
   assert.equal(mod.isTraceMiniManager(owner, '1'), true);
@@ -52,6 +62,48 @@ test('project member read uses approved owner-or-active-member authorization', (
   assert.match(text, /projectAccessSql/);
   assert.match(text, /membership_status='active'/);
   assert.match(source(dataRoute), /requireApiSession/);
+});
+
+test('TraceMini data GET is read-safe and proposal creation is an explicit same-origin POST', async () => {
+  const routeSource = source(dataRoute);
+  const serviceSource = source(service);
+  const getHandler = routeSource.match(/export async function GET[\s\S]*?(?=export async function POST|$)/)?.[0] ?? '';
+  const getService = serviceSource.match(/export async function getTraceMiniData[\s\S]*?\n}\n\n\/\*\*/)?.[0] ?? '';
+  assert.doesNotMatch(getHandler, /proposeTraceMiniProgress/);
+  assert.doesNotMatch(getService, /proposeTraceMiniProgress\s*\(/, 'a safe browser GET must never create proposals or evidence indirectly');
+  assert.match(routeSource, /export async function POST/);
+  assert.match(routeSource, /assertSameOrigin\s*\(request\)/);
+  assert.match(routeSource, /proposeTraceMiniProgressForProject/);
+
+  const session = { id: '1', role: 'employee', account_type: 'client' };
+  let reads = 0;
+  let proposals = 0;
+  const route = loadTs(dataRoute, {
+    'next/server': { NextResponse: { json: (body, init = {}) => ({ body, status: init.status ?? 200, headers: init.headers }) } },
+    '@/lib/api': {
+      assertSameOrigin(request) { if (request.headers.get('origin') !== 'https://cloud.example') { const error = new Error('Invalid origin'); error.status = 403; throw error; } },
+      async requireApiSession() { return session; },
+      apiErrorResponse(error) { return { body: { ok: false, error: error.message }, status: error.status ?? 500 }; },
+    },
+    '@/lib/tracemini': {
+      async getTraceMiniData(received, project) { reads += 1; assert.equal(received, session); assert.equal(project, '9'); return { state: 'fresh', data: { matchStatus: 'matched' } }; },
+      async proposeTraceMiniProgressForProject(received, project) { proposals += 1; assert.equal(received, session); assert.equal(project, '9'); return true; },
+    },
+  });
+  const context = { params: Promise.resolve({ projectId: '9' }) };
+  const request = (origin) => ({ headers: { get: (name) => name === 'origin' ? origin : null } });
+  const getResult = await route.GET(request(null), context);
+  assert.equal(getResult.status, 200, 'ordinary reads remain usable without an Origin header');
+  assert.equal(reads, 1);
+  assert.equal(proposals, 0, 'GET must not create an action or evidence');
+  for (const origin of [null, 'https://evil.example']) {
+    const result = await route.POST(request(origin), context);
+    assert.equal(result.status, 403, `${origin ?? 'missing origin'} POST must be rejected`);
+  }
+  const postResult = await route.POST(request('https://cloud.example'), context);
+  assert.deepEqual({ ...postResult.body }, { ok: true, created: true });
+  assert.equal(proposals, 1);
+  assert.deepEqual(Object.keys(postResult.body).sort(), ['created', 'ok'], 'POST must not expose evidence or upstream payloads');
 });
 
 test('unrelated users are denied and strict platform admin checks both role and account type', () => {
@@ -148,7 +200,7 @@ test('adapter sends GET and retries exactly once only for transient status, netw
         return new Response('{}', { status: 200 });
       };
       const mod = loadTs(adapterPath, {}, { fetch: fetchMock });
-      await mod.traceMiniGet('https://trace.example.com', 'credential', 'workspaces', undefined, { timeoutMs: 20 });
+      await mod.traceMiniGet('https://trace.example.com', 'credential', 'bootstrap', undefined, { timeoutMs: 20 });
       assert.equal(calls.length, 2, String(failure));
       assert.ok(calls.every((call) => call.options.method === 'GET'));
     }
@@ -159,7 +211,7 @@ test('adapter sends GET and retries exactly once only for transient status, netw
     ]) {
       let calls = 0;
       const mod = loadTs(adapterPath, {}, { fetch: async () => { calls += 1; return response(); } });
-      await assert.rejects(mod.traceMiniGet('https://trace.example.com', 'credential', 'workspaces'));
+      await assert.rejects(mod.traceMiniGet('https://trace.example.com', 'credential', 'bootstrap'));
       assert.equal(calls, 1);
     }
   } finally { if (oldAllowed === undefined) delete process.env.TRACEMINI_ALLOWED_ORIGINS; else process.env.TRACEMINI_ALLOWED_ORIGINS = oldAllowed; }
@@ -175,10 +227,10 @@ test('adapter cancels a stream after it exceeds the byte limit and reports malfo
       cancel: async () => { cancelled = true; },
     }) } };
     let mod = loadTs(adapterPath, {}, { fetch: async () => oversized });
-    await assert.rejects(mod.traceMiniGet('https://trace.example.com', 'secret', 'workspaces'), /too large/i);
+    await assert.rejects(mod.traceMiniGet('https://trace.example.com', 'secret', 'bootstrap'), /too large/i);
     assert.equal(cancelled, true);
     mod = loadTs(adapterPath, {}, { fetch: async () => new Response('password=hunter2 at /srv/db.sql', { status: 200 }) });
-    await assert.rejects(mod.traceMiniGet('https://trace.example.com', 'secret', 'workspaces'), (error) => error.message === 'Invalid TraceMini response: malformed JSON');
+    await assert.rejects(mod.traceMiniGet('https://trace.example.com', 'secret', 'bootstrap'), (error) => error.message === 'Invalid TraceMini response: malformed JSON');
   } finally { if (oldAllowed === undefined) delete process.env.TRACEMINI_ALLOWED_ORIGINS; else process.env.TRACEMINI_ALLOWED_ORIGINS = oldAllowed; }
 });
 
@@ -200,6 +252,14 @@ test('malformed upstream payloads are rejected without exposing body or credenti
   assert.doesNotMatch(routes, /credential_ciphertext|credential_iv|credential_tag|token\s*:/);
 });
 
+test('connection test and live refresh share strict dashboard envelope validation', () => {
+  const text = source(service);
+  assert.match(text, /validateTraceMiniDashboardEnvelope/);
+  assert.ok((text.match(/validateTraceMiniDashboardEnvelope\(/g) || []).length >= 3, 'definition plus test and refresh usage');
+  for (const field of ['events', 'repositories', 'timeline']) assert.match(text, new RegExp(`Array\\.isArray\\(dashboard\\.${field}\\)`));
+  assert.match(text, /dashboard\.stats[\s\S]*typeof[\s\S]*object/);
+});
+
 test('identity mapping uses trimmed lowercase exact email only', () => {
   const mod = loadTs(normalizePath);
   const members = [{ id: '9', email: ' Alice@Example.COM ', display_name: 'Alice Smith' }];
@@ -210,7 +270,7 @@ test('identity mapping uses trimmed lowercase exact email only', () => {
 
 test('unknown upstream identities receive the explicit unmapped label', () => {
   const mod = loadTs(normalizePath);
-  const result = mod.normalizeTraceMiniData({ activity: [{ id: '1', type: 'commit', user_name: 'other@example.com', occurred_at: '2026-01-01T00:00:00Z', data: {} }], repositories: [], agents: [], reports: [] }, [{ id: '9', email: 'alice@example.com', display_name: 'Alice' }]);
+  const result = normalizeLinked(mod, { activity: [{ id: '1', type: 'commit', user_name: 'other@example.com', occurred_at: '2026-01-01T00:00:00Z', data: {} }], repositories: [], agents: [], reports: [] }, [{ id: '9', email: 'alice@example.com', display_name: 'Alice' }]);
   assert.equal(result.recentActivity[0].member.label, 'Unmapped TraceMini member');
   assert.equal(result.memberActivity[0].member.label, 'Unmapped TraceMini member');
 });
@@ -218,7 +278,7 @@ test('unknown upstream identities receive the explicit unmapped label', () => {
 test('normalization preserves true Git type and only contracted confirmation state', () => {
   const mod = loadTs(normalizePath);
   const confirmation = { confirmed: true, status: 'pending', method: 'password=hunter2' };
-  const result = mod.normalizeTraceMiniData({ activity: [{ id: '1', type: 'git.push.rejected', user_name: 'alice@example.com', occurred_at: '2026-01-01T00:00:00Z', data: { confirmation, message: 'safe' } }], repositories: [], agents: [], reports: [] }, [{ id: '9', email: 'alice@example.com', display_name: 'Alice' }]);
+  const result = normalizeLinked(mod, { activity: [{ id: '1', type: 'git.push.rejected', user_name: 'alice@example.com', occurred_at: '2026-01-01T00:00:00Z', data: { confirmation, message: 'safe' } }], repositories: [], agents: [], reports: [] }, [{ id: '9', email: 'alice@example.com', display_name: 'Alice' }]);
   assert.equal(result.recentActivity[0].type, 'git.push.rejected');
   assert.deepEqual(JSON.parse(JSON.stringify(result.recentActivity[0].data.confirmation)), { confirmed: true, status: 'pending' });
 });
@@ -231,7 +291,7 @@ test('browser DTO is fail-closed for credential-shaped and source-code strings',
     'password=hunter2 api_key=sk-live-verysecret',
     'function steal() { return process.env.SECRET; }',
   ];
-  const output = mod.normalizeTraceMiniData({
+  const output = normalizeLinked(mod, {
     activity: secrets.map((secret, index) => ({ type: index ? 'git.commit' : 'git.push.rejected', occurred_at: `2026-01-01T00:00:0${index}Z`, repository_name: secret, data: { message: secret, branch: secret, headSha: secret, remoteHeadSha: secret, confirmation: { confirmed: false, status: 'unconfirmed', note: secret } } })),
     repositories: secrets.map((name) => ({ name })), agents: [],
     reports: secrets.map((title) => ({ title, name: title, status: title, created_at: '2026-01-01T00:00:00Z' })),
@@ -255,14 +315,14 @@ test('confirmation renderer exposes known state without stringifying arbitrary o
 
 test('frontend/API DTOs omit credentials, local paths, remote URLs and device identifiers while showing safe TraceMini UI', () => {
   const mod = loadTs(normalizePath);
-  const output = mod.normalizeTraceMiniData({
+  const output = normalizeLinked(mod, {
     activity: [{ id: 'evt-secret', local_key: '/home/alice/key', type: 'commit', user_name: 'alice@example.com', occurred_at: '2026-01-01T00:00:00Z', data: { path: '/home/alice/repo', files: ['/secret/a'], remoteUrl: 'ssh://secret', token: 'secret', message: 'ok' } }],
     repositories: [{ id: 'repo-secret', name: 'app', remote_url: 'ssh://private', archived: false, clone_count: 2 }],
-    agents: [{ id: 'agent-secret', user_name: 'alice@example.com', machine_name: 'alice-laptop', status: 'online', last_seen: '2026-01-01T00:00:00Z' }],
-    reports: [{ id: 'report-1', title: 'Weekly', markdown: '# private', created_at: '2026-01-01T00:00:00Z' }],
+    agents: [{ id: 'agent-secret', repository_id: 'linked-repository', user_name: 'alice@example.com', machine_name: 'alice-laptop', status: 'online', last_seen: '2026-01-01T00:00:00Z' }],
+    reports: [{ id: 'report-1', repository_id: 'linked-repository', title: 'Weekly', markdown: '# private', created_at: '2026-01-01T00:00:00Z' }],
   }, [{ id: '9', email: 'alice@example.com', display_name: 'Alice' }]);
   const serialized = JSON.stringify(output);
-  for (const secret of ['/home/alice', 'ssh://', 'evt-secret', 'repo-secret', 'agent-secret', '# private']) assert.equal(serialized.includes(secret), false, secret);
+  for (const secret of ['/home/alice', 'ssh://', 'repo-secret', 'agent-secret', '# private']) assert.equal(serialized.includes(secret), false, secret);
   assert.equal(output.devices[0].member.label, 'Alice');
   const ui = source('app/projects/[projectId]/WorkspaceClient.tsx');
   for (const label of ['Data from TraceMini', 'Recent Git activity', 'Repository summaries', 'Connected-device status', 'Member activity', 'Report metadata']) assert.match(ui, new RegExp(label));
@@ -271,7 +331,7 @@ test('frontend/API DTOs omit credentials, local paths, remote URLs and device id
 
 test('normalization rejects arbitrary absolute paths, remote URL forms, and embedded auth secrets', () => {
   const mod = loadTs(normalizePath);
-  const output = mod.normalizeTraceMiniData({
+  const output = normalizeLinked(mod, {
     activity: [
       { type: 'commit', occurred_at: '2026-01-01T00:00:00Z', repository_name: '/etc/private-repository', data: { message: 'read /opt/build/private.log' } },
       { type: 'commit', occurred_at: '2026-01-01T00:00:01Z', data: { message: 'mirror git@github.com:private/repo.git' } },
@@ -377,7 +437,7 @@ test('service persists and renders only allowlisted upstream errors, never DB or
     const mod = loadTs(service, {
       './db': { ensureSchema: async () => {}, getPool: () => db },
       './projects': { ProjectServiceError, projectAccessSql: () => ({ join: '', predicate: 'true' }) },
-      './tracemini-adapter': { traceMiniGet: async (_url, _credential, endpoint) => endpoint === 'dashboard' ? {} : [] },
+      './tracemini-adapter': { traceMiniGet: async (_url, _credential, endpoint, workspace) => validUpstream(endpoint, workspace) },
       './tracemini-crypto': { decryptTraceMiniCredential: () => { if (sourceKind === 'crypto') throw new Error(secret); return 'credential'; } },
       './tracemini-normalize': { normalizeTraceMiniData: () => ({}) },
     });
@@ -413,10 +473,12 @@ test('a failed refresh returns stale last-good data with a safe error', async ()
   let now = 1_700_000_000_000;
   class FakeDate extends Date { constructor(value) { super(value === undefined ? now : value); } static now() { return now; } }
   let fail = false;
-  const row = { project_id: '77', client_id: '1', enabled: true, base_url: 'https://trace.example.com', workspace_id: 'ws', updated_at: '2026-01-01T00:00:00.000Z', credential_version: 1, credential_ciphertext: Buffer.from('x'), credential_iv: Buffer.from('x'), credential_tag: Buffer.from('x'), last_successful_sync: null };
+  const row = { project_id: '77', client_id: '1', enabled: true, base_url: 'https://trace.example.com', workspace_id: 'ws', git_repository_key: 'github.com/acme/widget', config_generation: '1', config_revision: '1', updated_at: '2026-01-01T00:00:00.000Z', credential_version: 1, credential_ciphertext: Buffer.from('x'), credential_iv: Buffer.from('x'), credential_tag: Buffer.from('x'), last_successful_sync: null };
   const db = { async query(sql) {
     if (/left join project_tracemini_integrations/i.test(sql)) return { rows: [row] };
     if (/select u.id,u.email/i.test(sql)) return { rows: [] };
+    if (/select git_repository_key from projects/i.test(sql)) return { rows: [{ git_repository_key: row.git_repository_key }] };
+    if (/insert into project_tracemini_repository_matches/i.test(sql)) return { rows: [{ project_id: row.project_id }] };
     if (/update project_tracemini_integrations/i.test(sql)) return { rows: [{ project_id: '77' }] };
     return { rows: [] };
   } };
@@ -424,7 +486,7 @@ test('a failed refresh returns stale last-good data with a safe error', async ()
   const mod = loadTs(service, {
     './db': { ensureSchema: async () => {}, getPool: () => db },
     './projects': { ProjectServiceError, projectAccessSql: () => ({ join: '', predicate: 'true' }) },
-    './tracemini-adapter': { traceMiniGet: async (_url, _credential, endpoint) => { if (fail) throw Object.assign(new Error('socket /secret'), { code: 'temporary_outage' }); return endpoint === 'dashboard' ? {} : []; } },
+    './tracemini-adapter': { traceMiniGet: async (_url, _credential, endpoint, workspace) => { if (fail) throw Object.assign(new Error('socket /secret'), { code: 'temporary_outage' }); return validUpstream(endpoint, workspace); } },
     './tracemini-crypto': { decryptTraceMiniCredential: () => 'credential' },
     './tracemini-normalize': { normalizeTraceMiniData: () => ({ marker: 'last-good' }) },
   }, { Date: FakeDate });
@@ -438,7 +500,14 @@ test('a failed refresh returns stale last-good data with a safe error', async ()
   assert.equal(stale.lastError, 'TraceMini is temporarily unavailable');
 });
 
-function loadTraceMiniService({ db, traceMiniGet = async (_url, _credential, endpoint) => endpoint === 'dashboard' ? {} : [], normalizeTraceMiniData = (input, members) => ({ input, members }), DateClass } = {}) {
+function validUpstream(endpoint, workspace = 'ws') {
+  if (endpoint === 'bootstrap') return { workspaces: [{ id: workspace }] };
+  if (endpoint === 'dashboard') return { events: [], repositories: [], stats: {}, timeline: [] };
+  if (endpoint === 'settings') return {};
+  return [];
+}
+
+function loadTraceMiniService({ db, traceMiniGet = async (_url, _credential, endpoint, workspace) => validUpstream(endpoint, workspace), normalizeTraceMiniData = (input, members) => ({ input, members }), DateClass } = {}) {
   class ProjectServiceError extends Error { constructor(message, status = 400, code = 'invalid_request') { super(message); this.status = status; this.code = code; } }
   return loadTs(service, {
     './db': { ensureSchema: async () => {}, getPool: () => db },
@@ -449,7 +518,7 @@ function loadTraceMiniService({ db, traceMiniGet = async (_url, _credential, end
   }, DateClass ? { Date: DateClass } : {});
 }
 
-const integrationRow = (project = '88', overrides = {}) => ({ project_id: project, authorized_project_id: project, client_id: '1', enabled: true, base_url: 'https://trace.example.com', workspace_id: 'ws', config_generation: '1', config_revision: '1', updated_at: '2026-01-01T00:00:00.000Z', credential_version: 1, credential_ciphertext: Buffer.from('x'), credential_iv: Buffer.from('x'), credential_tag: Buffer.from('x'), last_successful_sync: null, ...overrides });
+const integrationRow = (project = '88', overrides = {}) => ({ project_id: project, authorized_project_id: project, client_id: '1', enabled: true, base_url: 'https://trace.example.com', workspace_id: 'ws', git_repository_key: 'github.com/acme/widget', config_generation: '1', config_revision: '1', updated_at: '2026-01-01T00:00:00.000Z', credential_version: 1, credential_ciphertext: Buffer.from('x'), credential_iv: Buffer.from('x'), credential_tag: Buffer.from('x'), last_successful_sync: null, ...overrides });
 
 function traceDb(currentRow, members = () => []) {
   const writes = [];
@@ -457,6 +526,8 @@ function traceDb(currentRow, members = () => []) {
     const row = currentRow();
     if (/left join project_tracemini_integrations/i.test(sql) || /select (?:project_id|base_url).*from project_tracemini_integrations/i.test(sql)) return { rows: row ? [row] : [] };
     if (/select u.id,u.email/i.test(sql)) return { rows: members() };
+    if (/select git_repository_key from projects/i.test(sql)) return { rows: [{ git_repository_key: 'github.com/acme/widget' }] };
+    if (/insert into project_tracemini_repository_matches/i.test(sql)) return { rows: [{ project_id: row?.project_id }] };
     if (/update project_tracemini_integrations/i.test(sql)) { writes.push(params); return { rows: [row] }; }
     return { rows: [] };
   } };
@@ -486,8 +557,8 @@ test('adapter cancels non-2xx bodies before retrying or throwing', async () => {
         if (code === 200) return new Response('{}');
         return { ok: false, status: code, headers: new Headers(), body: { cancel: async () => { cancellations += 1; } } };
       } });
-      if (status === 503) await mod.traceMiniGet('https://trace.example.com', 'credential', 'workspaces');
-      else await assert.rejects(mod.traceMiniGet('https://trace.example.com', 'credential', 'workspaces'));
+      if (status === 503) await mod.traceMiniGet('https://trace.example.com', 'credential', 'bootstrap');
+      else await assert.rejects(mod.traceMiniGet('https://trace.example.com', 'credential', 'bootstrap'));
       assert.equal(cancellations, 1, `status ${status}`);
       assert.equal(calls, status === 503 ? 2 : 1);
     }
@@ -504,9 +575,10 @@ test('numeric config revision supersedes an old in-flight read even when timesta
     const revision = row.config_revision;
     calls.push({ endpoint, revision });
     if (revision === '41') await gateA;
-    return endpoint === 'dashboard' ? { revision } : [];
+    if (endpoint === 'dashboard') return { ...validUpstream(endpoint), stats: { revision } };
+    return validUpstream(endpoint);
   };
-  const mod = loadTraceMiniService({ db, traceMiniGet, normalizeTraceMiniData: (input) => ({ revision: input.dashboard.revision }) });
+  const mod = loadTraceMiniService({ db, traceMiniGet, normalizeTraceMiniData: (input) => ({ revision: input.dashboard.stats.revision }) });
   const requestA = mod.getTraceMiniData(engineer, '88');
   await new Promise((resolve) => setImmediate(resolve));
   row = integrationRow('88', { config_revision: '42', updated_at: '2026-01-01T00:00:00.000Z' });
@@ -534,7 +606,7 @@ test('an old in-flight connection test cannot update or verify a replacement con
     return { rows: [] };
   } };
   const mod = loadTraceMiniService({ db, traceMiniGet: async (_url, _credential, endpoint) => {
-    if (endpoint === 'workspaces') { await gate; return [{ id: 'workspace-a' }]; }
+    if (endpoint === 'bootstrap') { await gate; return { workspaces: [{ id: 'workspace-a' }] }; }
     return {};
   } });
   const request = mod.testTraceMiniConnection(owner, '95');
@@ -556,6 +628,8 @@ test('delete and recreate isolates revision-1 cache, fetches, and connection-tes
     if (/select id,client_id from projects/i.test(sql)) return { rows: [{ id: '98', client_id: '1' }] };
     if (/left join project_tracemini_integrations/i.test(sql) || /select i\.\*,p\.client_id/i.test(sql)) return { rows: [row] };
     if (/select u.id,u.email/i.test(sql)) return { rows: [] };
+    if (/select git_repository_key from projects/i.test(sql)) return { rows: [{ git_repository_key: row.git_repository_key }] };
+    if (/insert into project_tracemini_repository_matches/i.test(sql)) return { rows: [{ project_id: row.project_id }] };
     if (/update project_tracemini_integrations/i.test(sql)) {
       writes.push({ sql, params });
       const revision = String(params[params.length - 1]);
@@ -569,11 +643,13 @@ test('delete and recreate isolates revision-1 cache, fetches, and connection-tes
   } };
   const mod = loadTraceMiniService({ db, traceMiniGet: async (_url, _credential, endpoint, workspace) => {
     const generation = row.config_generation;
+    const workspaceId = row.workspace_id;
     calls.push({ endpoint, generation });
     if (generation === '500') await oldGate;
-    if (endpoint === 'workspaces') return [{ id: workspace || 'workspace-old' }];
-    return endpoint === 'dashboard' ? { source: generation } : [];
-  }, normalizeTraceMiniData: (input) => ({ source: input.dashboard.source }) });
+    if (endpoint === 'bootstrap') return { workspaces: [{ id: workspaceId }] };
+    if (endpoint === 'dashboard') return { ...validUpstream(endpoint), stats: { source: generation } };
+    return validUpstream(endpoint, workspace);
+  }, normalizeTraceMiniData: (input) => ({ source: input.dashboard.stats.source }) });
 
   const oldRead = mod.getTraceMiniData(engineer, '98');
   const oldTest = mod.testTraceMiniConnection(owner, '98');
@@ -652,7 +728,7 @@ test('stale data expires after five minutes and is never served for auth/not-fou
     const db = traceDb(() => row);
     const mod = loadTraceMiniService({ db, DateClass: FakeDate, traceMiniGet: async (_u, _c, endpoint) => {
       if (failure) throw Object.assign(new Error('safe'), { code: failure });
-      return endpoint === 'dashboard' ? {} : [];
+      return validUpstream(endpoint);
     }, normalizeTraceMiniData: () => ({ marker: 'cached' }) });
     await mod.getTraceMiniData(engineer, '91');
     failure = code;
@@ -671,9 +747,8 @@ test('cached upstream data is mapped against current project member emails on ev
   const normalizer = loadTs(normalizePath);
   const mod = loadTraceMiniService({ db, normalizeTraceMiniData: normalizer.normalizeTraceMiniData, traceMiniGet: async (_u, _c, endpoint) => {
     upstreamCalls += 1;
-    if (endpoint === 'dashboard') return {};
-    if (endpoint === 'activity') return [{ type: 'commit', user_name: 'new@example.com', occurred_at: '2026-01-01T00:00:00Z' }];
-    return [];
+    if (endpoint === 'dashboard') return { events: [{ id: 'event-1', repository_id: 'linked-repository', type: 'commit', user_name: 'new@example.com', occurred_at: '2026-01-01T00:00:00Z' }], repositories: [{ id: 'linked-repository', name: 'app', normalized_remote: 'https://github.com/acme/widget.git' }], stats: {}, timeline: [] };
+    return validUpstream(endpoint);
   } });
   const first = await mod.getTraceMiniData(engineer, '93');
   assert.equal(first.data.recentActivity[0].member.mapped, false);
@@ -692,7 +767,7 @@ test('concurrent cache misses for one revision share one upstream fetch', async 
   const mod = loadTraceMiniService({ db, traceMiniGet: async (_u, _c, endpoint) => {
     upstreamCalls += 1;
     await gate;
-    return endpoint === 'dashboard' ? {} : [];
+    return validUpstream(endpoint);
   }, normalizeTraceMiniData: () => ({ marker: 'shared' }) });
   const first = mod.getTraceMiniData(engineer, '94');
   const second = mod.getTraceMiniData(engineer, '94');

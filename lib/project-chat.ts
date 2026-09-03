@@ -510,10 +510,16 @@ export async function confirmProjectAgentAction(session: SessionUser, projectId:
   const client = await db.connect();
   try {
     await client.query('begin');
+    // Proposal creation takes this advisory lock before p/i/m. Keep the same prefix and
+    // order here so confirmation cannot deadlock while revalidating that configuration.
+    await client.query(`select pg_advisory_xact_lock(hashtext($1))`, [`tracemini-progress:${project}`]);
     const lockedProject = await lockProjectAccess(client, session, project, 'update');
-    const claimed = await client.query(`select a.id,a.action_type,a.input,a.status,a.source_message_id,source.body as source_message_body
+    const claimed = await client.query(`select a.id,a.action_type,a.input,a.status,a.source_message_id,source.body as source_message_body,
+      evidence.proposed_action_id as tracemini_evidence_action_id
       from project_agent_actions a left join project_chat_messages source
         on source.id=a.source_message_id and source.project_id=a.project_id and source.user_id=a.actor_user_id and source.role='user'
+      left join project_tracemini_evidence evidence
+        on evidence.project_id=a.project_id and evidence.proposed_action_id=a.id
       where a.id=$2 and a.project_id=$1 and a.actor_user_id=$3 and a.status='pending' for update of a`, [project, action, session.id]);
     if (!claimed.rows[0]) throw new ProjectServiceError('Pending action not found', 404, 'not_found');
     const proposed = sanitizeAction({ type: claimed.rows[0].action_type, args: claimed.rows[0].input });
@@ -521,11 +527,37 @@ export async function confirmProjectAgentAction(session: SessionUser, projectId:
     let result: Record<string, unknown>;
     let receipt: string;
     if (proposed.type === 'update_project_progress') {
-      const sourceMessage = typeof claimed.rows[0].source_message_body === 'string' ? String(claimed.rows[0].source_message_body) : '';
-      const authorizedPercent = explicitProjectProgressPercent(sourceMessage);
-      const authorizedIntent = explicitProjectProgressIntent(sourceMessage);
-      if (!authorizedIntent || (authorizedPercent !== null && authorizedPercent !== Number(proposed.args.percent))) throw new ProjectServiceError('Progress authorization could not be verified', 409, 'conflict');
-      if (authorizedPercent === null && (Number(proposed.args.percent) === 100 || !/^Estimated\b/i.test(String(proposed.args.summary)))) throw new ProjectServiceError('Estimated progress authorization could not be verified', 409, 'conflict');
+      // Provenance comes only from immutable evidence linked to this action. The action
+      // payload and source-message fields are not trusted to identify TraceMini actions.
+      const evidenceBacked = claimed.rows[0].tracemini_evidence_action_id != null;
+      if (evidenceBacked) {
+        const currentEvidence = await client.query(
+          `select evidence.evidence_key
+             from project_tracemini_evidence evidence
+             join project_tracemini_integrations i on i.project_id=evidence.project_id
+             join project_tracemini_repository_matches m on m.project_id=evidence.project_id
+             join projects p on p.id=evidence.project_id
+            where evidence.project_id=$1 and evidence.proposed_action_id=$2 and i.enabled=true
+              and evidence.config_generation=i.config_generation and evidence.config_revision=i.config_revision
+              and m.config_generation=i.config_generation and m.config_revision=i.config_revision
+              and m.match_status='matched' and evidence.repository_id=m.repository_id
+              and evidence.repository_key=m.repository_key and m.repository_key=p.git_repository_key
+            for update of i,m`,
+          [project, action],
+        );
+        if (!currentEvidence.rows[0]) throw new ProjectServiceError('TraceMini progress proposal is stale', 409, 'conflict');
+        const percent = Number(proposed.args.percent);
+        const summary = String(proposed.args.summary);
+        if (percent < Number(lockedProject.progress_percent) || percent >= 100 || !/^TraceMini observed \d+ new Git events? for .+; latest was (?:clone|checkout|commit|push) at \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\.$/.test(summary)) {
+          throw new ProjectServiceError('TraceMini progress evidence could not be verified', 409, 'conflict');
+        }
+      } else {
+        const sourceMessage = typeof claimed.rows[0].source_message_body === 'string' ? String(claimed.rows[0].source_message_body) : '';
+        const authorizedPercent = explicitProjectProgressPercent(sourceMessage);
+        const authorizedIntent = explicitProjectProgressIntent(sourceMessage);
+        if (!authorizedIntent || (authorizedPercent !== null && authorizedPercent !== Number(proposed.args.percent))) throw new ProjectServiceError('Progress authorization could not be verified', 409, 'conflict');
+        if (authorizedPercent === null && (Number(proposed.args.percent) === 100 || !/^Estimated\b/i.test(String(proposed.args.summary)))) throw new ProjectServiceError('Estimated progress authorization could not be verified', 409, 'conflict');
+      }
       if (Number(proposed.args.percent) === 100 && lockedProject.status !== 'completed') throw new ProjectServiceError('100% progress requires a completed project', 409, 'conflict');
       const fromVersion = Number(lockedProject.progress_version);
       if (fromVersion !== Number(proposed.args.expectedVersion)) throw new ProjectServiceError('Progress version conflict', 409, 'version_conflict');

@@ -11,6 +11,7 @@ const routeSource = readFileSync(new URL('app/api/projects/route.ts', root), 'ut
 const engineer = { id: '20', role: 'employee', account_type: 'engineer' };
 const client = { id: '10', role: 'employee', account_type: 'client' };
 const requestKey = '7d444840-9dc0-4b9b-b785-31f1f14f18b8';
+const gitRemote = 'https://github.com/acme/widget.git';
 
 function loadProjects(query) {
   const calls = [];
@@ -30,6 +31,10 @@ function loadProjects(query) {
       if (specifier === 'node:crypto') return crypto;
       if (specifier === './db') return { ensureSchema: async () => {}, getPool: () => pool };
       if (specifier === './project-agent-documents') return { async loadProjectAgentStructuredData() { return { memberRoster: [], projectStatistics: {} }; }, async ensureCanonicalProjectDocuments() {} };
+      if (specifier === './git-remote') return { parseGitRemote(value) {
+        if (value !== gitRemote) throw new Error('invalid Git remote');
+        return { displayUrl: gitRemote, repositoryKey: 'github.com/acme/widget' };
+      } };
       throw new Error(`Unexpected import: ${specifier}`);
     },
   });
@@ -95,7 +100,7 @@ test('engineer creation uses one transaction to create an immediately open clien
     throw new Error(`Unexpected query: ${sql}`);
   });
 
-  const result = await service.createProject(engineer, { clientId: '10', title: ' Trace model ', description: ' Build it ', status: 'open', requestKey });
+  const result = await service.createProject(engineer, { clientId: '10', title: ' Trace model ', description: ' Build it ', status: 'open', requestKey, gitRemote });
   const { creation_payload_fingerprint: _fingerprint, ...publicProject } = project;
   assert.deepEqual(JSON.parse(JSON.stringify(result)), { ...publicProject, memberships: [membership], membership });
   assert.equal(result.id, '99');
@@ -112,7 +117,7 @@ test('invalid or unapproved client rolls back the project transaction without cr
     if (/from projects p/i.test(sql) && /creation_request_key/i.test(sql)) return { rows: [] };
     throw new Error(`Unexpected query: ${sql}`);
   });
-  await assert.rejects(service.createProject(engineer, { clientId: '404', title: 'New project', requestKey }), isConflict);
+  await assert.rejects(service.createProject(engineer, { clientId: '404', title: 'New project', requestKey, gitRemote }), isConflict);
   assert.equal(calls.filter(({ sql }) => /^rollback$/i.test(sql)).length, 1);
   assert.equal(calls.filter(({ sql }) => /insert into project_memberships/i.test(sql)).length, 0);
   assert.equal(calls.filter(({ sql }) => /^commit$/i.test(sql)).length, 0);
@@ -128,7 +133,7 @@ test('membership insertion failure rolls back and preserves the primary error', 
     if (/^rollback$/i.test(sql)) throw new Error('rollback failed');
     throw new Error(`Unexpected query: ${sql}`);
   });
-  await assert.rejects(service.createProject(engineer, { clientId: '10', title: 'New project', requestKey }), (error) => error === primary);
+  await assert.rejects(service.createProject(engineer, { clientId: '10', title: 'New project', requestKey, gitRemote }), (error) => error === primary);
   assert.ok(calls.some(({ sql }) => /^rollback$/i.test(sql)));
 });
 
@@ -153,7 +158,7 @@ test('project POST returns the active project in its 201 body', async () => {
 test('creation fails closed before database access when the request key is missing or malformed', async () => {
   const { service, calls } = loadProjects(async () => { throw new Error('database must not be reached'); });
   for (const invalid of [undefined, '', 'not-a-uuid', '00000000-0000-0000-0000-000000000000']) {
-    await assert.rejects(service.createProject(client, { title: 'New project', requestKey: invalid }), (error) => error?.status === 400 && error?.code === 'invalid_request');
+    await assert.rejects(service.createProject(client, { title: 'New project', requestKey: invalid, gitRemote }), (error) => error?.status === 400 && error?.code === 'invalid_request');
   }
   assert.equal(calls.length, 0);
 });
@@ -174,7 +179,7 @@ test('client creation uses durable request-key conflict handling and transaction
     if (/from projects p/i.test(sql) && /creation_request_key/i.test(sql)) return { rows: [project] };
     throw new Error(`Unexpected query: ${sql}`);
   });
-  const input = { title: 'Client project', status: 'open', requestKey };
+  const input = { title: 'Client project', status: 'open', requestKey, gitRemote };
   assert.equal((await service.createProject(client, input)).id, '77');
   assert.equal((await service.createProject(client, input)).id, '77');
   assert.equal(calls.filter(({ sql }) => /insert into projects/i.test(sql)).length, 2);
@@ -204,7 +209,7 @@ test('client creation explicitly persists the deterministic initial progress for
       if (/from projects p/i.test(sql) && /creation_request_key/i.test(sql)) return { rows: [project] };
       throw new Error(`Unexpected query: ${sql}`);
     });
-    assert.equal((await service.createProject(client, { title: `${status} project`, status, requestKey })).status, status);
+    assert.equal((await service.createProject(client, { title: `${status} project`, status, requestKey, gitRemote })).status, status);
   }
 });
 

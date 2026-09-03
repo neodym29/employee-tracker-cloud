@@ -5,6 +5,7 @@ import { ProjectServiceError, projectAccessSql } from './projects';
 import { traceMiniGet, validateTraceMiniBaseUrl } from './tracemini-adapter';
 import { decryptTraceMiniCredential, encryptTraceMiniCredential } from './tracemini-crypto';
 import { normalizeTraceMiniData, type TraceMiniProjectMember } from './tracemini-normalize';
+import { proposeProgress, traceMiniEvidenceKey, type TraceMiniProgressEvent } from './tracemini-progress';
 
 const CACHE_TTL_MS = 30_000;
 const CACHE_STALE_MAX_MS = 5 * 60_000;
@@ -19,7 +20,7 @@ const PUBLIC_ERRORS = new Set([
   'TraceMini is unavailable',
 ]);
 
-type UpstreamData = { dashboard: unknown; activity: unknown[]; repositories: unknown[]; agents: unknown[]; reports: unknown[] };
+type UpstreamData = { dashboard: { events: unknown[]; repositories: unknown[]; stats: Record<string, unknown>; timeline: unknown[] }; settings: Record<string, unknown>; agents: unknown[]; reports: unknown[] };
 type CacheEntry = { fetchedAt: number; upstream: UpstreamData; lastSuccessfulSync: string };
 const cache = new Map<string, CacheEntry>();
 const inFlight = new Map<string, Promise<UpstreamData>>();
@@ -28,6 +29,7 @@ type IntegrationRow = {
   project_id: string; client_id: string; base_url: string; workspace_id: string; enabled: boolean;
   credential_ciphertext: Buffer; credential_iv: Buffer; credential_tag: Buffer; credential_version: 1;
   config_generation: string | number; config_revision: string | number;
+  git_remote_url: string | null; git_repository_key: string | null;
   last_successful_sync: Date | string | null; last_error: string | null; created_at: Date | string; updated_at: Date | string;
 };
 
@@ -177,11 +179,13 @@ export async function testTraceMiniConnection(session: SessionUser, projectValue
   const generation = row.config_generation;
   const revision = row.config_revision;
   try {
-    const credential = decrypt(project, row);
-    const payload = await traceMiniGet(row.base_url, credential, 'workspaces');
-    if (!Array.isArray(payload) || !payload.some((workspace) => workspace && typeof workspace === 'object' && String((workspace as Record<string, unknown>).id) === row.workspace_id)) throw new Error('Configured TraceMini workspace was not returned');
-    const dashboard = await traceMiniGet(row.base_url, credential, 'dashboard', row.workspace_id);
-    if (!dashboard || typeof dashboard !== 'object' || Array.isArray(dashboard)) throw new Error('Invalid TraceMini dashboard response');
+    const userSession = decrypt(project, row);
+    const payload = await traceMiniGet(row.base_url, userSession, 'bootstrap');
+    const bootstrap = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
+    const workspaces = Array.isArray(bootstrap.workspaces) ? bootstrap.workspaces : [];
+    if (!workspaces.some((workspace) => workspace && typeof workspace === 'object' && String((workspace as Record<string, unknown>).id) === row.workspace_id)) throw new Error('Configured TraceMini workspace was not returned');
+    const dashboard = await traceMiniGet(row.base_url, userSession, 'dashboard', row.workspace_id);
+    validateTraceMiniDashboardEnvelope(dashboard);
   } catch (error) {
     const message = safeError(error);
     const updated = await db.query(
@@ -229,7 +233,7 @@ async function readableIntegration(session: SessionUser, project: string) {
   const access = projectAccessSql('$2'); // helper enforces membership_status='active' and approved-project owner/member access
   const admin = strictAdmin(session);
   const result = await db.query(
-    `select i.*,p.id as authorized_project_id,p.client_id from projects p left join project_tracemini_integrations i on i.project_id=p.id ${admin ? '' : access.join}
+    `select i.*,p.id as authorized_project_id,p.client_id,p.git_remote_url,p.git_repository_key from projects p left join project_tracemini_integrations i on i.project_id=p.id ${admin ? '' : access.join}
      where p.id=$1 and p.approval_status='approved' and ${admin ? 'true' : access.predicate}`,
     admin ? [project] : [project, session.id],
   );
@@ -248,6 +252,16 @@ async function projectMembers(db: Awaited<ReturnType<typeof ready>>, project: st
   return result.rows.map((row) => ({ id: String(row.id), email: String(row.email), display_name: row.display_name }));
 }
 
+export function validateTraceMiniDashboardEnvelope(value: unknown): UpstreamData['dashboard'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid TraceMini dashboard response');
+  const dashboard = value as Record<string, unknown>;
+  if (!Array.isArray(dashboard.events)) throw new Error('Invalid TraceMini dashboard events response');
+  if (!Array.isArray(dashboard.repositories)) throw new Error('Invalid TraceMini dashboard repositories response');
+  if (!dashboard.stats || typeof dashboard.stats !== 'object' || Array.isArray(dashboard.stats)) throw new Error('Invalid TraceMini dashboard stats response');
+  if (!Array.isArray(dashboard.timeline)) throw new Error('Invalid TraceMini dashboard timeline response');
+  return { events: dashboard.events, repositories: dashboard.repositories, stats: dashboard.stats as Record<string, unknown>, timeline: dashboard.timeline };
+}
+
 function assertArray(value: unknown, label: string) {
   if (!Array.isArray(value)) throw new Error(`Invalid TraceMini ${label} response`);
   return value;
@@ -258,16 +272,20 @@ async function fetchUpstream(project: string, row: IntegrationRow): Promise<Upst
   const existing = inFlight.get(key);
   if (existing) return existing;
   const request = (async () => {
-    const credential = decrypt(project, row);
-    const [dashboard, activity, repositories, agents, reports] = await Promise.all([
-      traceMiniGet(row.base_url, credential, 'dashboard', row.workspace_id),
-      traceMiniGet(row.base_url, credential, 'activity', row.workspace_id),
-      traceMiniGet(row.base_url, credential, 'repositories', row.workspace_id),
-      traceMiniGet(row.base_url, credential, 'agents', row.workspace_id),
-      traceMiniGet(row.base_url, credential, 'reports', row.workspace_id),
+    const userSession = decrypt(project, row);
+    const [bootstrapValue, dashboardValue, settingsValue, agents, reports] = await Promise.all([
+      traceMiniGet(row.base_url, userSession, 'bootstrap'),
+      traceMiniGet(row.base_url, userSession, 'dashboard', row.workspace_id),
+      traceMiniGet(row.base_url, userSession, 'settings', row.workspace_id),
+      traceMiniGet(row.base_url, userSession, 'agents', row.workspace_id),
+      traceMiniGet(row.base_url, userSession, 'reports', row.workspace_id),
     ]);
-    if (!dashboard || typeof dashboard !== 'object' || Array.isArray(dashboard)) throw new Error('Invalid TraceMini dashboard response');
-    return { dashboard, activity: assertArray(activity, 'activity'), repositories: assertArray(repositories, 'repositories'), agents: assertArray(agents, 'agents'), reports: assertArray(reports, 'reports') };
+    const bootstrap = bootstrapValue && typeof bootstrapValue === 'object' && !Array.isArray(bootstrapValue) ? bootstrapValue as Record<string, unknown> : null;
+    if (!bootstrap || !Array.isArray(bootstrap.workspaces) || !bootstrap.workspaces.some((workspace) => workspace && typeof workspace === 'object' && String((workspace as Record<string, unknown>).id) === row.workspace_id)) throw new Error('Configured TraceMini workspace was not returned');
+    const dashboard = validateTraceMiniDashboardEnvelope(dashboardValue);
+    const settings = settingsValue && typeof settingsValue === 'object' && !Array.isArray(settingsValue) ? settingsValue as Record<string, unknown> : null;
+    if (!settings) throw new Error('Invalid TraceMini settings response');
+    return { dashboard, settings, agents: assertArray(agents, 'agents'), reports: assertArray(reports, 'reports') };
   })();
   inFlight.set(key, request);
   try { return await request; } finally { if (inFlight.get(key) === request) inFlight.delete(key); }
@@ -281,7 +299,79 @@ async function configurationIsCurrent(session: SessionUser, project: string, exp
 }
 
 async function normalized(db: Awaited<ReturnType<typeof ready>>, project: string, upstream: UpstreamData) {
-  return normalizeTraceMiniData(upstream, await projectMembers(db, project));
+  const link = await db.query(`select git_repository_key from projects where id=$1`, [project]);
+  return normalizeTraceMiniData(upstream, await projectMembers(db, project), link.rows[0]?.git_repository_key ?? null);
+}
+
+async function persistRepositoryMatch(db: Awaited<ReturnType<typeof ready>>, project: string, row: IntegrationRow, data: ReturnType<typeof normalizeTraceMiniData>) {
+  const matched = data.matchStatus === 'matched' ? data.matchedRepository : null;
+  const result = await db.query(
+    `insert into project_tracemini_repository_matches(project_id,config_generation,config_revision,repository_id,repository_name,repository_key,match_status,matched_at,updated_at)
+     select $1,$2,$3,$4,$5,$6,$7,case when $7='matched' then now() else null end,now()
+       from project_tracemini_integrations i join projects p on p.id=i.project_id
+      where i.project_id=$1 and i.config_generation=$2 and i.config_revision=$3 and i.enabled=true and p.git_repository_key=$8
+     on conflict(project_id) do update set config_generation=excluded.config_generation,config_revision=excluded.config_revision,
+       repository_id=excluded.repository_id,repository_name=excluded.repository_name,repository_key=excluded.repository_key,
+       match_status=excluded.match_status,matched_at=excluded.matched_at,updated_at=excluded.updated_at
+     returning project_id`,
+    [project, row.config_generation, row.config_revision, matched?.id ?? null, matched?.name ?? null, matched ? row.git_repository_key : null, data.matchStatus, row.git_repository_key],
+  );
+  return Boolean(result.rows[0]);
+}
+
+/** Creates reviewable owner actions only; it never updates authoritative project progress. */
+export async function proposeTraceMiniProgress(project: string, row: IntegrationRow, data: ReturnType<typeof normalizeTraceMiniData>) {
+  if (data.matchStatus !== 'matched' || !data.matchedRepository) return null;
+  const pool = await ready();
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    await client.query(`select pg_advisory_xact_lock(hashtext($1))`, [`tracemini-progress:${project}`]);
+    const locked = await client.query(
+      `select p.client_id,p.progress_percent,p.progress_summary,p.progress_version,m.repository_id,m.repository_name,m.repository_key
+         from projects p join project_tracemini_integrations i on i.project_id=p.id
+         join project_tracemini_repository_matches m on m.project_id=p.id
+        where p.id=$1 and p.approval_status='approved' and i.enabled=true and i.config_generation=$2 and i.config_revision=$3
+          and m.config_generation=i.config_generation and m.config_revision=i.config_revision and m.match_status='matched' and m.repository_id=$4
+          and m.repository_key=p.git_repository_key
+        -- Lock every row whose values authorize the proposal. Other integration writers modify
+        -- only i or m, so their inherent target-row locks serialize without a reverse multi-row order.
+        for update of p,i,m`,
+      [project, row.config_generation, row.config_revision, data.matchedRepository.id],
+    );
+    const projectRow = locked.rows[0];
+    if (!projectRow) { await client.query('rollback'); return null; }
+    const watermark = await client.query(
+      `select max(newest_occurred_at) as newest from project_tracemini_evidence
+        where project_id=$1 and config_generation=$2 and config_revision=$3 and repository_id=$4 and repository_key=$5
+          and newest_occurred_at <= created_at + interval '5 minutes'`,
+      [project, row.config_generation, row.config_revision, projectRow.repository_id, projectRow.repository_key],
+    );
+    const newest = watermark.rows[0]?.newest ? new Date(watermark.rows[0].newest).getTime() : -Infinity;
+    const events = data.recentActivity.filter((event) => new Date(event.occurredAt).getTime() > newest) as TraceMiniProgressEvent[];
+    const proposal = proposeProgress({ percent: Number(projectRow.progress_percent), summary: String(projectRow.progress_summary), version: Number(projectRow.progress_version) }, String(projectRow.repository_id), String(projectRow.repository_name), events);
+    if (!proposal) { await client.query('rollback'); return null; }
+    const evidenceKey = traceMiniEvidenceKey({ projectId: project, generation: String(row.config_generation), revision: String(row.config_revision), repositoryId: String(projectRow.repository_id), progressVersion: Number(projectRow.progress_version), events: proposal.events });
+    const duplicate = await client.query(`select 1 from project_tracemini_evidence where project_id=$1 and evidence_key=$2`, [project, evidenceKey]);
+    const pending = await client.query(`select 1 from project_agent_actions where project_id=$1 and actor_user_id=$2 and action_type='update_project_progress' and status='pending' limit 1`, [project, projectRow.client_id]);
+    if (duplicate.rows[0] || pending.rows[0]) { await client.query('rollback'); return null; }
+    const description = `Automatic progress proposal: ${projectRow.progress_percent}% to ${proposal.percent}%. ${proposal.summary}`.slice(0, 320);
+    const action = await client.query(
+      `insert into project_agent_actions(project_id,actor_user_id,action_type,input,status,display_description)
+       values($1,$2,'update_project_progress',$3::jsonb,'pending',$4) returning id`,
+      [project, projectRow.client_id, JSON.stringify({ percent: proposal.percent, summary: proposal.summary, expectedVersion: proposal.expectedVersion }), description],
+    );
+    await client.query(
+      `insert into project_tracemini_evidence(project_id,evidence_key,config_generation,config_revision,repository_id,repository_key,newest_occurred_at,proposed_action_id)
+       values($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [project, evidenceKey, row.config_generation, row.config_revision, projectRow.repository_id, projectRow.repository_key, proposal.newestOccurredAt, action.rows[0].id],
+    );
+    await client.query('commit');
+    return { actionId: String(action.rows[0].id), evidenceKey };
+  } catch (error) {
+    try { await client.query('rollback'); } catch { /* Preserve primary error. */ }
+    throw error;
+  } finally { client.release(); }
 }
 
 export async function getTraceMiniData(session: SessionUser, projectValue: unknown) {
@@ -302,6 +392,7 @@ export async function getTraceMiniData(session: SessionUser, projectValue: unkno
     const upstream = await fetchUpstream(project, row);
     const data = await normalized(db, project, upstream);
     if (!await configurationIsCurrent(session, project, key)) return { state: 'unavailable', stale: false, lastSuccessfulSync: timestamp(row.last_successful_sync), lastError: 'TraceMini is unavailable', data: null };
+    if (!await persistRepositoryMatch(db, project, row, data)) return { state: 'unavailable', stale: false, lastSuccessfulSync: timestamp(row.last_successful_sync), lastError: 'TraceMini is unavailable', data: null };
     const successfulAt = new Date().toISOString();
     const updated = await db.query(
       `update project_tracemini_integrations set last_successful_sync=$2,last_error=null where project_id=$1 and config_generation=$3 and config_revision=$4 and enabled=true returning project_id`,
@@ -326,4 +417,15 @@ export async function getTraceMiniData(session: SessionUser, projectValue: unkno
     if (cached) cache.delete(key);
     return { state: 'unavailable', stale: false, lastSuccessfulSync: timestamp(row.last_successful_sync), lastError: message, data: null };
   }
+}
+
+/** Explicit mutation entry point. Authorization and all integration/repository inputs are server-derived. */
+export async function proposeTraceMiniProgressForProject(session: SessionUser, projectValue: unknown) {
+  const project = projectId(projectValue);
+  const view = await getTraceMiniData(session, project);
+  if (view.state !== 'fresh' || view.data?.matchStatus !== 'matched' || !view.data.matchedRepository) return false;
+  // Re-read after upstream work; proposeTraceMiniProgress performs the final locked identity recheck.
+  const { row } = await readableIntegration(session, project);
+  if (!row?.enabled) return false;
+  return Boolean(await proposeTraceMiniProgress(project, row, view.data));
 }

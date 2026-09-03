@@ -43,10 +43,9 @@ export function validateTraceMiniBaseUrl(value: unknown): string {
 }
 
 const ENDPOINTS = {
-  workspaces: () => '/api/workspaces',
+  bootstrap: () => '/api/bootstrap',
   dashboard: (workspaceId: string) => `/api/workspaces/${encodeURIComponent(workspaceId)}/dashboard`,
-  activity: (workspaceId: string) => `/api/workspaces/${encodeURIComponent(workspaceId)}/activity`,
-  repositories: (workspaceId: string) => `/api/workspaces/${encodeURIComponent(workspaceId)}/repositories`,
+  settings: (workspaceId: string) => `/api/workspaces/${encodeURIComponent(workspaceId)}/settings`,
   agents: (workspaceId: string) => `/api/workspaces/${encodeURIComponent(workspaceId)}/agents`,
   reports: (workspaceId: string) => `/api/workspaces/${encodeURIComponent(workspaceId)}/reports`,
 } as const;
@@ -85,16 +84,16 @@ async function cancelBody(response: Response) {
   } finally { if (timer) clearTimeout(timer); }
 }
 
-export async function traceMiniGet(baseUrl: string, credential: string, endpoint: TraceMiniEndpoint, workspaceId?: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
+export async function traceMiniGet(baseUrl: string, userSession: string, endpoint: TraceMiniEndpoint, workspaceId?: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
   const origin = validateTraceMiniBaseUrl(baseUrl);
   if (!(endpoint in ENDPOINTS)) throw new Error('Invalid TraceMini endpoint');
-  if (endpoint !== 'workspaces' && (!workspaceId || workspaceId.length > 200)) throw new Error('Invalid TraceMini workspace ID');
-  const path = endpoint === 'workspaces' ? ENDPOINTS.workspaces() : ENDPOINTS[endpoint](workspaceId!);
+  if (endpoint !== 'bootstrap' && (!workspaceId || workspaceId.length > 200)) throw new Error('Invalid TraceMini workspace ID');
+  const path = endpoint === 'bootstrap' ? ENDPOINTS.bootstrap() : ENDPOINTS[endpoint](workspaceId!);
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     try {
-      const response = await fetch(`${origin}${path}`, { method: 'GET', headers: { authorization: `Bearer ${credential}`, accept: 'application/json' }, signal: controller.signal, redirect: 'error', cache: 'no-store' });
+      const response = await fetch(`${origin}${path}`, { method: 'GET', headers: { authorization: `Bearer ${userSession}`, accept: 'application/json' }, signal: controller.signal, redirect: 'error', cache: 'no-store' });
       if (!response.ok) {
         controller.abort();
         await cancelBody(response);

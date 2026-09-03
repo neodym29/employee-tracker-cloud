@@ -3,6 +3,7 @@ import type { PoolClient } from 'pg';
 import type { SessionUser } from './auth';
 import { ensureSchema, getPool } from './db';
 import { ensureCanonicalProjectDocuments, loadProjectAgentStructuredData } from './project-agent-documents';
+import { parseGitRemote } from './git-remote';
 
 export const TITLE_MAX = 120;
 export const DESCRIPTION_MAX = 4000;
@@ -120,10 +121,13 @@ function creationFingerprint(payload: Record<string, unknown>) {
   return crypto.createHash('sha256').update(JSON.stringify(payload), 'utf8').digest('hex');
 }
 
-export async function createProject(session: SessionUser, input: { clientId?: unknown; title?: unknown; description?: unknown; status?: unknown; engineerIds?: unknown; requestKey?: unknown }) {
+export async function createProject(session: SessionUser, input: { clientId?: unknown; title?: unknown; description?: unknown; status?: unknown; engineerIds?: unknown; requestKey?: unknown; gitRemote?: unknown }) {
   const creationRequestKey = requestUuid(input.requestKey);
   const title = text(input.title, 'Title', TITLE_MAX);
   const description = text(input.description ?? '', 'Description', DESCRIPTION_MAX, true);
+  let gitLink: ReturnType<typeof parseGitRemote>;
+  try { gitLink = parseGitRemote(input.gitRemote); }
+  catch { throw new ProjectServiceError('A valid credential-free Git remote is required'); }
   if (session.account_type !== 'client' && session.account_type !== 'engineer') {
     throw new ProjectServiceError('Forbidden', 403, 'forbidden');
   }
@@ -135,13 +139,15 @@ export async function createProject(session: SessionUser, input: { clientId?: un
   const selectedEngineerIds = creationEngineerIds(input.engineerIds, !engineerCreating);
   const counterpartIds = engineerCreating ? [session.id] : selectedEngineerIds;
   const payloadFingerprint = creationFingerprint({
-    version: 2,
+    version: 3,
     accountType: session.account_type,
     ownerId,
     title,
     description,
     status,
     engineerIds: counterpartIds,
+    gitRemoteUrl: gitLink.remoteUrl,
+    gitRepositoryKey: gitLink.repositoryKey,
   });
 
   const pool = await ready();
@@ -152,21 +158,21 @@ export async function createProject(session: SessionUser, input: { clientId?: un
     transactionStarted = true;
     const inserted = engineerCreating
       ? await client.query(
-          `insert into projects(client_id,title,description,status,approval_status,proposal_kind,creation_requested_by,creation_request_key,creation_payload_fingerprint,progress_percent,progress_summary)
-           select id,$2,$3,'open','approved',null,$4,$5::uuid,$6,30,'Project is open for delivery.' from app_users
+          `insert into projects(client_id,title,description,status,approval_status,proposal_kind,creation_requested_by,creation_request_key,creation_payload_fingerprint,git_remote_url,git_repository_key,progress_percent,progress_summary)
+           select id,$2,$3,'open','approved',null,$4,$5::uuid,$6,$7,$8,30,'Project is open for delivery.' from app_users
            where id=$1 and account_type='client' and approval_status='approved'
            on conflict(creation_requested_by,creation_request_key) do nothing
-           returning id,client_id,title,description,status,approval_status,created_at,updated_at,creation_payload_fingerprint`,
-          [ownerId, title, description, session.id, creationRequestKey, payloadFingerprint],
+           returning id,client_id,title,description,status,approval_status,git_remote_url,git_repository_key,created_at,updated_at,creation_payload_fingerprint`,
+          [ownerId, title, description, session.id, creationRequestKey, payloadFingerprint, gitLink.remoteUrl, gitLink.repositoryKey],
         )
       : await client.query(
-          `insert into projects(client_id,title,description,status,approval_status,proposal_kind,creation_requested_by,creation_request_key,creation_payload_fingerprint,progress_percent,progress_summary)
-           values($1,$2,$3,$4,'approved',null,$5,$6::uuid,$7,
+          `insert into projects(client_id,title,description,status,approval_status,proposal_kind,creation_requested_by,creation_request_key,creation_payload_fingerprint,git_remote_url,git_repository_key,progress_percent,progress_summary)
+           values($1,$2,$3,$4,'approved',null,$5,$6::uuid,$7,$8,$9,
              case $4 when 'draft' then 10 when 'open' then 30 when 'active' then 65 when 'completed' then 100 when 'archived' then 0 end,
              case $4 when 'draft' then 'Project is in draft.' when 'open' then 'Project is open for delivery.' when 'active' then 'Project delivery is active.' when 'completed' then 'Project delivery is complete.' when 'archived' then 'Project is archived.' end)
            on conflict(creation_requested_by,creation_request_key) do nothing
-           returning id,client_id,title,description,status,approval_status,created_at,updated_at,creation_payload_fingerprint`,
-          [ownerId, title, description, status, session.id, creationRequestKey, payloadFingerprint],
+           returning id,client_id,title,description,status,approval_status,git_remote_url,git_repository_key,created_at,updated_at,creation_payload_fingerprint`,
+          [ownerId, title, description, status, session.id, creationRequestKey, payloadFingerprint, gitLink.remoteUrl, gitLink.repositoryKey],
         );
 
     if (inserted.rows[0] && engineerCreating) {
@@ -193,7 +199,7 @@ export async function createProject(session: SessionUser, input: { clientId?: un
     // ON CONFLICT waits for a concurrent creator transaction. Bind the key to the
     // canonical payload before returning any replayed project or memberships.
     const canonicalResult = await client.query(
-      `select p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.proposal_kind,p.created_at,p.updated_at,p.creation_payload_fingerprint
+      `select p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.proposal_kind,p.git_remote_url,p.git_repository_key,p.created_at,p.updated_at,p.creation_payload_fingerprint
          from projects p
         where p.creation_requested_by=$1 and p.creation_request_key=$2::uuid`,
       [session.id, creationRequestKey],
@@ -271,12 +277,39 @@ export async function updateProject(session: SessionUser, projectId: unknown, in
   return result.rows[0];
 }
 
+/** Atomically fills the nullable legacy Git link. An established identity is immutable. */
+export async function attachProjectGitRemote(session: SessionUser, projectId: unknown, gitRemote: unknown) {
+  const project = id(projectId, 'project id');
+  const platformAdmin = session.role === 'admin' && session.account_type === 'admin';
+  if (!platformAdmin && session.account_type !== 'client') throw new ProjectServiceError('Forbidden', 403, 'forbidden');
+  const db = await ready();
+  const authorized = await db.query(
+    `select id,client_id,git_remote_url,git_repository_key from projects
+      where id=$1 and approval_status='approved' and ($2::boolean or client_id=$3)`,
+    [project, platformAdmin, session.id],
+  );
+  const existing = authorized.rows[0];
+  if (!existing) throw new ProjectServiceError('Project not found', 404, 'not_found');
+  if (existing.git_remote_url !== null || existing.git_repository_key !== null) throw new ProjectServiceError('Project already has a Git remote', 409, 'git_remote_already_attached');
+  let link: ReturnType<typeof parseGitRemote>;
+  try { link = parseGitRemote(gitRemote); }
+  catch { throw new ProjectServiceError('A valid credential-free Git remote is required'); }
+  const result = await db.query(
+    `update projects set git_remote_url=$2,git_repository_key=$3,updated_at=now()
+      where id=$1 and git_remote_url is null and git_repository_key is null
+      returning id,client_id,title,description,status,approval_status,git_remote_url,git_repository_key,created_at,updated_at`,
+    [project, link.remoteUrl, link.repositoryKey],
+  );
+  if (!result.rows[0]) throw new ProjectServiceError('Project already has a Git remote', 409, 'git_remote_already_attached');
+  return result.rows[0];
+}
+
 export async function listProjects(session: SessionUser, options: ProjectReadOptions = {}) {
   const db = await ready();
   if (options.platformAudit) {
     requirePlatformAdmin(session);
     return (await db.query(
-      `select p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.created_at,p.updated_at
+      `select p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.git_remote_url,p.git_repository_key,p.created_at,p.updated_at
        from projects p order by p.updated_at desc,p.id desc`,
     )).rows;
   }
@@ -284,7 +317,10 @@ export async function listProjects(session: SessionUser, options: ProjectReadOpt
     // Open projects are discoverable summaries. Pending and active membership state is
     // included so the UI can offer the correct action without granting workspace access.
     return (await db.query(
-      `select p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.created_at,p.updated_at,
+      `select p.id,p.client_id,p.title,p.description,p.status,p.approval_status,
+              case when pm.membership_status='active' then p.git_remote_url else null end as git_remote_url,
+              case when pm.membership_status='active' then p.git_repository_key else null end as git_repository_key,
+              p.created_at,p.updated_at,
               pm.id as membership_id,pm.membership_type,pm.membership_status
        from projects p
        left join project_memberships pm on pm.project_id=p.id and pm.user_id=$1
@@ -295,7 +331,7 @@ export async function listProjects(session: SessionUser, options: ProjectReadOpt
   }
   if (session.account_type === 'client') {
     return (await db.query(
-      `select p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.created_at,p.updated_at,
+      `select p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.git_remote_url,p.git_repository_key,p.created_at,p.updated_at,
               null::bigint as membership_id,null::text as membership_type,null::text as membership_status
        from projects p where p.client_id=$1 order by p.updated_at desc,p.id desc`,
       [session.id],
@@ -309,7 +345,7 @@ export async function getProject(session: SessionUser, projectId: unknown, optio
   if (options.platformAudit) {
     requirePlatformAdmin(session);
     const auditResult = await db.query(
-      `select p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.created_at,p.updated_at from projects p where p.id=$1`,
+      `select p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.git_remote_url,p.git_repository_key,p.created_at,p.updated_at from projects p where p.id=$1`,
       [id(projectId, 'project id')],
     );
     if (!auditResult.rows[0]) throw new ProjectServiceError('Project not found', 404, 'not_found');
@@ -317,7 +353,7 @@ export async function getProject(session: SessionUser, projectId: unknown, optio
   }
   const access = projectAccessSql('$2');
   const result = await db.query(
-    `select distinct p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.created_at,p.updated_at
+    `select distinct p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.git_remote_url,p.git_repository_key,p.created_at,p.updated_at
      from projects p ${access.join}
      where p.id=$1 and ${access.predicate}`,
     [id(projectId, 'project id'), session.id],

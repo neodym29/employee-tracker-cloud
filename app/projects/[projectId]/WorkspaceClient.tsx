@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { renderTraceMiniConfirmation } from '../../../lib/tracemini-confirmation';
 
-type Project = { id: string; title: string; description: string; status: 'draft' | 'open' | 'active' | 'completed' | 'archived'; createdAt: string; updatedAt: string };
+type Project = { id: string; title: string; description: string; status: 'draft' | 'open' | 'active' | 'completed' | 'archived'; gitRemote: string | null; createdAt: string; updatedAt: string };
 type Membership = { id: string; display_name: string; membership_type: 'request' | 'invitation' | 'creator'; membership_status: string };
 type AgentMessage = { id: string; role: 'user' | 'assistant'; body: string; created_at: string };
 type AgentAction = { id: string; action_type: 'create_file' | 'update_file' | 'rename_file' | 'delete_file' | 'update_project_progress'; status: string; description: string; created_at: string };
@@ -18,8 +18,12 @@ type Overview = {
 };
 type TraceMiniMember = { mapped: boolean; id?: string; label: string };
 type TraceMiniData = {
+  matchStatus: 'matched' | 'unmatched' | 'ambiguous';
+  matchedRepository: { id: string; name: string } | null;
+  hasLocalClone: boolean;
+  localCloneCount: number;
   activityTotal: number;
-  recentActivity: Array<{ id: string; type: string; occurredAt: string; repositoryName: string; member: TraceMiniMember; data: Record<string, unknown> }>;
+  recentActivity: Array<{ id: string; upstreamId?: string; evidenceEligible: boolean; type: string; occurredAt: string; repositoryName: string; member: TraceMiniMember; data: Record<string, unknown> }>;
   repositories: Array<{ id: string; name: string; archived: boolean; cloneCount: number; createdAt: string }>;
   devices: Array<{ member: TraceMiniMember; status: string; lastSeen: string }>;
   memberActivity: Array<{ member: TraceMiniMember; count: number }>;
@@ -68,7 +72,12 @@ export default function WorkspaceClient({ projectId, accountType, canManageTrace
   const [traceCredential, setTraceCredential] = useState('');
   const [traceBusy, setTraceBusy] = useState('');
   const [traceMessage, setTraceMessage] = useState('');
+  const [gitRemote, setGitRemote] = useState('');
+  const [gitAttachBusy, setGitAttachBusy] = useState(false);
   const submissionPendingRef = useRef(false);
+  const mountedRef = useRef(true);
+  const workspaceRequestRef = useRef(0);
+  const traceRequestRef = useRef(0);
   const conversationEndRef = useRef<HTMLDivElement | null>(null);
 
   const loadOverview = useCallback(async () => {
@@ -77,12 +86,14 @@ export default function WorkspaceClient({ projectId, accountType, canManageTrace
   }, [base]);
 
   const loadWorkspace = useCallback(async () => {
-    setError('');
+    const requestId = workspaceRequestRef.current += 1;
+    if (mountedRef.current) setError('');
     try {
       const requests: Promise<unknown>[] = [api(`${base}/overview`)];
       if (accountType !== 'admin') requests.push(api(`${base}/chat`));
       if (accountType === 'client') requests.push(api(`${base}/requests`));
       const responses = await Promise.all(requests) as any[];
+      if (!mountedRef.current || requestId !== workspaceRequestRef.current) return;
       setOverview(responses[0].overview);
       if (accountType !== 'admin') {
         const agentData = responses[1];
@@ -92,25 +103,51 @@ export default function WorkspaceClient({ projectId, accountType, canManageTrace
         if (accountType === 'client' && responses[2]) setMemberships(responses[2].memberships);
       } else setAgentAvailable(false);
     } catch {
-      setError('This workspace is unavailable or you no longer have access.');
+      if (mountedRef.current && requestId === workspaceRequestRef.current) setError('This workspace is unavailable or you no longer have access.');
     }
   }, [accountType, base]);
 
   const loadTraceMini = useCallback(async () => {
+    const requestId = traceRequestRef.current += 1;
+    let proposalEligible = false;
     try {
       const result = await api(`${base}/tracemini/data`);
+      if (!mountedRef.current || requestId !== traceRequestRef.current) return;
       setTraceView(result.tracemini);
-    } catch { setTraceView({ state: 'unavailable', stale: false, lastSuccessfulSync: null, lastError: 'TraceMini data is unavailable.', data: null }); }
+      proposalEligible = result.tracemini?.state === 'fresh' && result.tracemini?.data?.matchStatus === 'matched';
+    } catch {
+      if (mountedRef.current && requestId === traceRequestRef.current) setTraceView({ state: 'unavailable', stale: false, lastSuccessfulSync: null, lastError: 'TraceMini data is unavailable.', data: null });
+    }
     if (canManageTraceMini) {
       try {
         const result = await api(`${base}/tracemini`);
-        setTraceConfig(result.config);
-        setTraceBaseUrl(result.config.baseUrl || '');
-        setTraceWorkspaceId(result.config.workspaceId || '');
-      } catch { setTraceConfig(null); }
+        if (mountedRef.current && requestId === traceRequestRef.current) {
+          setTraceConfig(result.config);
+          setTraceBaseUrl(result.config.baseUrl || '');
+          setTraceWorkspaceId(result.config.workspaceId || '');
+        }
+      } catch {
+        if (mountedRef.current && requestId === traceRequestRef.current) setTraceConfig(null);
+      }
     }
-  }, [base, canManageTraceMini]);
+    if (proposalEligible && mountedRef.current && requestId === traceRequestRef.current) {
+      // Proposal creation is an explicit, CSRF-protected mutation. It is best-effort so
+      // TraceMini data remains useful if proposal generation is temporarily unavailable.
+      try {
+        await api(`${base}/tracemini/data`, { method: 'POST' });
+        if (mountedRef.current && requestId === traceRequestRef.current) await loadWorkspace();
+      } catch { /* A later refresh can retry without hiding read-only data. */ }
+    }
+  }, [base, canManageTraceMini, loadWorkspace]);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      workspaceRequestRef.current += 1;
+      traceRequestRef.current += 1;
+    };
+  }, []);
   useEffect(() => { void loadWorkspace(); }, [loadWorkspace]);
   useEffect(() => { void loadTraceMini(); }, [loadTraceMini]);
   useEffect(() => { conversationEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, actions]);
@@ -138,12 +175,25 @@ export default function WorkspaceClient({ projectId, accountType, canManageTrace
     await updateTraceMini('save', () => api(`${base}/tracemini`, jsonOptions(body, 'PUT')));
   }
 
+  async function attachGitRemote(event: React.FormEvent) {
+    event.preventDefault();
+    setGitAttachBusy(true);
+    setError('');
+    try {
+      await api(base, jsonOptions({ gitRemote }, 'PATCH'));
+      setGitRemote('');
+      await Promise.all([loadWorkspace(), loadTraceMini()]);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Git remote could not be attached.');
+    } finally { setGitAttachBusy(false); }
+  }
+
   async function decideAction(action: AgentAction, decision: 'confirm' | 'cancel') {
     setBusy(`${decision}:${action.id}`);
     setError('');
     try {
       await api(`${base}/agent-actions/${action.id}/${decision}`, { method: 'POST' });
-      await loadWorkspace();
+      await Promise.all([loadWorkspace(), loadTraceMini()]);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'The change could not be completed.');
     } finally { setBusy(''); }
@@ -196,6 +246,7 @@ export default function WorkspaceClient({ projectId, accountType, canManageTrace
             <span className="sectionLabel">Project overview</span>
             <h1 id="project-overview-title">{project.title}</h1>
             {project.description && <p>{project.description}</p>}
+            <p className="muted"><strong>Git remote:</strong> {project.gitRemote || 'Git link missing'}</p>
             {latestPriority && <blockquote><span>Latest client priority</span>{latestPriority.summary}</blockquote>}
           </div>
           <div className="projectContextMeta">
@@ -207,6 +258,16 @@ export default function WorkspaceClient({ projectId, accountType, canManageTrace
             </select>}
           </div>
         </header>
+
+        {canManageTraceMini && !project.gitRemote && <section className="dashboardPanel" aria-labelledby="attach-git-title">
+          <span className="sectionLabel">Legacy project setup</span>
+          <h2 id="attach-git-title">Attach Git remote</h2>
+          <p className="muted">Attach the exact credential-free clone remote once. It cannot be changed later.</p>
+          <form onSubmit={attachGitRemote}>
+            <label>Git remote<input required value={gitRemote} onChange={(event) => setGitRemote(event.target.value)} placeholder="https://github.com/owner/repository.git" /></label>
+            <button disabled={gitAttachBusy || !gitRemote.trim()}>{gitAttachBusy ? 'Attaching...' : 'Attach Git remote'}</button>
+          </form>
+        </section>}
 
         {accountType === 'client' && memberships.some((member) => member.membership_status === 'pending') && <details className="memberRequests dashboardPanel">
           <summary>Pending member requests</summary>
@@ -253,6 +314,7 @@ export default function WorkspaceClient({ projectId, accountType, canManageTrace
           {traceView?.lastSuccessfulSync && <p className="traceFreshness">Last successful refresh {formatTimestamp(traceView.lastSuccessfulSync)}{traceView.stale ? ' · showing stale cached data' : ''}</p>}
           {traceView?.lastError && <p className="errorBanner" role="status">{traceView.lastError}</p>}
           {!traceView?.data ? <p className="emptyOverview">{traceView?.state === 'unconfigured' ? 'TraceMini is not configured for this project.' : traceView?.state === 'disabled' ? 'TraceMini is disabled for this project.' : traceView?.state === 'unavailable' ? 'TraceMini data is unavailable. The rest of this project remains available.' : 'Loading TraceMini data...'}</p> : <>
+            <p><strong>{traceView.data.matchStatus === 'matched' ? 'Matched' : traceView.data.matchStatus === 'ambiguous' ? 'Ambiguous' : 'No match'}</strong>{traceView.data.matchedRepository ? ` · ${traceView.data.matchedRepository.name}` : ''} · {traceView.data.hasLocalClone ? `Local clone available (${traceView.data.localCloneCount})` : 'No local clone reported'}</p>
             <section className="analyticsGrid traceMiniStats" aria-label="TraceMini totals">
               <article><span>Activity events</span><strong>{traceView.data.activityTotal}</strong></article>
               <article><span>Repositories</span><strong>{traceView.data.repositories.length}</strong></article>
@@ -304,7 +366,7 @@ export default function WorkspaceClient({ projectId, accountType, canManageTrace
           <div ref={conversationEndRef} aria-hidden="true" />
         </div>
 
-        {actions.length > 0 && <section className="actionList" aria-labelledby="pending-changes-title"><h3 id="pending-changes-title">Pending changes</h3>{actions.map((action) => { const actionBusy = busy === `confirm:${action.id}` || busy === `cancel:${action.id}`; return <article className="proposedAction" key={action.id}><div><span className="changeKind">Agent proposal</span><strong>{action.description}</strong><p>Review this specific project change before it runs.</p></div><div className="rowActions"><button disabled={actionBusy} onClick={() => decideAction(action, 'confirm')}>{busy === `confirm:${action.id}` ? 'Updating...' : 'Confirm'}</button><button disabled={actionBusy} className="secondaryButton" onClick={() => decideAction(action, 'cancel')}>{busy === `cancel:${action.id}` ? 'Canceling...' : 'Cancel'}</button></div></article>; })}</section>}
+          {actions.length > 0 && <section className="actionList" aria-labelledby="pending-changes-title"><h3 id="pending-changes-title">Pending changes</h3>{actions.map((action) => { const actionBusy = busy === `confirm:${action.id}` || busy === `cancel:${action.id}`; return <article className="proposedAction" key={action.id}><div><span className="changeKind">{action.description.startsWith('Automatic progress proposal:') ? 'Automatic progress proposal' : 'Agent proposal'}</span><strong>{action.description}</strong><p>Review this specific project change before it runs.</p></div><div className="rowActions"><button disabled={actionBusy} onClick={() => decideAction(action, 'confirm')}>{busy === `confirm:${action.id}` ? 'Updating...' : 'Confirm'}</button><button disabled={actionBusy} className="secondaryButton" onClick={() => decideAction(action, 'cancel')}>{busy === `cancel:${action.id}` ? 'Canceling...' : 'Cancel'}</button></div></article>; })}</section>}
 
         <form className="chatForm agentComposer" onSubmit={sendCommand} aria-busy={busy === 'agent'}>
           <label htmlFor="agent-command">Message the project agent</label>
