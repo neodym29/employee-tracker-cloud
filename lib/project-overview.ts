@@ -57,6 +57,7 @@ export async function getProjectOverview(session: SessionUser, projectId: unknow
   if (!/^[1-9]\d*$/.test(project)) throw new ProjectServiceError('Invalid project id');
   await ensureSchema();
   const db = getPool();
+  const platformAdmin = session.role === 'admin' && session.account_type === 'admin';
   const access = projectAccessSql('$2');
   const result = await db.query(
     `select p.id,p.title,p.description,p.status,p.progress_percent,p.progress_summary,p.progress_version,p.progress_updated_at,p.created_at,p.updated_at,
@@ -96,8 +97,8 @@ export async function getProjectOverview(session: SessionUser, projectId: unknow
        ) timeline_row),'[]'::json) as timeline
      from projects p
      join app_users client on client.id=p.client_id
-     ${access.join}
-     where p.id=$1 and ${access.predicate}
+     ${platformAdmin ? '' : access.join}
+     where p.id=$1 and ${platformAdmin ? "p.approval_status='approved'" : access.predicate}
      limit 1`,
     [project, session.id],
   );

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { renderTraceMiniConfirmation } from '../../../lib/tracemini-confirmation';
 
 type Project = { id: string; title: string; description: string; status: 'draft' | 'open' | 'active' | 'completed' | 'archived'; createdAt: string; updatedAt: string };
 type Membership = { id: string; display_name: string; membership_type: 'request' | 'invitation' | 'creator'; membership_status: string };
@@ -15,6 +16,17 @@ type Overview = {
   clientPriorities: Array<{ id: string; summary: string; createdAt: string }>;
   timeline: Array<{ id: string; label: string; createdAt: string }>;
 };
+type TraceMiniMember = { mapped: boolean; id?: string; label: string };
+type TraceMiniData = {
+  activityTotal: number;
+  recentActivity: Array<{ id: string; type: string; occurredAt: string; repositoryName: string; member: TraceMiniMember; data: Record<string, unknown> }>;
+  repositories: Array<{ id: string; name: string; archived: boolean; cloneCount: number; createdAt: string }>;
+  devices: Array<{ member: TraceMiniMember; status: string; lastSeen: string }>;
+  memberActivity: Array<{ member: TraceMiniMember; count: number }>;
+  reports: Array<{ id: string; title: string; status: string; createdAt: string; updatedAt: string }>;
+};
+type TraceMiniView = { state: 'fresh' | 'stale' | 'unavailable' | 'disabled' | 'unconfigured'; stale: boolean; lastSuccessfulSync: string | null; lastError: string | null; data: TraceMiniData | null };
+type TraceMiniConfig = { configured: boolean; enabled: boolean; hasCredential: boolean; baseUrl: string | null; workspaceId: string | null; lastSuccessfulSync: string | null; lastError: string | null };
 
 const STARTER_PROMPTS = [
   'Summarize current progress and next steps.',
@@ -38,7 +50,7 @@ function formatTimestamp(value: string) {
 }
 
 
-export default function WorkspaceClient({ projectId, accountType }: { projectId: string; accountType: 'client' | 'engineer' }) {
+export default function WorkspaceClient({ projectId, accountType, canManageTraceMini }: { projectId: string; accountType: 'admin' | 'client' | 'engineer'; canManageTraceMini: boolean }) {
   const base = `/api/projects/${projectId}`;
   const [overview, setOverview] = useState<Overview | null>(null);
   const [memberships, setMemberships] = useState<Membership[]>([]);
@@ -49,6 +61,13 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
   const [chatError, setChatError] = useState('');
   const [busy, setBusy] = useState('');
   const [agentCommand, setAgentCommand] = useState('');
+  const [traceView, setTraceView] = useState<TraceMiniView | null>(null);
+  const [traceConfig, setTraceConfig] = useState<TraceMiniConfig | null>(null);
+  const [traceBaseUrl, setTraceBaseUrl] = useState('');
+  const [traceWorkspaceId, setTraceWorkspaceId] = useState('');
+  const [traceCredential, setTraceCredential] = useState('');
+  const [traceBusy, setTraceBusy] = useState('');
+  const [traceMessage, setTraceMessage] = useState('');
   const submissionPendingRef = useRef(false);
   const conversationEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -60,20 +79,40 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
   const loadWorkspace = useCallback(async () => {
     setError('');
     try {
-      const requests: Promise<unknown>[] = [api(`${base}/overview`), api(`${base}/chat`)];
+      const requests: Promise<unknown>[] = [api(`${base}/overview`)];
+      if (accountType !== 'admin') requests.push(api(`${base}/chat`));
       if (accountType === 'client') requests.push(api(`${base}/requests`));
-      const [overviewData, agentData, memberData] = await Promise.all(requests) as any[];
-      setOverview(overviewData.overview);
-      setMessages(agentData.messages);
-      setActions(agentData.actions);
-      setAgentAvailable(agentData.available !== false);
-      if (memberData) setMemberships(memberData.memberships);
+      const responses = await Promise.all(requests) as any[];
+      setOverview(responses[0].overview);
+      if (accountType !== 'admin') {
+        const agentData = responses[1];
+        setMessages(agentData.messages);
+        setActions(agentData.actions);
+        setAgentAvailable(agentData.available !== false);
+        if (accountType === 'client' && responses[2]) setMemberships(responses[2].memberships);
+      } else setAgentAvailable(false);
     } catch {
       setError('This workspace is unavailable or you no longer have access.');
     }
   }, [accountType, base]);
 
+  const loadTraceMini = useCallback(async () => {
+    try {
+      const result = await api(`${base}/tracemini/data`);
+      setTraceView(result.tracemini);
+    } catch { setTraceView({ state: 'unavailable', stale: false, lastSuccessfulSync: null, lastError: 'TraceMini data is unavailable.', data: null }); }
+    if (canManageTraceMini) {
+      try {
+        const result = await api(`${base}/tracemini`);
+        setTraceConfig(result.config);
+        setTraceBaseUrl(result.config.baseUrl || '');
+        setTraceWorkspaceId(result.config.workspaceId || '');
+      } catch { setTraceConfig(null); }
+    }
+  }, [base, canManageTraceMini]);
+
   useEffect(() => { void loadWorkspace(); }, [loadWorkspace]);
+  useEffect(() => { void loadTraceMini(); }, [loadTraceMini]);
   useEffect(() => { conversationEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, actions]);
 
   async function run(key: string, work: () => Promise<unknown>, fallback: string) {
@@ -82,6 +121,21 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
     try { await work(); await loadWorkspace(); }
     catch (failure) { setError(failure instanceof Error ? failure.message : fallback); }
     finally { setBusy(''); }
+  }
+
+  async function updateTraceMini(kind: string, request: () => Promise<unknown>) {
+    setTraceBusy(kind);
+    setTraceMessage('');
+    try { await request(); setTraceCredential(''); setTraceMessage(kind === 'test' ? 'Connection verified.' : 'TraceMini settings updated.'); await loadTraceMini(); }
+    catch (failure) { setTraceMessage(failure instanceof Error ? failure.message : 'TraceMini request failed.'); }
+    finally { setTraceBusy(''); }
+  }
+
+  async function saveTraceMini(event: React.FormEvent) {
+    event.preventDefault();
+    const body: Record<string, unknown> = { baseUrl: traceBaseUrl, workspaceId: traceWorkspaceId };
+    if (traceCredential) body.credential = traceCredential;
+    await updateTraceMini('save', () => api(`${base}/tracemini`, jsonOptions(body, 'PUT')));
   }
 
   async function decideAction(action: AgentAction, decision: 'confirm' | 'cancel') {
@@ -190,6 +244,47 @@ export default function WorkspaceClient({ projectId, accountType }: { projectId:
             {overview.timeline.length ? <ul>{overview.timeline.map((item) => <li key={item.id}><p>{item.label}</p><time dateTime={item.createdAt}>{formatTimestamp(item.createdAt)}</time></li>)}</ul> : <p className="emptyOverview">No recent project activity.</p>}
           </section>
         </div>
+
+        <section className="dashboardPanel traceMiniPanel" aria-labelledby="tracemini-title">
+          <div className="overviewSectionHeader traceMiniHeader">
+            <div><span className="sectionLabel">Data from TraceMini</span><h2 id="tracemini-title">Git delivery activity</h2></div>
+            <span className={`statusBadge ${traceView?.state === 'fresh' ? '' : 'subtle'}`}>{traceView?.state || 'loading'}</span>
+          </div>
+          {traceView?.lastSuccessfulSync && <p className="traceFreshness">Last successful refresh {formatTimestamp(traceView.lastSuccessfulSync)}{traceView.stale ? ' · showing stale cached data' : ''}</p>}
+          {traceView?.lastError && <p className="errorBanner" role="status">{traceView.lastError}</p>}
+          {!traceView?.data ? <p className="emptyOverview">{traceView?.state === 'unconfigured' ? 'TraceMini is not configured for this project.' : traceView?.state === 'disabled' ? 'TraceMini is disabled for this project.' : traceView?.state === 'unavailable' ? 'TraceMini data is unavailable. The rest of this project remains available.' : 'Loading TraceMini data...'}</p> : <>
+            <section className="analyticsGrid traceMiniStats" aria-label="TraceMini totals">
+              <article><span>Activity events</span><strong>{traceView.data.activityTotal}</strong></article>
+              <article><span>Repositories</span><strong>{traceView.data.repositories.length}</strong></article>
+              <article><span>Connected devices</span><strong>{traceView.data.devices.filter((device) => device.status === 'online' || device.status === 'active').length}</strong></article>
+              <article><span>Reports</span><strong>{traceView.data.reports.length}</strong></article>
+            </section>
+            <div className="traceMiniGrid">
+              <section><h3>Recent Git activity</h3>{traceView.data.recentActivity.length ? <ul>{traceView.data.recentActivity.slice(0, 12).map((event) => { const confirmation = renderTraceMiniConfirmation(event.data.confirmation); return <li key={event.id}><strong>{event.type}</strong><span>{event.member.label}{event.repositoryName ? ` · ${event.repositoryName}` : ''}{confirmation ? ` · ${confirmation}` : ''}</span><time dateTime={event.occurredAt}>{formatTimestamp(event.occurredAt)}</time></li>; })}</ul> : <p className="muted">No recent activity.</p>}</section>
+              <section><h3>Repository summaries</h3>{traceView.data.repositories.length ? <ul>{traceView.data.repositories.map((repository) => <li key={repository.id}><strong>{repository.name}</strong><span>{repository.archived ? 'Archived' : 'Active'} · {repository.cloneCount} clones</span></li>)}</ul> : <p className="muted">No repositories.</p>}</section>
+              <section><h3>Connected-device status</h3>{traceView.data.devices.length ? <ul>{traceView.data.devices.map((device, index) => <li key={`${device.member.id || 'unmapped'}-${index}`}><strong>{device.member.label}</strong><span>{device.status}{device.lastSeen ? ` · ${formatTimestamp(device.lastSeen)}` : ''}</span></li>)}</ul> : <p className="muted">No device status.</p>}</section>
+              <section><h3>Member activity</h3>{traceView.data.memberActivity.length ? <ul>{traceView.data.memberActivity.map((member, index) => <li key={`${member.member.id || 'unmapped'}-${index}`}><strong>{member.member.label}</strong><span>{member.count} events</span></li>)}</ul> : <p className="muted">No member activity.</p>}</section>
+              <section><h3>Report metadata</h3>{traceView.data.reports.length ? <ul>{traceView.data.reports.map((report) => <li key={report.id}><strong>{report.title}</strong><span>{report.status || 'Available'}{report.updatedAt ? ` · ${formatTimestamp(report.updatedAt)}` : ''}</span></li>)}</ul> : <p className="muted">No reports.</p>}</section>
+            </div>
+          </>}
+        </section>
+
+        {canManageTraceMini && <details className="dashboardPanel traceMiniSettings">
+          <summary>TraceMini settings</summary>
+          <form onSubmit={saveTraceMini}>
+            <p className="muted">Read-only connection. The session token is encrypted and is never returned to the browser.</p>
+            <label>Trusted base URL<input type="url" required value={traceBaseUrl} onChange={(event) => setTraceBaseUrl(event.target.value)} placeholder="https://tracemini.example.com" /></label>
+            <label>Workspace ID<input required value={traceWorkspaceId} onChange={(event) => setTraceWorkspaceId(event.target.value)} /></label>
+            <label>Session token<input type="password" autoComplete="off" required={!traceConfig?.hasCredential} value={traceCredential} onChange={(event) => setTraceCredential(event.target.value)} placeholder={traceConfig?.hasCredential ? 'Leave blank to keep current token' : 'Required'} /></label>
+            <div className="rowActions">
+              <button disabled={Boolean(traceBusy)}>{traceBusy === 'save' ? 'Saving...' : 'Save settings'}</button>
+              {traceConfig?.configured && <><button type="button" className="secondaryButton" disabled={Boolean(traceBusy)} onClick={() => updateTraceMini('test', () => api(`${base}/tracemini`, jsonOptions({ action: 'test' })))}>Test connection</button><button type="button" className="secondaryButton" disabled={Boolean(traceBusy)} onClick={() => updateTraceMini('toggle', () => api(`${base}/tracemini`, jsonOptions({ action: traceConfig.enabled ? 'disable' : 'enable' })))}>{traceConfig.enabled ? 'Disable' : 'Enable'}</button><button type="button" className="secondaryButton" disabled={Boolean(traceBusy)} onClick={() => window.confirm('Remove this TraceMini connection?') && updateTraceMini('remove', () => api(`${base}/tracemini`, { method: 'DELETE' }))}>Remove</button></>}
+            </div>
+            {traceConfig?.lastSuccessfulSync && <small>Last success: {formatTimestamp(traceConfig.lastSuccessfulSync)}</small>}
+            {traceConfig?.lastError && <p className="errorBanner">{traceConfig.lastError}</p>}
+            {traceMessage && <p role="status" className={traceMessage.endsWith('updated.') || traceMessage.endsWith('verified.') ? 'good' : 'errorBanner'}>{traceMessage}</p>}
+          </form>
+        </details>}
       </section>
 
       <aside className="agentPanel chatRail dashboardPanel" aria-labelledby="project-agent-title">
