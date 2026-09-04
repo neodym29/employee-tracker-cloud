@@ -13,7 +13,7 @@ type ProjectStatus = 'draft' | 'open' | 'active' | 'completed' | 'archived';
 type TimelineItem = { id: string; label: string; createdAt: string };
 
 export type ProjectOverview = {
-  project: { id: string; title: string; description: string; status: ProjectStatus; createdAt: string; updatedAt: string };
+  project: { id: string; title: string; description: string; status: ProjectStatus; gitRemote: string | null; createdAt: string; updatedAt: string };
   stage: { label: string; closed: boolean };
   progress: { percent: number; summary: string; version: number; updatedAt: string };
   clientName: string;
@@ -57,9 +57,10 @@ export async function getProjectOverview(session: SessionUser, projectId: unknow
   if (!/^[1-9]\d*$/.test(project)) throw new ProjectServiceError('Invalid project id');
   await ensureSchema();
   const db = getPool();
+  const platformAdmin = session.role === 'admin' && session.account_type === 'admin';
   const access = projectAccessSql('$2');
   const result = await db.query(
-    `select p.id,p.title,p.description,p.status,p.progress_percent,p.progress_summary,p.progress_version,p.progress_updated_at,p.created_at,p.updated_at,
+    `select p.id,p.title,p.description,p.status,p.git_remote_url,p.progress_percent,p.progress_summary,p.progress_version,p.progress_updated_at,p.created_at,p.updated_at,
        client.display_name as client_name,
        (select count(*) from project_memberships engineer_members
          join app_users engineer on engineer.id=engineer_members.user_id and engineer.account_type='engineer'
@@ -96,8 +97,8 @@ export async function getProjectOverview(session: SessionUser, projectId: unknow
        ) timeline_row),'[]'::json) as timeline
      from projects p
      join app_users client on client.id=p.client_id
-     ${access.join}
-     where p.id=$1 and ${access.predicate}
+     ${platformAdmin ? '' : access.join}
+     where p.id=$1 and ${platformAdmin ? "p.approval_status='approved'" : access.predicate}
      limit 1`,
     [project, session.id],
   );
@@ -107,7 +108,7 @@ export async function getProjectOverview(session: SessionUser, projectId: unknow
   const percent = Number(row.progress_percent);
   const version = Number(row.progress_version);
   return {
-    project: { id: String(row.id), title: String(row.title ?? ''), description: String(row.description ?? ''), status, createdAt: timestamp(row.created_at), updatedAt: timestamp(row.updated_at) },
+    project: { id: String(row.id), title: String(row.title ?? ''), description: String(row.description ?? ''), status, gitRemote: row.git_remote_url ? String(row.git_remote_url) : null, createdAt: timestamp(row.created_at), updatedAt: timestamp(row.updated_at) },
     stage: projectStage(status),
     progress: { percent: Number.isInteger(percent) && percent >= 0 && percent <= 100 ? percent : 0, summary: boundedSafeText(row.progress_summary, PROGRESS_SUMMARY_MAX), version: Number.isSafeInteger(version) && version > 0 ? version : 1, updatedAt: timestamp(row.progress_updated_at) },
     clientName: String(row.client_name ?? ''),

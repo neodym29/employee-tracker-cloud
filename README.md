@@ -23,4 +23,4 @@ npm run typecheck
 npm run build
 ```
 
-Set `DATABASE_URL` (or `POSTGRES_URL`) and `AUTH_SECRET` for authenticated database-backed use. See `.env.example` if present and the files-agent documentation under `docs/` and `files-agent/`.
+Set `DATABASE_URL` (or `POSTGRES_URL`) and `AUTH_SECRET` for authenticated database-backed use. See `.env.example` and the documentation under `docs/` and `files-agent/`. The optional project-scoped TraceMini integration is documented in [`docs/tracemini-readonly.md`](docs/tracemini-readonly.md).

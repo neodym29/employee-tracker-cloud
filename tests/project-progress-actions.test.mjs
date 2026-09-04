@@ -96,7 +96,7 @@ test('workspace shows descriptions and refreshes both chat and overview after co
   const workspace = read('app/projects/[projectId]/WorkspaceClient.tsx');
   assert.match(workspace, /description:\s*string/);
   assert.match(workspace, /action\.description/);
-  assert.match(workspace, /decideAction[\s\S]*await loadWorkspace\(\)/);
+  assert.match(workspace, /decideAction[\s\S]*await Promise\.all\(\[loadWorkspace\(\), loadTraceMini\(\)\]\)/);
   assert.doesNotMatch(workspace, /stage based on the current project status/i);
   assert.match(workspace, /overview\.progress\.summary/);
 });

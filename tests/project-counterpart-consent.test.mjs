@@ -7,11 +7,20 @@ import ts from 'typescript';
 
 const root = new URL('../', import.meta.url);
 const projectSource = readFileSync(new URL('lib/projects.ts', root), 'utf8');
+const gitRemoteSource = readFileSync(new URL('lib/git-remote.ts', root), 'utf8');
 const projectsUi = readFileSync(new URL('app/projects/ProjectsClient.tsx', root), 'utf8');
 const client = { id: '10', role: 'employee', account_type: 'client' };
 const engineer = { id: '20', role: 'employee', account_type: 'engineer' };
 const requestKey = '7d444840-9dc0-4b9b-b785-31f1f14f18b8';
+const gitRemote = 'https://github.com/acme/formation.git';
 const plain = (value) => JSON.parse(JSON.stringify(value));
+
+function loadGitRemote() {
+  const javascript = ts.transpileModule(gitRemoteSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const module = { exports: {} };
+  vm.runInNewContext(javascript, { module, exports: module.exports, URL });
+  return module.exports;
+}
 
 function loadProjects(query) {
   const calls = [];
@@ -31,6 +40,7 @@ function loadProjects(query) {
       if (specifier === 'node:crypto') return crypto;
       if (specifier === './db') return { ensureSchema: async () => {}, getPool: () => pool };
       if (specifier === './project-agent-documents') return { async loadProjectAgentStructuredData() { return { memberRoster: [], projectStatistics: {} }; }, async ensureCanonicalProjectDocuments() {} };
+      if (specifier === './git-remote') return loadGitRemote();
       throw new Error(`Unexpected import: ${specifier}`);
     },
   });
@@ -45,7 +55,7 @@ test('client formation makes every selected approved engineer an active creator 
   ];
   const { service, calls } = loadProjects(async (sql, values) => {
     if (/^(begin|commit)$/i.test(sql)) return { rows: [] };
-    if (/insert into projects/i.test(sql)) { project.creation_payload_fingerprint = values.at(-1); return { rows: [project] }; }
+    if (/insert into projects/i.test(sql)) { project.creation_payload_fingerprint = values[6]; return { rows: [project] }; }
     if (/insert into project_memberships/i.test(sql)) {
       assert.match(sql, /'creator','active'/i);
       assert.doesNotMatch(sql, /'invitation','pending'/i);
@@ -56,7 +66,7 @@ test('client formation makes every selected approved engineer an active creator 
     if (/from project_memberships/i.test(sql)) return { rows: creators };
     throw new Error(`Unexpected query: ${sql}`);
   });
-  const result = await service.createProject(client, { title: 'Formation', status: 'open', engineerIds: ['20', '21'], requestKey });
+  const result = await service.createProject(client, { title: 'Formation', status: 'open', engineerIds: ['20', '21'], requestKey, gitRemote });
   assert.deepEqual(plain(result.memberships), creators);
   assert.equal(calls.filter(({ sql }) => /^commit$/i.test(sql)).length, 1);
   assert.equal(calls.filter(({ sql }) => /^rollback$/i.test(sql)).length, 0);
@@ -70,7 +80,7 @@ test('engineer formation immediately creates an approved open client-owned proje
     if (/insert into projects/i.test(sql)) {
       assert.match(sql, /select id,[\s\S]*'open','approved',null/i);
       assert.match(sql, /account_type='client'[\s\S]*approval_status='approved'/i);
-      project.creation_payload_fingerprint = values.at(-1);
+      project.creation_payload_fingerprint = values[5];
       return { rows: [project] };
     }
     if (/insert into project_memberships/i.test(sql)) {
@@ -84,7 +94,7 @@ test('engineer formation immediately creates an approved open client-owned proje
     throw new Error(`Unexpected query: ${sql}`);
   });
 
-  const created = await service.createProject(engineer, { clientId: '10', title: 'Immediate project', requestKey });
+  const created = await service.createProject(engineer, { clientId: '10', title: 'Immediate project', requestKey, gitRemote });
   assert.equal(created.status, 'open');
   assert.equal(created.approval_status, 'approved');
   assert.equal(created.membership.membership_type, 'creator');
@@ -100,7 +110,7 @@ test('invalid counterpart selection rolls back all immediate formation writes', 
     throw new Error(`Unexpected query: ${sql}`);
   });
   await assert.rejects(
-    service.createProject(client, { title: 'Formation', engineerIds: ['20', '404'], requestKey }),
+    service.createProject(client, { title: 'Formation', engineerIds: ['20', '404'], requestKey, gitRemote }),
     (error) => error?.status === 409 && error?.code === 'conflict',
   );
   assert.equal(calls.filter(({ sql }) => /^rollback$/i.test(sql)).length, 1);

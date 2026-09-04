@@ -6,6 +6,14 @@ import crypto from 'node:crypto';
 import ts from 'typescript';
 
 const source = readFileSync(new URL('../lib/projects.ts', import.meta.url), 'utf8');
+const gitRemoteSource = readFileSync(new URL('../lib/git-remote.ts', import.meta.url), 'utf8');
+
+function loadGitRemote() {
+  const javascript = ts.transpileModule(gitRemoteSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const module = { exports: {} };
+  vm.runInNewContext(javascript, { module, exports: module.exports, URL });
+  return module.exports;
+}
 
 const owner = { id: '10', role: 'user', account_type: 'client' };
 const member = { id: '20', role: 'user', account_type: 'engineer' };
@@ -50,6 +58,7 @@ function loadProjects() {
       if (specifier === 'node:crypto') return crypto;
       if (specifier === './db') return { ensureSchema: async () => {}, getPool: () => pool };
       if (specifier === './project-agent-documents') return { async loadProjectAgentStructuredData() { return { memberRoster: [], projectStatistics: {} }; }, async ensureCanonicalProjectDocuments() {} };
+      if (specifier === './git-remote') return loadGitRemote();
       throw new Error(`Unexpected import: ${specifier}`);
     },
     Buffer,

@@ -117,6 +117,25 @@ select:focus, input:focus, textarea:focus, a:focus-visible, button:focus-visible
 .dashboardListRow div span, .textLink { color: var(--muted); font-size: 12px; }
 .textLink { font-weight: 700; }
 
+.traceMiniPanel { margin-top: 18px; padding-bottom: 20px; }
+.traceMiniHeader { padding: 22px 24px; border-bottom: 1px solid var(--line); }
+.traceFreshness { margin: 14px 24px 0; color: var(--muted); font-size: 12px; }
+.traceMiniPanel > .errorBanner { margin: 14px 24px 0; }
+.traceMiniStats { margin: 18px 24px; }
+.traceMiniStats article { box-shadow: none; }
+.traceMiniGrid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; padding: 0 24px; }
+.traceMiniGrid section { min-width: 0; border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+.traceMiniGrid section:last-child { grid-column: 1 / -1; }
+.traceMiniGrid h3 { margin: 0 0 10px; font-size: 15px; }
+.traceMiniGrid ul { display: grid; margin: 0; padding: 0; list-style: none; }
+.traceMiniGrid li { min-width: 0; display: grid; gap: 4px; padding: 10px 0; }
+.traceMiniGrid li + li { border-top: 1px solid var(--line); }
+.traceMiniGrid li strong, .traceMiniGrid li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.traceMiniGrid li span, .traceMiniGrid time { color: var(--muted); font-size: 11px; }
+.traceMiniSettings { margin-top: 18px; }
+.traceMiniSettings summary { padding: 20px 24px; cursor: pointer; font-weight: 700; }
+.traceMiniSettings form { padding: 0 24px 24px; }
+
 /* Forms and legacy operational pages retain a restrained usable shell. */
 .card { max-width: 760px; padding: 28px; }
 .card .card { box-shadow: none; }
@@ -342,6 +361,9 @@ button:disabled { cursor: not-allowed; opacity: .55; transform: none; box-shadow
   .projectContext { min-width: 0; align-items: flex-start; flex-direction: column; padding: 16px; }
   .projectContextMeta { width: 100%; justify-items: start; }
   .analyticsGrid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .traceMiniGrid { grid-template-columns: minmax(0,1fr); padding: 0 16px; }
+  .traceMiniGrid section:last-child { grid-column: auto; }
+  .traceMiniStats { margin: 16px; }
   .agentHeader { grid-template-columns: auto minmax(0,1fr); padding: 18px 16px 8px; }
   .agentState { grid-column: 2; }
   .agentCapability { padding: 4px 16px 14px; }

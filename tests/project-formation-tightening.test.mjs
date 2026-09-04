@@ -7,9 +7,18 @@ import ts from 'typescript';
 
 const root = new URL('../', import.meta.url);
 const projectSource = readFileSync(new URL('lib/projects.ts', root), 'utf8');
+const gitRemoteSource = readFileSync(new URL('lib/git-remote.ts', root), 'utf8');
 const clientSource = readFileSync(new URL('app/projects/ProjectsClient.tsx', root), 'utf8');
 const client = { id: '10', role: 'employee', account_type: 'client' };
 const requestKey = '7d444840-9dc0-4b9b-b785-31f1f14f18b8';
+const gitRemote = 'https://github.com/acme/formation.git';
+
+function loadGitRemote() {
+  const javascript = ts.transpileModule(gitRemoteSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const module = { exports: {} };
+  vm.runInNewContext(javascript, { module, exports: module.exports, URL });
+  return module.exports;
+}
 
 function loadProjects(query) {
   const calls = [];
@@ -26,6 +35,7 @@ function loadProjects(query) {
       if (specifier === 'node:crypto') return crypto;
       if (specifier === './db') return { ensureSchema: async () => {}, getPool: () => pool };
       if (specifier === './project-agent-documents') return { async loadProjectAgentStructuredData() { return { memberRoster: [], projectStatistics: {} }; }, async ensureCanonicalProjectDocuments() {} };
+      if (specifier === './git-remote') return loadGitRemote();
       throw new Error(`Unexpected import: ${specifier}`);
     },
   });
@@ -45,7 +55,7 @@ test('client formation atomically creates active creator memberships for every s
     if (/^(begin|commit)$/i.test(sql)) return { rows: [] };
     if (/insert into projects/i.test(sql)) {
       assert.match(sql, /creation_payload_fingerprint/i);
-      fingerprint = values.at(-1);
+      fingerprint = values[6];
       assert.match(fingerprint, /^[a-f0-9]{64}$/);
       project.creation_payload_fingerprint = fingerprint;
       return { rows: [project] };
@@ -61,7 +71,7 @@ test('client formation atomically creates active creator memberships for every s
     throw new Error(`Unexpected query: ${sql}`);
   });
 
-  const result = await service.createProject(client, { title: ' Formation ', description: ' Together ', status: 'open', engineerIds: ['10', '2'], requestKey });
+  const result = await service.createProject(client, { title: ' Formation ', description: ' Together ', status: 'open', engineerIds: ['10', '2'], requestKey, gitRemote });
   assert.deepEqual(plain(result.memberships), members);
   assert.equal(calls.filter(({ sql }) => /^commit$/i.test(sql)).length, 1);
   assert.equal(calls.filter(({ sql }) => /^rollback$/i.test(sql)).length, 0);
@@ -77,7 +87,7 @@ test('malformed, duplicate, or excessive engineer selections fail before databas
   ];
   for (const engineerIds of invalidSelections) {
     await assert.rejects(
-      service.createProject(client, { title: 'Formation', engineerIds, requestKey }),
+      service.createProject(client, { title: 'Formation', engineerIds, requestKey, gitRemote }),
       (error) => error?.status === 400 && error?.code === 'invalid_request',
     );
   }
@@ -93,7 +103,7 @@ test('one invalid or unapproved selected engineer rolls back the whole client fo
     throw new Error(`Unexpected query: ${sql}`);
   });
   await assert.rejects(
-    service.createProject(client, { title: 'Formation', engineerIds: ['20', '404'], requestKey }),
+    service.createProject(client, { title: 'Formation', engineerIds: ['20', '404'], requestKey, gitRemote }),
     (error) => error?.status === 409 && error?.code === 'conflict',
   );
   assert.equal(calls.filter(({ sql }) => /^rollback$/i.test(sql)).length, 1);
@@ -108,7 +118,7 @@ test('same request key rejects a materially different payload and exact replay r
     if (/^begin$|^commit$|^rollback$/i.test(sql)) return { rows: [] };
     if (/insert into projects/i.test(sql)) {
       attempts += 1;
-      if (!storedFingerprint) storedFingerprint = values.at(-1);
+      if (!storedFingerprint) storedFingerprint = values[6];
       return { rows: attempts === 1 ? [{ id: '77', creation_payload_fingerprint: storedFingerprint }] : [] };
     }
     if (/insert into project_memberships/i.test(sql)) return { rows: members };
@@ -117,7 +127,7 @@ test('same request key rejects a materially different payload and exact replay r
     throw new Error(`Unexpected query: ${sql}`);
   });
 
-  const exact = { title: 'Formation', status: 'open', engineerIds: ['20'], requestKey };
+  const exact = { title: 'Formation', status: 'open', engineerIds: ['20'], requestKey, gitRemote };
   assert.deepEqual(plain((await service.createProject(client, exact)).memberships), members);
   assert.deepEqual(plain((await service.createProject(client, exact)).memberships), members);
   await assert.rejects(

@@ -7,9 +7,17 @@ import ts from 'typescript';
 
 const root = new URL('../', import.meta.url);
 const source = readFileSync(new URL('lib/projects.ts', root), 'utf8');
+const gitRemoteSource = readFileSync(new URL('lib/git-remote.ts', root), 'utf8');
 const ensure = readFileSync(new URL('lib/db.ts', root), 'utf8');
 const clientUser = { id: '10', role: 'employee', account_type: 'client' };
 const engineerUser = { id: '20', role: 'employee', account_type: 'engineer' };
+
+function loadGitRemote() {
+  const javascript = ts.transpileModule(gitRemoteSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const module = { exports: {} };
+  vm.runInNewContext(javascript, { module, exports: module.exports, URL });
+  return module.exports;
+}
 
 function serviceFor(row) {
   const calls = [];
@@ -40,6 +48,7 @@ function serviceFor(row) {
       if (specifier === 'node:crypto') return crypto;
       if (specifier === './db') return { ensureSchema: async () => {}, getPool: () => pool };
       if (specifier === './project-agent-documents') return { async loadProjectAgentStructuredData() { return { memberRoster: [], projectStatistics: {} }; }, async ensureCanonicalProjectDocuments() {} };
+      if (specifier === './git-remote') return loadGitRemote();
       throw new Error(`Unexpected import: ${specifier}`);
     },
   });
@@ -72,12 +81,13 @@ test('later invitation decline remains engineer-controlled and replay safe', asy
 });
 
 test('immediate formation has no proposal writer or proposal decision state machine', () => {
-  assert.doesNotMatch(source, /'pending','engineer_client'/i);
-  assert.doesNotMatch(source, /'request','pending',true/i);
-  assert.doesNotMatch(source, /row\.is_project_proposal|isProposal|Project proposal has already been decided/i);
-  assert.match(source, /version:\s*2/, 'changed formation semantics must use a new request fingerprint version');
-  assert.match(source, /'approved',null/);
-  assert.match(source, /'creator','active',false/);
+  const formationSource = source.slice(source.indexOf('export async function createProject'), source.indexOf('export async function updateProject'));
+  assert.doesNotMatch(formationSource, /'pending','engineer_client'/i);
+  assert.doesNotMatch(formationSource, /'request','pending',true/i);
+  assert.doesNotMatch(formationSource, /row\.is_project_proposal|isProposal|Project proposal has already been decided/i);
+  assert.match(formationSource, /version:\s*3/, 'Git-linked formation semantics must use a new request fingerprint version');
+  assert.match(formationSource, /'approved',null/);
+  assert.match(formationSource, /'creator','active',false/);
 });
 
 test('authorization remains fail closed and reusable schema setup contains no data-specific repair', () => {
