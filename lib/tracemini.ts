@@ -1,431 +1,197 @@
 import 'server-only';
+import crypto from 'node:crypto';
 import type { SessionUser } from './auth';
 import { ensureSchema, getPool } from './db';
 import { ProjectServiceError, projectAccessSql } from './projects';
-import { traceMiniGet, validateTraceMiniBaseUrl } from './tracemini-adapter';
-import { decryptTraceMiniCredential, encryptTraceMiniCredential } from './tracemini-crypto';
-import { normalizeTraceMiniData, type TraceMiniProjectMember } from './tracemini-normalize';
-import { proposeProgress, traceMiniEvidenceKey, type TraceMiniProgressEvent } from './tracemini-progress';
 
-const CACHE_TTL_MS = 30_000;
-const CACHE_STALE_MAX_MS = 5 * 60_000;
-const MAX_CACHE_ENTRIES = 100;
-const PUBLIC_ERRORS = new Set([
-  'TraceMini request timed out',
-  'TraceMini authorization failed',
-  'TraceMini resource was not found',
-  'TraceMini returned an invalid response',
-  'TraceMini response was too large',
-  'TraceMini is temporarily unavailable',
-  'TraceMini is unavailable',
-]);
-
-type UpstreamData = { dashboard: { events: unknown[]; repositories: unknown[]; stats: Record<string, unknown>; timeline: unknown[] }; settings: Record<string, unknown>; agents: unknown[]; reports: unknown[] };
-type CacheEntry = { fetchedAt: number; upstream: UpstreamData; lastSuccessfulSync: string };
-const cache = new Map<string, CacheEntry>();
-const inFlight = new Map<string, Promise<UpstreamData>>();
-
-type IntegrationRow = {
-  project_id: string; client_id: string; base_url: string; workspace_id: string; enabled: boolean;
-  credential_ciphertext: Buffer; credential_iv: Buffer; credential_tag: Buffer; credential_version: 1;
-  config_generation: string | number; config_revision: string | number;
-  git_remote_url: string | null; git_repository_key: string | null;
-  last_successful_sync: Date | string | null; last_error: string | null; created_at: Date | string; updated_at: Date | string;
-};
-
-function projectId(value: unknown) {
+function projectId(value: unknown): string {
   const result = String(value ?? '');
   if (!/^[1-9]\d*$/.test(result)) throw new ProjectServiceError('Invalid project id');
   return result;
 }
-function workspaceId(value: unknown) {
-  if (typeof value !== 'string' || !value.trim() || value.trim().length > 200 || /[\u0000-\u001f\u007f]/.test(value)) throw new ProjectServiceError('Invalid TraceMini workspace ID');
-  return value.trim();
-}
-function timestamp(value: unknown) {
-  if (!value) return null;
-  const date = value instanceof Date ? value : new Date(String(value));
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-function safeError(error: unknown) {
-  const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
-  const messages: Record<string, string> = {
-    timeout: 'TraceMini request timed out',
-    unauthorized: 'TraceMini authorization failed',
-    not_found: 'TraceMini resource was not found',
-    malformed_response: 'TraceMini returned an invalid response',
-    too_large: 'TraceMini response was too large',
-    temporary_outage: 'TraceMini is temporarily unavailable',
-  };
-  return messages[code] || 'TraceMini is unavailable';
-}
-function storedError(value: unknown) {
-  if (!value) return null;
-  return typeof value === 'string' && PUBLIC_ERRORS.has(value) ? value : 'TraceMini is unavailable';
-}
-function strictAdmin(session: SessionUser) { return session.role === 'admin' && session.account_type === 'admin'; }
-function configurationKey(project: string, row: IntegrationRow) {
-  return JSON.stringify([project, String(row.config_generation), String(row.config_revision)]);
-}
-function invalidateProject(project: string) {
-  for (const key of cache.keys()) if (key.startsWith(`["${project}",`)) cache.delete(key);
-}
-function pruneCache(now: number) {
-  for (const [key, entry] of cache) if (now - entry.fetchedAt > CACHE_STALE_MAX_MS) cache.delete(key);
-  while (cache.size >= MAX_CACHE_ENTRIES) cache.delete(cache.keys().next().value!);
-}
-function errorCode(error: unknown) {
-  return error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
-}
-
-/** Pure policy helper; database ownership is still checked by every management operation. */
+function admin(session: SessionUser) { return session.role === 'admin' && session.account_type === 'admin'; }
 export function isTraceMiniManager(session: Pick<SessionUser, 'id' | 'role' | 'account_type'>, ownerId: string) {
-  return (session.role === 'admin' && session.account_type === 'admin') || (session.account_type === 'client' && session.id === String(ownerId));
+  return admin(session as SessionUser) || (session.account_type === 'client' && session.id === String(ownerId));
+}
+async function db() { await ensureSchema(); return getPool(); }
+async function authorized(session: SessionUser, project: string) {
+  const pool = await db();
+  const access = projectAccessSql('$2');
+  const result = await pool.query(
+    `select p.id,p.client_id,p.tracemini_telemetry_paused,p.tracemini_retention_days
+       from projects p ${admin(session) ? '' : access.join}
+      where p.id=$1 and p.approval_status='approved' and ${admin(session) ? 'true' : access.predicate}`,
+    admin(session) ? [project] : [project, session.id],
+  );
+  if (!result.rows[0]) throw new ProjectServiceError('Project not found', 404, 'not_found');
+  return { pool, row: result.rows[0] };
 }
 
-async function ready() { await ensureSchema(); return getPool(); }
-
-async function managementProject(session: SessionUser, project: string) {
-  if (session.account_type !== 'client' && !strictAdmin(session)) throw new ProjectServiceError('Forbidden', 403, 'forbidden');
-  const db = await ready();
-  const result = await db.query(`select id,client_id from projects where id=$1 and approval_status='approved'`, [project]);
-  const row = result.rows[0];
-  if (!row || !isTraceMiniManager(session, String(row.client_id))) throw new ProjectServiceError('Project not found', 404, 'not_found');
-  return { db, ownerId: String(row.client_id) };
+export async function getTraceMiniConfig(session: SessionUser, value: unknown) {
+  const project = projectId(value); const { pool, row } = await authorized(session, project);
+  const roots = await pool.query(`select r.binding_id,r.root_label,r.status,r.last_heartbeat_at,r.created_at,d.device_label,d.hostname from project_tracemini_roots r join files_agent_devices d on d.id=r.device_id where r.project_id=$1 order by r.created_at desc`, [project]);
+  const manager = isTraceMiniManager(session, String(row.client_id));
+  const safeRoots = roots.rows.map((root, index) => ({ ...(manager ? { managementId: String(root.binding_id || `root-${index}`) } : {}), label: String(root.root_label), status: String(root.status), lastHeartbeatAt: root.last_heartbeat_at ? new Date(root.last_heartbeat_at).toISOString() : null, createdAt: new Date(root.created_at).toISOString() }));
+  return { configured: true, enabled: !row.tracemini_telemetry_paused, hasCredential: false, baseUrl: null, workspaceId: null,
+    approvedRoots: safeRoots.filter((root) => root.status === 'approved').length, roots: safeRoots, retentionDays: Number(row.tracemini_retention_days || 90),
+    lastSuccessfulSync: null, lastError: null };
 }
 
-function publicConfig(row: IntegrationRow | undefined) {
-  if (!row) return { configured: false, enabled: false, hasCredential: false, baseUrl: null, workspaceId: null, lastSuccessfulSync: null, lastError: null };
-  return {
-    configured: true, enabled: row.enabled === true, hasCredential: true,
-    baseUrl: row.base_url, workspaceId: row.workspace_id,
-    lastSuccessfulSync: timestamp(row.last_successful_sync), lastError: storedError(row.last_error),
-    updatedAt: timestamp(row.updated_at),
-  };
-}
-
-export async function getTraceMiniConfig(session: SessionUser, projectValue: unknown) {
-  const project = projectId(projectValue);
-  const { db } = await managementProject(session, project);
-  const result = await db.query(`select project_id,client_id,base_url,workspace_id,enabled,config_generation,config_revision,last_successful_sync,last_error,created_at,updated_at from project_tracemini_integrations join projects on projects.id=project_id where project_id=$1`, [project]);
-  return publicConfig(result.rows[0]);
-}
-
-export async function saveTraceMiniConfig(session: SessionUser, projectValue: unknown, input: Record<string, unknown>) {
-  const project = projectId(projectValue);
-  const { db } = await managementProject(session, project);
-  let baseUrl: string;
-  try {
-    baseUrl = validateTraceMiniBaseUrl(input.baseUrl);
-  } catch (error) {
-    const message = error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string'
-      ? (error as { message: string }).message
-      : 'Invalid TraceMini base URL';
-    throw new ProjectServiceError(message, 400, 'invalid_request');
-  }
-  const workspace = workspaceId(input.workspaceId);
-  const existing = await db.query(`select credential_version,project_id,base_url,workspace_id,enabled,config_generation,config_revision,credential_ciphertext,credential_iv,credential_tag from project_tracemini_integrations where project_id=$1`, [project]);
-  const credential = typeof input.credential === 'string' ? input.credential.trim() : '';
-  if (!existing.rows[0] && !credential) throw new ProjectServiceError('A TraceMini credential is required');
-  let credentialChanged = Boolean(credential);
-  if (credential && existing.rows[0]) {
-    try { credentialChanged = credential !== decrypt(project, existing.rows[0] as IntegrationRow); }
-    catch { credentialChanged = true; }
-  }
-  if (credentialChanged) {
-    const envelope = encryptTraceMiniCredential(project, credential);
-    await db.query(
-      `insert into project_tracemini_integrations(project_id,base_url,workspace_id,credential_ciphertext,credential_iv,credential_tag,credential_version,enabled,last_error)
-       values($1,$2,$3,$4,$5,$6,$7,coalesce($8,true),null)
-       on conflict(project_id) do update set
-         config_revision=project_tracemini_integrations.config_revision+case when
-           row(project_tracemini_integrations.base_url,project_tracemini_integrations.workspace_id,project_tracemini_integrations.credential_ciphertext,project_tracemini_integrations.credential_iv,project_tracemini_integrations.credential_tag,project_tracemini_integrations.credential_version,project_tracemini_integrations.enabled)
-           is distinct from row(excluded.base_url,excluded.workspace_id,excluded.credential_ciphertext,excluded.credential_iv,excluded.credential_tag,excluded.credential_version,coalesce($8,project_tracemini_integrations.enabled))
-           then 1 else 0 end,
-         updated_at=case when
-           row(project_tracemini_integrations.base_url,project_tracemini_integrations.workspace_id,project_tracemini_integrations.credential_ciphertext,project_tracemini_integrations.credential_iv,project_tracemini_integrations.credential_tag,project_tracemini_integrations.credential_version,project_tracemini_integrations.enabled)
-           is distinct from row(excluded.base_url,excluded.workspace_id,excluded.credential_ciphertext,excluded.credential_iv,excluded.credential_tag,excluded.credential_version,coalesce($8,project_tracemini_integrations.enabled))
-           then now() else project_tracemini_integrations.updated_at end,
-         base_url=excluded.base_url,workspace_id=excluded.workspace_id,credential_ciphertext=excluded.credential_ciphertext,credential_iv=excluded.credential_iv,credential_tag=excluded.credential_tag,credential_version=excluded.credential_version,enabled=coalesce($8,project_tracemini_integrations.enabled),last_error=null`,
-      [project, baseUrl, workspace, envelope.ciphertext, envelope.iv, envelope.tag, envelope.version, typeof input.enabled === 'boolean' ? input.enabled : null],
-    );
-  } else {
-    await db.query(
-      `update project_tracemini_integrations set
-         config_revision=project_tracemini_integrations.config_revision+case when row(base_url,workspace_id,enabled) is distinct from row($2,$3,coalesce($4,enabled)) then 1 else 0 end,
-         updated_at=case when row(base_url,workspace_id,enabled) is distinct from row($2,$3,coalesce($4,enabled)) then now() else updated_at end,
-         base_url=$2,workspace_id=$3,enabled=coalesce($4,enabled),last_error=null
-       where project_id=$1`,
-      [project, baseUrl, workspace, typeof input.enabled === 'boolean' ? input.enabled : null],
-    );
-  }
-  invalidateProject(project);
+export async function saveTraceMiniConfig(session: SessionUser, value: unknown, input: Record<string, unknown>) {
+  const project = projectId(value); const { pool, row } = await authorized(session, project);
+  if (!isTraceMiniManager(session, String(row.client_id))) throw new ProjectServiceError('Forbidden', 403, 'forbidden');
+  if ('baseUrl' in input || 'workspaceId' in input || 'credential' in input) throw new ProjectServiceError('Embedded TraceMini does not accept external configuration', 400, 'invalid_request');
+  const paused = typeof input.enabled === 'boolean' ? !input.enabled : row.tracemini_telemetry_paused;
+  const retention = typeof input.retentionDays === 'number' && Number.isInteger(input.retentionDays) ? Math.max(1, Math.min(input.retentionDays, 3650)) : Number(row.tracemini_retention_days || 90);
+  await pool.query(`update projects set tracemini_telemetry_paused=$2,tracemini_retention_days=$3,updated_at=now() where id=$1`, [project, paused, retention]);
   return getTraceMiniConfig(session, project);
 }
-
-async function integrationForManager(session: SessionUser, project: string): Promise<{ db: Awaited<ReturnType<typeof ready>>; row: IntegrationRow }> {
-  const { db } = await managementProject(session, project);
-  const result = await db.query(`select i.*,p.client_id from project_tracemini_integrations i join projects p on p.id=i.project_id where i.project_id=$1`, [project]);
-  if (!result.rows[0]) throw new ProjectServiceError('TraceMini is not configured', 404, 'not_found');
-  return { db, row: result.rows[0] };
-}
-function decrypt(project: string, row: IntegrationRow) {
-  return decryptTraceMiniCredential(project, { version: Number(row.credential_version) as 1, ciphertext: row.credential_ciphertext, iv: row.credential_iv, tag: row.credential_tag });
+export async function revokeTraceMiniRoot(session: SessionUser, value: unknown, bindingId: unknown) {
+  const project=projectId(value); const {pool,row}=await authorized(session,project);
+  if(!isTraceMiniManager(session,String(row.client_id))) throw new ProjectServiceError('Forbidden',403,'forbidden');
+  const binding=String(bindingId??''); if(!/^[A-Za-z0-9_-]{32,128}$/.test(binding)) throw new ProjectServiceError('Invalid binding id',400,'invalid_request');
+  const result=await pool.query(`update project_tracemini_roots set status='revoked',revoked_at=now() where project_id=$1 and binding_id=$2 and status<>'revoked' returning binding_id`,[project,binding]);
+  if(!result.rows[0]) throw new ProjectServiceError('Root not found',404,'not_found'); return {revoked:true,bindingId:binding};
 }
 
-export async function testTraceMiniConnection(session: SessionUser, projectValue: unknown) {
-  const project = projectId(projectValue);
-  const { db, row } = await integrationForManager(session, project);
-  const generation = row.config_generation;
-  const revision = row.config_revision;
-  try {
-    const userSession = decrypt(project, row);
-    const payload = await traceMiniGet(row.base_url, userSession, 'bootstrap');
-    const bootstrap = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
-    const workspaces = Array.isArray(bootstrap.workspaces) ? bootstrap.workspaces : [];
-    if (!workspaces.some((workspace) => workspace && typeof workspace === 'object' && String((workspace as Record<string, unknown>).id) === row.workspace_id)) throw new Error('Configured TraceMini workspace was not returned');
-    const dashboard = await traceMiniGet(row.base_url, userSession, 'dashboard', row.workspace_id);
-    validateTraceMiniDashboardEnvelope(dashboard);
-  } catch (error) {
-    const message = safeError(error);
-    const updated = await db.query(
-      `update project_tracemini_integrations set last_error=$2 where project_id=$1 and config_generation=$3 and config_revision=$4 returning project_id`,
-      [project, message, generation, revision],
-    ).catch(() => null);
-    if (updated && !updated.rows[0]) throw new ProjectServiceError('TraceMini configuration changed during connection test', 409, 'config_superseded');
-    throw new ProjectServiceError(message, 502, 'tracemini_unavailable');
-  }
-  const updated = await db.query(
-    `update project_tracemini_integrations set last_error=null where project_id=$1 and config_generation=$2 and config_revision=$3 returning project_id`,
-    [project, generation, revision],
-  ).catch(() => null);
-  if (!updated) throw new ProjectServiceError('TraceMini is unavailable', 502, 'tracemini_unavailable');
-  if (!updated.rows[0]) throw new ProjectServiceError('TraceMini configuration changed during connection test', 409, 'config_superseded');
-  return { connected: true, workspaceVerified: true };
+export async function setTraceMiniEnabled(session: SessionUser, value: unknown, enabled: boolean) { return saveTraceMiniConfig(session, value, { enabled }); }
+export async function removeTraceMiniConfig(session: SessionUser, value: unknown) { return setTraceMiniEnabled(session, value, false).then(() => ({ removed: true })); }
+export async function testTraceMiniConnection(session: SessionUser, value: unknown) {
+  const config = await getTraceMiniConfig(session, value);
+  return { connected: true, embedded: true, telemetryPaused: !config.enabled, approvedRoots: config.approvedRoots };
+}
+export async function wipeTraceMiniTelemetry(session: SessionUser, value: unknown) {
+  const project = projectId(value); const { pool, row } = await authorized(session, project);
+  if (!isTraceMiniManager(session, String(row.client_id))) throw new ProjectServiceError('Forbidden', 403, 'forbidden');
+  const client = await pool.connect();
+  try { await client.query('begin');
+    await client.query(`update projects set tracemini_telemetry_paused=true,tracemini_resume_epoch=tracemini_resume_epoch+1,updated_at=now() where id=$1`, [project]);
+    const events = await client.query(`delete from project_tracemini_events where project_id=$1`, [project]);
+    const reports = await client.query(`delete from project_tracemini_reports where project_id=$1`, [project]);
+    const audit = await client.query(`insert into tracemini_audit_log(project_id,actor_user_id,action,details) values($1,$2,'telemetry_wipe',$3::jsonb) returning id`, [project, session.id, JSON.stringify({ events: events.rowCount || 0, reports: reports.rowCount || 0, evidenceRetained: true })]);
+    await client.query('commit');
+    return { wiped: true, projectId: project, evidenceRetained: true, events: events.rowCount || 0, reports: reports.rowCount || 0, telemetryPaused: true, auditId: String(audit.rows[0].id), resumeEpoch: true };
+  } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
 }
 
-export async function setTraceMiniEnabled(session: SessionUser, projectValue: unknown, enabled: boolean) {
-  const project = projectId(projectValue);
-  const { db } = await managementProject(session, project);
-  const result = await db.query(
-    `update project_tracemini_integrations set
-       config_revision=config_revision+case when enabled is distinct from $2 then 1 else 0 end,
-       updated_at=case when enabled is distinct from $2 then now() else updated_at end,
-       enabled=$2
-     where project_id=$1 returning project_id`,
-    [project, enabled],
-  );
-  if (!result.rows[0]) throw new ProjectServiceError('TraceMini is not configured', 404, 'not_found');
-  invalidateProject(project);
-  return getTraceMiniConfig(session, project);
+export function validateTraceMiniDashboardEnvelope(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid embedded TraceMini dashboard response');
+  return value as { events: unknown[]; repositories: unknown[]; stats: Record<string, unknown>; timeline: unknown[] };
 }
 
-export async function removeTraceMiniConfig(session: SessionUser, projectValue: unknown) {
-  const project = projectId(projectValue);
-  const { db } = await managementProject(session, project);
-  await db.query(`delete from project_tracemini_integrations where project_id=$1`, [project]);
-  invalidateProject(project);
-  return { removed: true };
+export async function getTraceMiniData(session: SessionUser, value: unknown, filters: { from?: string; to?: string } = {}) {
+  const project = projectId(value); const { pool, row } = await authorized(session, project);
+  if (row.tracemini_telemetry_paused) return { state: 'disabled', stale: false, lastSuccessfulSync: null, lastError: null, data: null };
+  const params: unknown[] = [project]; const where = ['e.project_id=$1'];
+  if (filters.from && /^\d{4}-\d{2}-\d{2}$/.test(filters.from)) { params.push(filters.from); where.push(`e.occurred_at >= $${params.length}::date`); }
+  if (filters.to && /^\d{4}-\d{2}-\d{2}$/.test(filters.to)) { params.push(filters.to); where.push(`e.occurred_at < ($${params.length}::date + interval '1 day')`); }
+  const events = await pool.query(
+    `select e.id,e.event_key,e.kind,e.repository_key,e.occurred_at,e.provenance,e.evidence_eligible,u.display_name
+       from project_tracemini_events e join files_agent_devices d on d.id=e.device_id
+       join app_users u on u.id=d.user_id where ${where.join(' and ')} order by e.occurred_at desc,e.id desc limit 250`, params);
+  const recentActivity = events.rows.map((event) => { const provenance = event.provenance && typeof event.provenance === 'object' ? event.provenance as Record<string, unknown> : {};
+    const evidenceEligible = event.evidence_eligible === true;
+    return { id: String(event.id), upstreamId: String(event.event_key), evidenceEligible,
+    type: String(event.kind), occurredAt: new Date(event.occurred_at).toISOString(), repositoryName: String(event.repository_key || ''),
+    member: { mapped: true, label: typeof event.display_name === 'string' ? event.display_name : 'Project member' },
+    data: provenance }; });
+  const counts = recentActivity.reduce((result, event) => { result[event.type] = (result[event.type] || 0) + 1; return result; }, {} as Record<string, number>);
+  return { state: 'fresh', stale: false, lastSuccessfulSync: new Date().toISOString(), lastError: null,
+    data: { matchStatus: 'embedded', matchedRepository: null, hasLocalClone: recentActivity.some((event) => event.type === 'git'),
+      localCloneCount: recentActivity.filter((event) => event.type === 'git').length, activityTotal: recentActivity.length, recentActivity,
+      repositories: [...new Set(recentActivity.map((event) => event.repositoryName).filter(Boolean))].map((name) => ({ name, events: recentActivity.filter((event) => event.repositoryName === name).length })),
+      devices: (await pool.query(`select device_label,last_seen_at,revoked_at from files_agent_devices where id in (select distinct device_id from project_tracemini_events where project_id=$1) order by last_seen_at desc`, [project])).rows.map((device, index) => ({ label: `Approved device ${index + 1}`, status: device.revoked_at ? 'revoked' : 'active', lastSeen: device.last_seen_at ? new Date(device.last_seen_at).toISOString() : null })),
+      memberActivity: Object.values(recentActivity.reduce((all, event) => { const key = event.member.label; (all[key] ||= { member: key, events: 0 }).events++; return all; }, {} as Record<string, { member: string; events: number }>)),
+      reports: (await pool.query(`select id,name,scope,reporter,format,status,start_date,end_date,created_at,completed_at from project_tracemini_reports where project_id=$1 order by created_at desc limit 50`, [project])).rows.map((report) => ({ id: String(report.id), title: String(report.name), scope: report.scope, reporter: report.reporter, format: report.format, status: report.status, createdAt: new Date(report.created_at).toISOString(), completedAt: report.completed_at ? new Date(report.completed_at).toISOString() : null })),
+      stats: counts } };
 }
 
-async function readableIntegration(session: SessionUser, project: string) {
-  const db = await ready();
-  const access = projectAccessSql('$2'); // helper enforces membership_status='active' and approved-project owner/member access
-  const admin = strictAdmin(session);
-  const result = await db.query(
-    `select i.*,p.id as authorized_project_id,p.client_id,p.git_remote_url,p.git_repository_key from projects p left join project_tracemini_integrations i on i.project_id=p.id ${admin ? '' : access.join}
-     where p.id=$1 and p.approval_status='approved' and ${admin ? 'true' : access.predicate}`,
-    admin ? [project] : [project, session.id],
-  );
-  const resultRow = result.rows[0] as (IntegrationRow & { authorized_project_id: string }) | undefined;
-  if (!resultRow) throw new ProjectServiceError('Project not found', 404, 'not_found');
-  return { db, row: resultRow.project_id ? resultRow : null };
+/** Compatibility name retained for the old route. It deliberately creates no progress mutation. */
+export async function proposeTraceMiniProgressForProject(session: SessionUser, value: unknown) {
+  const project = projectId(value); await authorized(session, project); return false;
 }
+export async function proposeTraceMiniProgress() { return null; }
 
-async function projectMembers(db: Awaited<ReturnType<typeof ready>>, project: string): Promise<TraceMiniProjectMember[]> {
-  const result = await db.query(
-    `select u.id,u.email,u.display_name from projects p join app_users u on u.id=p.client_id where p.id=$1
-     union
-     select u.id,u.email,u.display_name from project_memberships pm join app_users u on u.id=pm.user_id where pm.project_id=$1 and pm.membership_status='active'`,
-    [project],
-  );
-  return result.rows.map((row) => ({ id: String(row.id), email: String(row.email), display_name: row.display_name }));
-}
-
-export function validateTraceMiniDashboardEnvelope(value: unknown): UpstreamData['dashboard'] {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid TraceMini dashboard response');
-  const dashboard = value as Record<string, unknown>;
-  if (!Array.isArray(dashboard.events)) throw new Error('Invalid TraceMini dashboard events response');
-  if (!Array.isArray(dashboard.repositories)) throw new Error('Invalid TraceMini dashboard repositories response');
-  if (!dashboard.stats || typeof dashboard.stats !== 'object' || Array.isArray(dashboard.stats)) throw new Error('Invalid TraceMini dashboard stats response');
-  if (!Array.isArray(dashboard.timeline)) throw new Error('Invalid TraceMini dashboard timeline response');
-  return { events: dashboard.events, repositories: dashboard.repositories, stats: dashboard.stats as Record<string, unknown>, timeline: dashboard.timeline };
-}
-
-function assertArray(value: unknown, label: string) {
-  if (!Array.isArray(value)) throw new Error(`Invalid TraceMini ${label} response`);
+function reportDate(value: unknown, label: string): string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) throw new ProjectServiceError(`${label} must be YYYY-MM-DD`, 400, 'invalid_request');
   return value;
 }
 
-async function fetchUpstream(project: string, row: IntegrationRow): Promise<UpstreamData> {
-  const key = configurationKey(project, row);
-  const existing = inFlight.get(key);
-  if (existing) return existing;
-  const request = (async () => {
-    const userSession = decrypt(project, row);
-    const [bootstrapValue, dashboardValue, settingsValue, agents, reports] = await Promise.all([
-      traceMiniGet(row.base_url, userSession, 'bootstrap'),
-      traceMiniGet(row.base_url, userSession, 'dashboard', row.workspace_id),
-      traceMiniGet(row.base_url, userSession, 'settings', row.workspace_id),
-      traceMiniGet(row.base_url, userSession, 'agents', row.workspace_id),
-      traceMiniGet(row.base_url, userSession, 'reports', row.workspace_id),
-    ]);
-    const bootstrap = bootstrapValue && typeof bootstrapValue === 'object' && !Array.isArray(bootstrapValue) ? bootstrapValue as Record<string, unknown> : null;
-    if (!bootstrap || !Array.isArray(bootstrap.workspaces) || !bootstrap.workspaces.some((workspace) => workspace && typeof workspace === 'object' && String((workspace as Record<string, unknown>).id) === row.workspace_id)) throw new Error('Configured TraceMini workspace was not returned');
-    const dashboard = validateTraceMiniDashboardEnvelope(dashboardValue);
-    const settings = settingsValue && typeof settingsValue === 'object' && !Array.isArray(settingsValue) ? settingsValue as Record<string, unknown> : null;
-    if (!settings) throw new Error('Invalid TraceMini settings response');
-    return { dashboard, settings, agents: assertArray(agents, 'agents'), reports: assertArray(reports, 'reports') };
-  })();
-  inFlight.set(key, request);
-  try { return await request; } finally { if (inFlight.get(key) === request) inFlight.delete(key); }
+export async function listTraceMiniReports(session: SessionUser, value: unknown) {
+  const project = projectId(value); const { pool, row } = await authorized(session, project);
+  const manager = isTraceMiniManager(session, String(row.client_id));
+  return (await pool.query(`select id,name,scope,reporter,format,status,attempt_count,next_run_at,slack_status,start_date,end_date,created_at,completed_at,parent_report_id from project_tracemini_reports where project_id=$1 and ($2 or scope='workspace' or requested_by=$3) order by created_at desc limit 100`, [project, manager, session.id])).rows.map((report) => ({ ...report, id: String(report.id), parentReportId: report.parent_report_id ? String(report.parent_report_id) : null }));
 }
 
-async function configurationIsCurrent(session: SessionUser, project: string, expected: string) {
-  try {
-    const current = await readableIntegration(session, project);
-    return Boolean(current.row && current.row.enabled && configurationKey(project, current.row) === expected);
-  } catch { return false; }
+export async function getTraceMiniReport(session: SessionUser, value: unknown, reportValue: unknown) {
+  const project = projectId(value); const report = String(reportValue ?? ''); if (!/^\d+$/.test(report)) throw new ProjectServiceError('Invalid report id', 400, 'invalid_request');
+  const { pool, row } = await authorized(session, project); const manager = isTraceMiniManager(session, String(row.client_id));
+  const result = await pool.query(`select id,name,scope,reporter,format,status,attempt_count,next_run_at,slack_status,start_date,end_date,created_at,completed_at,parent_report_id,markdown,last_error from project_tracemini_reports where id=$1 and project_id=$2 and ($3 or scope='workspace' or requested_by=$4)`, [report, project, manager, session.id]);
+  if (!result.rows[0]) throw new ProjectServiceError('Report not found', 404, 'not_found');
+  return result.rows[0];
 }
 
-async function normalized(db: Awaited<ReturnType<typeof ready>>, project: string, upstream: UpstreamData) {
-  const link = await db.query(`select git_repository_key from projects where id=$1`, [project]);
-  return normalizeTraceMiniData(upstream, await projectMembers(db, project), link.rows[0]?.git_repository_key ?? null);
+export async function createTraceMiniReport(session: SessionUser, value: unknown, input: Record<string, unknown>) {
+  const project = projectId(value); const { pool, row } = await authorized(session, project);
+  const manager = isTraceMiniManager(session, String(row.client_id));
+  const unknown = Object.keys(input).find((key) => !['scope','reporter','format','name','prompt','startDate','endDate','includeDiff','diffConsent','documents','notifySlack'].includes(key));
+  if (unknown) throw new ProjectServiceError(`Unknown report field: ${unknown}`, 400, 'invalid_request');
+  const start = reportDate(input.startDate, 'startDate'), end = reportDate(input.endDate, 'endDate');
+  if (end < start || Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`) > 366 * 86400000) throw new ProjectServiceError('report date window is invalid', 400, 'invalid_request');
+  const scope = input.scope === 'workspace' ? 'workspace' : 'personal'; if (scope === 'workspace' && !manager) throw new ProjectServiceError('Workspace reports require manager access', 403, 'forbidden');
+  const reporter = input.reporter === 'hermes' ? 'hermes' : input.reporter === 'codex' ? 'codex' : (() => { throw new ProjectServiceError('Invalid reporter', 400, 'invalid_request'); })();
+  const format = ['markdown','pdf','pptx'].includes(String(input.format)) ? String(input.format) : (() => { throw new ProjectServiceError('Invalid report format', 400, 'invalid_request'); })();
+  const name = typeof input.name === 'string' && input.name.trim() ? input.name.trim().slice(0, 160) : 'TraceMini report';
+  const prompt = input.prompt === undefined ? null : typeof input.prompt === 'string' && Buffer.byteLength(input.prompt,'utf8') <= 20000 ? input.prompt : (() => { throw new ProjectServiceError('Prompt exceeds bound',400,'invalid_request'); })();
+  const includeDiff = input.includeDiff === true; if (includeDiff && input.diffConsent !== true) throw new ProjectServiceError('bounded diff requires explicit consent', 400, 'invalid_request');
+  const documents = Array.isArray(input.documents) ? input.documents : [];
+  if (documents.length > 5 || documents.some((document) => !document || typeof document !== 'object' || Object.keys(document as object).some((key) => !['format','bytes','sha256'].includes(key)) || !['pdf','pptx'].includes(String((document as Record<string,unknown>).format)) || !Number.isSafeInteger((document as Record<string,unknown>).bytes) || Number((document as Record<string,unknown>).bytes) < 0 || Number((document as Record<string,unknown>).bytes) > 25 * 1024 * 1024 || !/^[a-f0-9]{64}$/.test(String((document as Record<string,unknown>).sha256)))) throw new ProjectServiceError('Invalid bounded document metadata', 400, 'invalid_request');
+  const dedupe = cryptoHash(`${project}:${session.id}:${start}:${end}:${reporter}:${format}:${name}`);
+  const notifySlack = input.notifySlack === true && Boolean(process.env.SLACK_REPORT_WEBHOOK_URL);
+  const result = await pool.query(`insert into project_tracemini_reports(project_id,requested_by,scope,reporter,name,format,prompt,start_date,end_date,include_diff,documents,status,dedupe_key,notify_slack,slack_status) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending',$12,$13,case when $13 then 'pending' else 'not_requested' end) on conflict(dedupe_key) do update set name=excluded.name returning *`, [project, session.id, scope, reporter, name, format, prompt, start, end, includeDiff, JSON.stringify(documents), dedupe, notifySlack]);
+  return result.rows[0];
 }
 
-async function persistRepositoryMatch(db: Awaited<ReturnType<typeof ready>>, project: string, row: IntegrationRow, data: ReturnType<typeof normalizeTraceMiniData>) {
-  const matched = data.matchStatus === 'matched' ? data.matchedRepository : null;
-  const result = await db.query(
-    `insert into project_tracemini_repository_matches(project_id,config_generation,config_revision,repository_id,repository_name,repository_key,match_status,matched_at,updated_at)
-     select $1,$2,$3,$4,$5,$6,$7,case when $7='matched' then now() else null end,now()
-       from project_tracemini_integrations i join projects p on p.id=i.project_id
-      where i.project_id=$1 and i.config_generation=$2 and i.config_revision=$3 and i.enabled=true and p.git_repository_key=$8
-     on conflict(project_id) do update set config_generation=excluded.config_generation,config_revision=excluded.config_revision,
-       repository_id=excluded.repository_id,repository_name=excluded.repository_name,repository_key=excluded.repository_key,
-       match_status=excluded.match_status,matched_at=excluded.matched_at,updated_at=excluded.updated_at
-     returning project_id`,
-    [project, row.config_generation, row.config_revision, matched?.id ?? null, matched?.name ?? null, matched ? row.git_repository_key : null, data.matchStatus, row.git_repository_key],
-  );
-  return Boolean(result.rows[0]);
+export async function regenerateTraceMiniReport(session:SessionUser,value:unknown,reportValue:unknown){
+  const project=projectId(value); const {pool,row}=await authorized(session,project); if(!isTraceMiniManager(session,String(row.client_id))) throw new ProjectServiceError('Forbidden',403,'forbidden');
+  const report=String(reportValue??''); if(!/^\d+$/.test(report)) throw new ProjectServiceError('Invalid report id',400,'invalid_request');
+  const result=await pool.query(`insert into project_tracemini_reports(project_id,requested_by,scope,reporter,name,format,prompt,start_date,end_date,include_diff,documents,parent_report_id,status,dedupe_key,slack_status) select project_id,$3,scope,reporter,name,format,prompt,start_date,end_date,include_diff,documents,id,'pending',$4,'not_requested' from project_tracemini_reports where id=$1 and project_id=$2 returning *`,[report,project,session.id,crypto.randomUUID()]);
+  if(!result.rows[0]) throw new ProjectServiceError('Report not found',404,'not_found'); return result.rows[0];
 }
 
-/** Creates reviewable owner actions only; it never updates authoritative project progress. */
-export async function proposeTraceMiniProgress(project: string, row: IntegrationRow, data: ReturnType<typeof normalizeTraceMiniData>) {
-  if (data.matchStatus !== 'matched' || !data.matchedRepository) return null;
-  const pool = await ready();
-  const client = await pool.connect();
-  try {
-    await client.query('begin');
-    await client.query(`select pg_advisory_xact_lock(hashtext($1))`, [`tracemini-progress:${project}`]);
-    const locked = await client.query(
-      `select p.client_id,p.progress_percent,p.progress_summary,p.progress_version,m.repository_id,m.repository_name,m.repository_key
-         from projects p join project_tracemini_integrations i on i.project_id=p.id
-         join project_tracemini_repository_matches m on m.project_id=p.id
-        where p.id=$1 and p.approval_status='approved' and i.enabled=true and i.config_generation=$2 and i.config_revision=$3
-          and m.config_generation=i.config_generation and m.config_revision=i.config_revision and m.match_status='matched' and m.repository_id=$4
-          and m.repository_key=p.git_repository_key
-        -- Lock every row whose values authorize the proposal. Other integration writers modify
-        -- only i or m, so their inherent target-row locks serialize without a reverse multi-row order.
-        for update of p,i,m`,
-      [project, row.config_generation, row.config_revision, data.matchedRepository.id],
-    );
-    const projectRow = locked.rows[0];
-    if (!projectRow) { await client.query('rollback'); return null; }
-    const watermark = await client.query(
-      `select max(newest_occurred_at) as newest from project_tracemini_evidence
-        where project_id=$1 and config_generation=$2 and config_revision=$3 and repository_id=$4 and repository_key=$5
-          and newest_occurred_at <= created_at + interval '5 minutes'`,
-      [project, row.config_generation, row.config_revision, projectRow.repository_id, projectRow.repository_key],
-    );
-    const newest = watermark.rows[0]?.newest ? new Date(watermark.rows[0].newest).getTime() : -Infinity;
-    const events = data.recentActivity.filter((event) => new Date(event.occurredAt).getTime() > newest) as TraceMiniProgressEvent[];
-    const proposal = proposeProgress({ percent: Number(projectRow.progress_percent), summary: String(projectRow.progress_summary), version: Number(projectRow.progress_version) }, String(projectRow.repository_id), String(projectRow.repository_name), events);
-    if (!proposal) { await client.query('rollback'); return null; }
-    const evidenceKey = traceMiniEvidenceKey({ projectId: project, generation: String(row.config_generation), revision: String(row.config_revision), repositoryId: String(projectRow.repository_id), progressVersion: Number(projectRow.progress_version), events: proposal.events });
-    const duplicate = await client.query(`select 1 from project_tracemini_evidence where project_id=$1 and evidence_key=$2`, [project, evidenceKey]);
-    const pending = await client.query(`select 1 from project_agent_actions where project_id=$1 and actor_user_id=$2 and action_type='update_project_progress' and status='pending' limit 1`, [project, projectRow.client_id]);
-    if (duplicate.rows[0] || pending.rows[0]) { await client.query('rollback'); return null; }
-    const description = `Automatic progress proposal: ${projectRow.progress_percent}% to ${proposal.percent}%. ${proposal.summary}`.slice(0, 320);
-    const action = await client.query(
-      `insert into project_agent_actions(project_id,actor_user_id,action_type,input,status,display_description)
-       values($1,$2,'update_project_progress',$3::jsonb,'pending',$4) returning id`,
-      [project, projectRow.client_id, JSON.stringify({ percent: proposal.percent, summary: proposal.summary, expectedVersion: proposal.expectedVersion }), description],
-    );
-    await client.query(
-      `insert into project_tracemini_evidence(project_id,evidence_key,config_generation,config_revision,repository_id,repository_key,newest_occurred_at,proposed_action_id)
-       values($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [project, evidenceKey, row.config_generation, row.config_revision, projectRow.repository_id, projectRow.repository_key, proposal.newestOccurredAt, action.rows[0].id],
-    );
-    await client.query('commit');
-    return { actionId: String(action.rows[0].id), evidenceKey };
-  } catch (error) {
-    try { await client.query('rollback'); } catch { /* Preserve primary error. */ }
-    throw error;
-  } finally { client.release(); }
+export async function getTraceMiniSchedule(session: SessionUser, value: unknown) {
+  const project = projectId(value); const { pool } = await authorized(session, project);
+  return (await pool.query(`select * from project_tracemini_schedules where project_id=$1 limit 1`, [project])).rows[0] || null;
 }
 
-export async function getTraceMiniData(session: SessionUser, projectValue: unknown) {
-  const project = projectId(projectValue);
-  const { db, row } = await readableIntegration(session, project);
-  if (!row) return { state: 'unconfigured', stale: false, lastSuccessfulSync: null, lastError: null, data: null };
-  if (!row.enabled) return { state: 'disabled', stale: false, lastSuccessfulSync: timestamp(row.last_successful_sync), lastError: storedError(row.last_error), data: null };
-  const key = configurationKey(project, row);
-  const now = Date.now();
-  pruneCache(now);
-  const cached = cache.get(key);
-  try {
-    if (cached && now - cached.fetchedAt < CACHE_TTL_MS) {
-      const data = await normalized(db, project, cached.upstream);
-      if (await configurationIsCurrent(session, project, key)) return { state: 'fresh', stale: false, lastSuccessfulSync: cached.lastSuccessfulSync, lastError: null, data };
-      return { state: 'unavailable', stale: false, lastSuccessfulSync: timestamp(row.last_successful_sync), lastError: 'TraceMini is unavailable', data: null };
-    }
-    const upstream = await fetchUpstream(project, row);
-    const data = await normalized(db, project, upstream);
-    if (!await configurationIsCurrent(session, project, key)) return { state: 'unavailable', stale: false, lastSuccessfulSync: timestamp(row.last_successful_sync), lastError: 'TraceMini is unavailable', data: null };
-    if (!await persistRepositoryMatch(db, project, row, data)) return { state: 'unavailable', stale: false, lastSuccessfulSync: timestamp(row.last_successful_sync), lastError: 'TraceMini is unavailable', data: null };
-    const successfulAt = new Date().toISOString();
-    const updated = await db.query(
-      `update project_tracemini_integrations set last_successful_sync=$2,last_error=null where project_id=$1 and config_generation=$3 and config_revision=$4 and enabled=true returning project_id`,
-      [project, successfulAt, row.config_generation, row.config_revision],
-    ).catch(() => ({ rows: [] }));
-    if (!updated.rows[0]) return { state: 'unavailable', stale: false, lastSuccessfulSync: timestamp(row.last_successful_sync), lastError: 'TraceMini is unavailable', data: null };
-    pruneCache(Date.now());
-    cache.set(key, { fetchedAt: Date.now(), upstream, lastSuccessfulSync: successfulAt });
-    return { state: 'fresh', stale: false, lastSuccessfulSync: successfulAt, lastError: null, data };
-  } catch (error) {
-    const message = safeError(error);
-    const current = await configurationIsCurrent(session, project, key);
-    if (current) await db.query(
-      `update project_tracemini_integrations set last_error=$2 where project_id=$1 and config_generation=$3 and config_revision=$4 and enabled=true`,
-      [project, message, row.config_generation, row.config_revision],
-    ).catch(() => undefined);
-    const canServeStale = current && !['unauthorized', 'not_found'].includes(errorCode(error)) && cached && Date.now() - cached.fetchedAt <= CACHE_STALE_MAX_MS;
-    if (canServeStale && cached) {
-      try { return { state: 'stale', stale: true, lastSuccessfulSync: cached.lastSuccessfulSync, lastError: message, data: await normalized(db, project, cached.upstream) }; }
-      catch { /* Current identity data is required before cached upstream data is browser-safe. */ }
-    }
-    if (cached) cache.delete(key);
-    return { state: 'unavailable', stale: false, lastSuccessfulSync: timestamp(row.last_successful_sync), lastError: message, data: null };
-  }
+export async function saveTraceMiniSchedule(session: SessionUser, value: unknown, input: Record<string, unknown>) {
+  const project = projectId(value); const { pool, row } = await authorized(session, project);
+  if (!isTraceMiniManager(session, String(row.client_id))) throw new ProjectServiceError('Forbidden', 403, 'forbidden');
+  const unknown = Object.keys(input).find((key) => !['name','frequency','selectedDays','localTime','timezone','reporter','format','prompt','includeDiff','diffConsent','documents','notifySlack','enabled'].includes(key));
+  if (unknown) throw new ProjectServiceError(`Unknown schedule field: ${unknown}`,400,'invalid_request');
+  const name = typeof input.name === 'string' && input.name.trim() ? input.name.trim().slice(0, 160) : 'TraceMini schedule';
+  const frequency = ['daily','weekdays','selected_days'].includes(String(input.frequency)) ? String(input.frequency) : (() => { throw new ProjectServiceError('Invalid schedule frequency',400,'invalid_request'); })();
+  const reporter = input.reporter === 'hermes' ? 'hermes' : input.reporter === 'codex' ? 'codex' : (() => { throw new ProjectServiceError('Invalid reporter',400,'invalid_request'); })();
+  const format = ['markdown','pdf','pptx'].includes(String(input.format)) ? String(input.format) : (() => { throw new ProjectServiceError('Invalid schedule format',400,'invalid_request'); })();
+  const days = Array.isArray(input.selectedDays) ? input.selectedDays.filter((day) => Number.isInteger(day) && Number(day) >= 0 && Number(day) <= 6) : [];
+  if (frequency === 'selected_days' && !days.length) throw new ProjectServiceError('selected_days requires selectedDays',400,'invalid_request');
+  const time = typeof input.localTime === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(input.localTime) ? input.localTime : (() => { throw new ProjectServiceError('Invalid local time',400,'invalid_request'); })();
+  const timezone = typeof input.timezone === 'string' && input.timezone.length <= 100 ? input.timezone : (() => { throw new ProjectServiceError('Invalid IANA timezone',400,'invalid_request'); })();
+  try { new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format(); } catch { throw new ProjectServiceError('Invalid IANA timezone',400,'invalid_request'); }
+  const next = computeNextSchedule(frequency, time, timezone, days);
+  const dedupe = cryptoHash(`${project}:${name}:${frequency}:${time}:${JSON.stringify(days)}`);
+  const schedulePrompt = input.prompt === undefined ? null : typeof input.prompt === 'string' && Buffer.byteLength(input.prompt,'utf8') <= 20000 ? input.prompt : (() => { throw new ProjectServiceError('Prompt exceeds bound',400,'invalid_request'); })();
+  const scheduleDocuments = Array.isArray(input.documents) ? input.documents : [];
+  if (scheduleDocuments.length > 5 || scheduleDocuments.some((document) => !document || typeof document !== 'object' || Object.keys(document as object).some((key) => !['format','bytes','sha256'].includes(key)))) throw new ProjectServiceError('Invalid bounded document metadata',400,'invalid_request');
+  const result = await pool.query(`insert into project_tracemini_schedules(project_id,configured_by,name,frequency,local_time,timezone,selected_days,reporter,format,prompt,include_diff,documents,notify_slack,next_run_at,dedupe_key,enabled) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) on conflict(project_id) do update set configured_by=excluded.configured_by,name=excluded.name,frequency=excluded.frequency,local_time=excluded.local_time,timezone=excluded.timezone,selected_days=excluded.selected_days,reporter=excluded.reporter,format=excluded.format,prompt=excluded.prompt,include_diff=excluded.include_diff,documents=excluded.documents,notify_slack=excluded.notify_slack,next_run_at=excluded.next_run_at,dedupe_key=excluded.dedupe_key,enabled=excluded.enabled,updated_at=now() returning *`, [project, session.id, name, frequency, time, timezone, JSON.stringify(days), reporter, format, schedulePrompt, input.includeDiff === true, JSON.stringify(scheduleDocuments), input.notifySlack === true && Boolean(process.env.SLACK_REPORT_WEBHOOK_URL), next, dedupe, input.enabled !== false]);
+  return result.rows[0];
 }
 
-/** Explicit mutation entry point. Authorization and all integration/repository inputs are server-derived. */
-export async function proposeTraceMiniProgressForProject(session: SessionUser, projectValue: unknown) {
-  const project = projectId(projectValue);
-  const view = await getTraceMiniData(session, project);
-  if (view.state !== 'fresh' || view.data?.matchStatus !== 'matched' || !view.data.matchedRepository) return false;
-  // Re-read after upstream work; proposeTraceMiniProgress performs the final locked identity recheck.
-  const { row } = await readableIntegration(session, project);
-  if (!row?.enabled) return false;
-  return Boolean(await proposeTraceMiniProgress(project, row, view.data));
+function computeNextSchedule(frequency: string, localTime: string, timezone: string, selectedDays: number[]): string {
+  const [hour, minute] = localTime.split(':').map(Number); const allowed = new Set(frequency === 'weekdays' ? [1,2,3,4,5] : frequency === 'selected_days' ? selectedDays : [0,1,2,3,4,5,6]);
+  const formatter = new Intl.DateTimeFormat('en-US', { timeZone: timezone, hour12: false, weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  for (let offset = 1; offset <= 370 * 1440; offset++) { const candidate = new Date(Date.now() + offset * 60_000); const parts = formatter.formatToParts(candidate); const h = Number(parts.find((p) => p.type === 'hour')?.value); const m = Number(parts.find((p) => p.type === 'minute')?.value); const weekday = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].indexOf(parts.find((p) => p.type === 'weekday')?.value || ''); if (h === hour && m === minute && allowed.has(weekday)) return candidate.toISOString(); }
+  throw new ProjectServiceError('could not materialize schedule in timezone', 400, 'invalid_request');
 }
+
+function cryptoHash(value: string) { return crypto.createHash('sha256').update(value).digest('hex'); }

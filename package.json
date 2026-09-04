@@ -3,11 +3,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --test tests/*.test.mjs && python3 tests/files-agent.test.py",
+    "test": "node --test tests/*.test.mjs && python3 tests/files-agent.test.py && python3 tests/files_agent_behavior.test.py && npm run test:postgres",
+    "test:postgres": "node --test tests/postgres-embedded-gate.mjs",
     "test:project-agent-bridge": "node --test tests/project-agent-bridge.test.mjs",
     "project-agent-bridge": "node scripts/project-agent-bridge.mjs",
     "project-agent-bridge:smoke": "node scripts/project-agent-bridge-smoke.mjs",
     "typecheck": "tsc --noEmit",
+    "diff-check": "git diff --check",
     "lint": "next lint"
   },
   "dependencies": {

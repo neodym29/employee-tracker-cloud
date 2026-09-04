@@ -84,6 +84,9 @@ export function buildFilesAgentPackage(root: string, origin: string, token: stri
   const config = {
     enrollment_url: `${origin}/api/files-agent/exchange`,
     ingest_url: `${origin}/api/files-agent/ingest`,
+    tracemini_endpoint: `${origin}/api/files-agent/tracemini`,
+    bind_url: `${origin}/api/files-agent/tracemini/bind`,
+    heartbeat_url: `${origin}/api/files-agent/tracemini/heartbeat`,
     enrollment_token: token,
     expires_at: expiresAt,
     authorization: 'Send credentials as Authorization: Bearer',
@@ -102,6 +105,9 @@ python3 <<'PY'
 import base64, json, os, pathlib, platform, shutil, socket, urllib.request
 exchange_url = base64.b64decode('${encode(config.enrollment_url)}').decode()
 ingest_url = base64.b64decode('${encode(config.ingest_url)}').decode()
+tracemini_endpoint = base64.b64decode('${encode(config.tracemini_endpoint)}').decode()
+bind_url = base64.b64decode('${encode(config.bind_url)}').decode()
+heartbeat_url = base64.b64decode('${encode(config.heartbeat_url)}').decode()
 enrollment_token = base64.b64decode('${encode(token)}').decode()
 approved_agents = json.loads(base64.b64decode('${encode(JSON.stringify(approvedAgents))}').decode())
 agent_commands = {}
@@ -149,6 +155,10 @@ except FileNotFoundError:
 link.symlink_to(program)
 config = {
     'endpoint': ingest_url,
+    'tracemini_endpoint': tracemini_endpoint,
+    'bind_url': bind_url,
+    'heartbeat_url': heartbeat_url,
+    'bindings': [],
     'device_token': credential,
     'auth': 'bearer',
     'agents': list(agent_commands),

@@ -7,7 +7,8 @@ type Context = { params: Promise<{ projectId: string }> };
 export async function GET(_request: NextRequest, context: Context) {
   try {
     const { projectId } = await context.params;
-    return NextResponse.json({ ok: true, tracemini: await getTraceMiniData(await requireApiSession(), projectId) }, { headers: { 'cache-control': 'no-store, private' } });
+    const url = new URL(_request.url);
+    return NextResponse.json({ ok: true, tracemini: await getTraceMiniData(await requireApiSession(), projectId, { from: url.searchParams.get('from') || undefined, to: url.searchParams.get('to') || undefined }) }, { headers: { 'cache-control': 'no-store, private' } });
   } catch (error) { return apiErrorResponse(error); }
 }
 

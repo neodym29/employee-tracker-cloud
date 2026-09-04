@@ -32,14 +32,16 @@ export async function requirePlatformAdminApiSession() {
 
 export function apiErrorResponse(error: unknown) {
   if (error instanceof ApiError || error instanceof ProjectServiceError) {
-    return NextResponse.json({ ok: false, error: error.message, code: error.code }, { status: error.status });
+    return NextResponse.json({ ok: false, error: error.message, code: error.code }, { status: error.status, headers: { 'cache-control': 'no-store, private' } });
   }
   console.error('API request failed', error);
-  return NextResponse.json({ ok: false, error: 'Request could not be completed', code: 'internal_error' }, { status: 500 });
+  return NextResponse.json({ ok: false, error: 'Request could not be completed', code: 'internal_error' }, { status: 500, headers: { 'cache-control': 'no-store, private' } });
 }
 
 export async function jsonBody(req: NextRequest): Promise<Record<string, unknown>> {
   try {
+    const length = Number(req.headers.get('content-length') || 0);
+    if (length > 128 * 1024) throw new ApiError('Request body too large', 413, 'body_too_large');
     const body = await req.json();
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error();
     return body as Record<string, unknown>;

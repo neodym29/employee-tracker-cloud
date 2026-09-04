@@ -9,10 +9,13 @@ from __future__ import annotations
 import argparse
 import ast
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
 import fcntl
+import hmac
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -25,8 +28,10 @@ from typing import Iterable, Sequence
 from urllib import request
 from urllib.error import URLError, HTTPError
 import uuid
+import time
+from urllib.parse import urlsplit
 
-VERSION = "1.0.0"
+VERSION = "2.0.0"
 SYSCALLS = (
     "clone,clone3,fork,vfork,chdir,fchdir,openat,openat2,creat,close,dup,dup2,dup3,fcntl,"
     "write,pwrite64,pwritev,pwritev2,writev,truncate,ftruncate,fallocate,mmap,mmap2,msync,munmap,"
@@ -37,6 +42,7 @@ RAW_SYSCALLS = "write,pwrite64,pwritev,pwritev2,writev,copy_file_range,sendfile"
 WRITE_FLAGS = ("O_WRONLY", "O_RDWR", "O_CREAT", "O_TRUNC", "O_APPEND", "O_TMPFILE")
 AGENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 APPROVED_AGENTS = frozenset(("hermes", "codex", "claude"))
+GIT_EVENT_TYPES = frozenset(("commit", "branch", "merge", "rewrite", "pull", "stage", "push"))
 LINE_RE = re.compile(r"^(?:(?:\[pid\s+)?(\d+)\]?\s+)?(.*)$")
 CALL_RE = re.compile(r"^(\w+)\((.*)\)\s+=\s+(.+)$")
 RESUMED_RE = re.compile(r"^<\.\.\.\s+(\w+) resumed>(.*)$")
@@ -387,8 +393,17 @@ class Queue:
         connection.execute("PRAGMA busy_timeout=10000")
         return connection
 
+    @contextmanager
+    def _connection(self):
+        connection = self._connect()
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
+
     def _initialize(self) -> None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='events'"
@@ -421,6 +436,21 @@ class Queue:
                 run_id TEXT NOT NULL, agent TEXT NOT NULL,
                 action TEXT NOT NULL, path TEXT NOT NULL, bytes INTEGER NOT NULL,
                 count INTEGER NOT NULL, occurred_at TEXT NOT NULL)""")
+            connection.execute("""CREATE TABLE IF NOT EXISTS trace_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                binding_id TEXT NOT NULL, event_key TEXT NOT NULL,
+                payload TEXT NOT NULL, created_at TEXT NOT NULL)""")
+            trace_indexes = [tuple(row[2] for row in connection.execute(f'PRAGMA index_info("{index[1]}")'))
+                             for index in connection.execute("PRAGMA index_list(trace_events)") if index[2]]
+            if ("event_key",) in trace_indexes:
+                connection.execute("ALTER TABLE trace_events RENAME TO trace_events_legacy")
+                connection.execute("""CREATE TABLE trace_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, binding_id TEXT NOT NULL,
+                    event_key TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL)""")
+                connection.execute("""INSERT INTO trace_events(id,binding_id,event_key,payload,created_at)
+                    SELECT id,binding_id,event_key,payload,created_at FROM trace_events_legacy ORDER BY id""")
+                connection.execute("DROP TABLE trace_events_legacy")
+            connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS trace_events_binding_key ON trace_events(binding_id,event_key)")
             if migrate:
                 columns = {row[1] for row in connection.execute("PRAGMA table_info(events_legacy)")}
                 rows = connection.execute("SELECT * FROM events_legacy ORDER BY id").fetchall()
@@ -438,7 +468,7 @@ class Queue:
         # A queue row is also the idempotent wire contribution. Never merge or
         # mutate it after insertion: retries must serialize the exact same event_id
         # and values, while later matching contributions receive independent IDs.
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.executemany("""INSERT INTO events
                 (event_id,run_id,agent,action,path,bytes,count,occurred_at)
                 VALUES (?,?,?,?,?,?,?,?)""",
@@ -446,14 +476,14 @@ class Queue:
                  for e in events])
 
     def pending(self, limit: int = 250) -> list[dict]:
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute("SELECT * FROM events ORDER BY id LIMIT ?", (limit,)).fetchall()
         return [dict(row) for row in rows]
 
     def ack(self, rows: Sequence[dict]) -> None:
         if not rows:
             return
-        with self._connect() as connection:
+        with self._connection() as connection:
             for item in rows:
                 # Both keys bind the acknowledgment to the exact immutable row
                 # snapshot selected for upload; never acknowledge by position alone.
@@ -463,8 +493,38 @@ class Queue:
                 )
 
     def count(self) -> int:
-        with self._connect() as connection:
+        with self._connection() as connection:
             return int(connection.execute("SELECT count(*) FROM events").fetchone()[0])
+
+    def enqueue_trace(self, binding_id: str, records: Sequence[dict]) -> None:
+        with self._connection() as connection:
+            connection.executemany(
+                "INSERT OR IGNORE INTO trace_events(binding_id,event_key,payload,created_at) VALUES(?,?,?,?)",
+                [(binding_id, record["event_key"], json.dumps(record, separators=(",", ":")), utc_now())
+                 for record in records],
+            )
+
+    def pending_trace(self, binding_id: str, limit: int = 250) -> list[dict]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT id,binding_id,event_key,payload FROM trace_events WHERE binding_id=? ORDER BY id LIMIT ?",
+                (binding_id, limit),
+            ).fetchall()
+        return [{"id": row["id"], "binding_id": row["binding_id"], "event_key": row["event_key"], "payload": json.loads(row["payload"])} for row in rows]
+
+    def ack_trace(self, rows: Sequence[dict]) -> None:
+        with self._connection() as connection:
+            connection.executemany("DELETE FROM trace_events WHERE id=? AND binding_id=? AND event_key=?",
+                                   [(row["id"], row["binding_id"], row["event_key"]) for row in rows])
+
+    def purge_trace(self, binding_id: str) -> int:
+        with self._connection() as connection:
+            result = connection.execute("DELETE FROM trace_events WHERE binding_id=?", (binding_id,))
+            return result.rowcount
+
+    def trace_count(self) -> int:
+        with self._connection() as connection:
+            return int(connection.execute("SELECT count(*) FROM trace_events").fetchone()[0])
 
 
 def paths() -> tuple[Path, Path]:
@@ -496,6 +556,15 @@ def load_config(required: bool = True) -> dict:
         mappings = value.get("agent_commands")
         if not isinstance(mappings, dict):
             raise RuntimeError("config requires an agent_commands mapping")
+        bindings = value.get("bindings", [])
+        if not isinstance(bindings, list):
+            raise RuntimeError("config bindings must be a list")
+        for binding in bindings:
+            if (not isinstance(binding, dict) or not isinstance(binding.get("root"), str)
+                    or not isinstance(binding.get("binding_id"), str)
+                    or not isinstance(binding.get("binding_secret"), str)
+                    or _canonical_root(binding["root"]) != binding["root"]):
+                raise RuntimeError("each binding requires a canonical root and opaque credentials")
         for agent in agents:
             commands = mappings.get(agent)
             if isinstance(commands, str):
@@ -556,6 +625,327 @@ def _flush_locked(queue: Queue, config: dict, state: Path) -> int:
         total += len(rows)
 
 
+def _canonical_root(root: str) -> str:
+    value = os.path.realpath(root)
+    if value == "/" or not os.path.isabs(value) or not os.path.isdir(value):
+        raise RuntimeError("root must be an existing checked-out directory")
+    return value
+
+
+def root_binding_hash(root: str, binding_code: str) -> str:
+    """Opaque, code-scoped root proof; never a plain hash of a predictable path."""
+    return hmac.new(binding_code.encode(), _canonical_root(root).encode(), "sha256").hexdigest()
+
+
+def select_binding(config: dict, root: str) -> dict | None:
+    """Select the longest explicitly bound root containing root; never guess a project."""
+    root = _canonical_root(root)
+    candidates = []
+    for binding in config.get("bindings", []):
+        bound = binding.get("root")
+        try:
+            if binding.get("disabled"):
+                continue
+            if not isinstance(bound, str) or _canonical_root(bound) != bound:
+                continue
+            if os.path.commonpath([root, bound]) == bound:
+                candidates.append(binding)
+        except (TypeError, ValueError):
+            continue
+    return max(candidates, key=lambda item: len(item["root"]), default=None)
+
+
+def _binding_headers(binding: dict, body: bytes) -> dict:
+    binding_id = binding.get("binding_id")
+    binding_secret = binding.get("binding_secret")
+    if not isinstance(binding_id, str) or not isinstance(binding_secret, str) or not binding_id or not binding_secret:
+        raise RuntimeError("TraceMini root binding is required; run bind first")
+    return _signed_headers(binding, "POST", body)
+
+
+def _signed_headers(binding: dict, method: str, body: bytes) -> dict:
+    binding_id = binding.get("binding_id")
+    binding_secret = binding.get("binding_secret")
+    if not isinstance(binding_id, str) or not isinstance(binding_secret, str) or not binding_id or not binding_secret:
+        raise RuntimeError("TraceMini root binding is required; run bind first")
+    timestamp = str(int(time.time()))
+    nonce = secrets.token_hex(16)
+    path = urlsplit(binding.get("endpoint", "")).path or "/api/files-agent/tracemini"
+    digest = hashlib.sha256(body).hexdigest()
+    canonical = "\n".join((method.upper(), path, timestamp, nonce, digest)).encode()
+    signature = hmac.new(binding_secret.encode(), canonical, "sha256").hexdigest()
+    return {"X-TraceMini-Binding": binding_id, "X-TraceMini-Signature": signature,
+            "X-TraceMini-Timestamp": timestamp, "X-TraceMini-Nonce": nonce}
+
+
+def _post_json(url: str, config: dict, body: dict, binding: dict | None = None) -> dict:
+    encoded = json.dumps(body, separators=(",", ":")).encode()
+    headers = {"Content-Type": "application/json", "User-Agent": f"files-agent/{VERSION}"}
+    if config.get("auth", "bearer") == "x-device-token":
+        headers["x-device-token"] = config["device_token"]
+    else:
+        headers["Authorization"] = "Bearer " + config["device_token"]
+    if binding is not None:
+        binding = {**binding, "endpoint": url}
+        headers.update(_signed_headers(binding, "POST", encoded))
+    attempts = max(1, min(5, int(config.get("max_retries", 4))))
+    for attempt in range(attempts):
+        if binding is not None:
+            # Every attempt needs a fresh nonce because the server rejects replayed proofs.
+            binding = {**binding, "endpoint": url}
+            headers.update(_signed_headers(binding, "POST", encoded))
+        req = request.Request(url, data=encoded, headers=headers, method="POST")
+        try:
+            with request.urlopen(req, timeout=float(config.get("timeout_seconds", 10))) as response:
+                if not 200 <= response.status < 300:
+                    raise HTTPError(url, response.status, "non-success", response.headers, None)
+                return json.loads(response.read(1_000_000).decode() or "{}")
+        except HTTPError as error:
+            retryable = error.code == 429 or error.code >= 500
+            if not retryable or attempt + 1 == attempts:
+                detail = ""
+                try:
+                    detail = error.read(4096).decode("utf-8", "replace")
+                except OSError:
+                    pass
+                raise RuntimeError(f"request failed with HTTP {error.code}: {detail}") from error
+        except (URLError, OSError, TimeoutError) as error:
+            if attempt + 1 == attempts:
+                raise RuntimeError(f"request failed after retries: {error}") from error
+        time.sleep(min(8.0, 0.25 * (2 ** attempt)))
+    raise RuntimeError("request failed")
+
+
+def git_root(root: str) -> str | None:
+    try:
+        return _canonical_root(subprocess.check_output(
+            ["git", "-C", root, "rev-parse", "--show-toplevel"], text=True,
+            stderr=subprocess.DEVNULL, timeout=3).strip())
+    except (OSError, subprocess.SubprocessError, RuntimeError):
+        return None
+
+
+def repository_metadata(root: str) -> dict:
+    repo = git_root(root)
+    if not repo:
+        return {"kind": "non_git", "repository_key": None,
+                "provenance": {"root_label": os.path.basename(root)}}
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", "-C", repo, *args], text=True,
+                                       stderr=subprocess.DEVNULL, timeout=3).strip()
+    branch, head = git("branch", "--show-current") or "HEAD", git("rev-parse", "HEAD")
+    try:
+        remote = git("config", "--get", "remote.origin.url")
+    except (OSError, subprocess.SubprocessError):
+        remote = ""
+    status = git("status", "--porcelain", "--untracked-files=all")
+    key = canonical_repository_key(remote, repo, head)
+    def digest_diff(*args: str) -> str:
+        result = subprocess.run(["git", "-C", repo, "diff", "--binary", *args], capture_output=True, timeout=3, check=False)
+        return hashlib.sha256(result.stdout).hexdigest() if result.returncode == 0 else ""
+    try:
+        upstream = git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+        upstream_head = git("rev-parse", "@{upstream}")
+    except (OSError, subprocess.SubprocessError):
+        upstream, upstream_head = "", ""
+    provenance = {"branch": branch, "head_sha": head, "repository_key": key,
+                  "index_digest": digest_diff("--cached"), "worktree_digest": digest_diff(),
+                  "parent_count": len(git("rev-list", "--parents", "-n", "1", "HEAD").split()) - 1,
+                  "upstream_head_sha": upstream_head}
+    remote_head = ""
+    if remote and branch != "HEAD":
+        try:
+            remote_head = verify_remote(repo, remote, f"refs/heads/{branch}")
+        except RuntimeError:
+            pass
+    provenance["remote_branch_sha"] = remote_head
+    if status:
+        provenance.update({"dirty": True, "dirty_paths": min(len(status.splitlines()), 1000)})
+    return {"kind": "git", "repository_key": key, "provenance": provenance, "dirty": bool(status)}
+
+
+def canonical_repository_key(remote: str, repo: str, head: str) -> str:
+    """Return a stable credential-free identity; never persist a raw remote URL."""
+    remote = (remote or "").strip()
+    if remote:
+        parsed = urlsplit(remote)
+        if parsed.scheme == "file":
+            if parsed.username or parsed.query or parsed.fragment or not parsed.path or not os.path.isabs(parsed.path):
+                raise RuntimeError("repository remote is invalid")
+            return f"local:{hashlib.sha256((os.path.realpath(repo) + ':' + parsed.path).encode()).hexdigest()}"
+        if parsed.scheme in ("http", "https"):
+            if parsed.username or parsed.password or parsed.query or parsed.fragment:
+                raise RuntimeError("repository remote contains credentials or query data")
+            host = (parsed.hostname or "").lower()
+            path = parsed.path.rstrip("/")
+            if not host or not path:
+                raise RuntimeError("repository remote is invalid")
+            return f"{host}{path[:-4] if path.endswith('.git') else path}".lower()
+        if remote.startswith("git@") and ":" in remote:
+            host, path = remote[4:].split(":", 1)
+            if not host or not path or any(mark in path for mark in "?#"):
+                raise RuntimeError("repository remote is invalid")
+            return f"{host.lower()}/{path[:-4] if path.endswith('.git') else path}".lower()
+        raise RuntimeError("repository remote must be HTTPS or standard SCP form")
+    return f"local:{hashlib.sha256((os.path.realpath(repo) + ':' + head).encode()).hexdigest()}"
+
+
+def verify_remote(root: str, remote: str, ref: str = "HEAD") -> str:
+    """Bounded, credential-free remote fact check; client booleans are ignored."""
+    canonical_repository_key(remote, _canonical_root(root), "0" * 40)
+    if not ref.startswith("refs/"):
+        raise RuntimeError("remote verification requires an exact ref")
+    result = subprocess.run(["git", "-C", _canonical_root(root), "ls-remote", "--refs", remote, ref],
+                            text=True, capture_output=True, timeout=5, check=False)
+    if result.returncode != 0:
+        raise RuntimeError("remote verification unavailable")
+    return result.stdout.split()[0] if result.stdout.split() else ""
+
+
+def _origin_remote(root: str) -> str:
+    try:
+        remote = subprocess.check_output(["git", "-C", _canonical_root(root), "config", "--get", "remote.origin.url"],
+                                         text=True, stderr=subprocess.DEVNULL, timeout=3).strip()
+        canonical_repository_key(remote, root, "0" * 40)
+        return remote
+    except (OSError, subprocess.SubprocessError, RuntimeError):
+        return ""
+
+
+def _history_rewritten(root: str, old_head: str, new_head: str) -> bool:
+    result = subprocess.run(["git", "-C", _canonical_root(root), "merge-base", "--is-ancestor", old_head, new_head],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3, check=False)
+    return result.returncode != 0
+
+
+def poll_reports(config: dict) -> None:
+    endpoint = config.get("report_poll_url")
+    if endpoint:
+        _post_json(endpoint, config, {"at": utc_now()})
+
+
+def _verified_push(root: str, metadata: dict) -> bool:
+    if metadata.get("kind") != "git" or not metadata.get("repository_key"):
+        return False
+    remote = _origin_remote(root)
+    if not remote or remote.startswith("local:"):
+        return False
+    try:
+        branch = metadata["provenance"].get("branch") or "HEAD"
+        output = subprocess.check_output(["git", "ls-remote", remote, f"refs/heads/{branch}"], text=True,
+                                         stderr=subprocess.DEVNULL, timeout=8)
+        return any(line.split()[0] == metadata["provenance"].get("head_sha")
+                   and len(line.split()) > 1 and line.split()[1] == f"refs/heads/{branch}"
+                   for line in output.splitlines() if line.split())
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def enqueue_tracemini(queue: Queue, config: dict, root: str, agent: str,
+                      file_events: Sequence[Event], before: dict | None = None) -> None:
+    root = _canonical_root(root)
+    binding = select_binding(config, root)
+    if not binding:
+        return
+    metadata = repository_metadata(root)
+    now, run_id = utc_now(), secrets.token_hex(16)
+    common = {"run_id": run_id, "agent": agent, "occurred_at": now,
+              "repository_key": metadata.get("repository_key")}
+    records = [{**common, "event_key": secrets.token_hex(24), "kind": "file_activity",
+                "action": "approved_agent_mutation",
+                "provenance": {"files_changed": min(len(file_events), 1000)}}]
+    if metadata["kind"] == "non_git":
+        records.append({**common, "event_key": secrets.token_hex(24), "kind": "non_git",
+                        "action": "approved_agent_non_git_activity", "provenance": {}})
+    else:
+        prior = before or {}
+        old_head = prior.get("provenance", {}).get("head_sha")
+        new_head = metadata["provenance"].get("head_sha")
+        old_branch = prior.get("provenance", {}).get("branch")
+        new_branch = metadata["provenance"].get("branch")
+        if old_head and new_head and old_head != new_head:
+            records.append({**common, "event_key": secrets.token_hex(24), "kind": "commit",
+                            "action": "head_changed", "provenance": {"old_head_sha": old_head, "new_head_sha": new_head,
+                                                                          "branch": new_branch}})
+            if _history_rewritten(root, old_head, new_head):
+                records.append({**common, "event_key": secrets.token_hex(24), "kind": "rewrite",
+                                "action": "history_rewritten", "provenance": {"old_head_sha": old_head, "new_head_sha": new_head}})
+            if metadata["provenance"].get("parent_count", 0) > 1:
+                records.append({**common, "event_key": secrets.token_hex(24), "kind": "merge",
+                                "action": "merge_commit", "provenance": {"new_head_sha": new_head}})
+            if metadata["provenance"].get("upstream_head_sha") == new_head:
+                records.append({**common, "event_key": secrets.token_hex(24), "kind": "pull",
+                                "action": "upstream_head_observed", "provenance": {"new_head_sha": new_head}})
+        if (prior.get("provenance", {}).get("index_digest")
+                and prior.get("provenance", {}).get("index_digest") != metadata["provenance"].get("index_digest")):
+            records.append({**common, "event_key": secrets.token_hex(24), "kind": "stage",
+                            "action": "index_changed", "provenance": {}})
+        if old_branch and old_branch != new_branch:
+            records.append({**common, "event_key": secrets.token_hex(24), "kind": "branch",
+                            "action": "branch_changed", "provenance": {"branch": new_branch}})
+        if metadata.get("dirty"):
+            records.append({**common, "event_key": secrets.token_hex(24), "kind": "dirty",
+                            "action": "working_tree_dirty", "provenance": {}})
+        if (_verified_push(root, metadata)
+                and before
+                and before.get("provenance", {}).get("remote_branch_sha") != metadata["provenance"].get("remote_branch_sha")):
+            records.append({**common, "event_key": secrets.token_hex(24), "kind": "push",
+                            "action": "remote_head_observed", "provenance": {"head_sha": new_head, "remote_head_sha": new_head}})
+    queue.enqueue_trace(binding["binding_id"], records)
+
+
+def heartbeat(config: dict) -> None:
+    queue = Queue(paths()[1] / "queue.sqlite3")
+    for binding in config.get("bindings", []):
+        if binding.get("disabled"):
+            continue
+        endpoint = config.get("heartbeat_url") or config.get("tracemini_endpoint", config.get("endpoint", "")) + "/heartbeat"
+        try:
+            response = _post_json(endpoint, config, {"at": utc_now()}, binding=binding)
+            if response.get("paused") or response.get("revoked") or response.get("purge"):
+                queue.purge_trace(binding["binding_id"])
+                binding["disabled"] = True
+        except RuntimeError as error:
+            if ("HTTP 401" in str(error) or "HTTP 403" in str(error)
+                    or "paused" in str(error).lower() or "telemetry" in str(error).lower()):
+                queue.purge_trace(binding["binding_id"])
+                binding["disabled"] = True
+            raise
+
+
+def flush_tracemini(config: dict, state: Path) -> int:
+    queue = Queue(state / "queue.sqlite3")
+    endpoint = config.get("tracemini_endpoint") or config.get("endpoint", "").replace("/api/files-agent/ingest", "/api/files-agent/tracemini")
+    total = 0
+    for binding in config.get("bindings", []):
+        if binding.get("disabled"):
+            continue
+        while True:
+            rows = queue.pending_trace(binding["binding_id"], 250)
+            if not rows:
+                break
+            try:
+                response = _post_json(endpoint, config, {"events": [row["payload"] for row in rows]}, binding=binding)
+            except RuntimeError as error:
+                if ("HTTP 401" in str(error) or "HTTP 403" in str(error)
+                        or "paused" in str(error).lower() or "telemetry" in str(error).lower()):
+                    queue.purge_trace(binding["binding_id"])
+                    binding["disabled"] = True
+                raise
+            if response.get("paused") or response.get("revoked") or response.get("purge"):
+                queue.purge_trace(binding["binding_id"])
+                binding["disabled"] = True
+                break
+            queue.ack_trace(rows)
+            total += len(rows)
+    return total
+
+
+def upload_tracemini(config: dict, state: Path) -> int:
+    """Named command API used by installers and tests."""
+    return flush_tracemini(config, state)
+
+
 def spawn_flush(config_path: Path, state: Path) -> None:
     if os.environ.get("FILES_AGENT_NO_BACKGROUND"):
         return
@@ -597,7 +987,9 @@ def execute(agent: str, command: list[str]) -> int:
     read_fd, write_fd = os.pipe()
     trace_command = [tracer, "-f", "-yy", "-qq", "-e", "trace=" + SYSCALLS,
                      "-e", "raw=" + RAW_SYSCALLS, "-o", f"/proc/self/fd/{write_fd}", "--", *command]
-    initial_cwd = os.getcwd()
+    initial_cwd = _canonical_root(os.getcwd())
+    binding = select_binding(config, initial_cwd)
+    before_metadata = repository_metadata(initial_cwd) if binding else None
     try:
         completed = subprocess.Popen(trace_command, pass_fds=(write_fd,))
         os.close(write_fd)
@@ -609,7 +1001,19 @@ def execute(agent: str, command: list[str]) -> int:
         return_code = completed.wait()
         if events:
             queue.enqueue(agent, secrets.token_hex(16), events)
-            spawn_flush(config_path, state)
+            if binding:
+                enqueue_tracemini(queue, config, initial_cwd, agent, events, before_metadata)
+        # Flush embedded provenance even when this invocation made no file
+        # events; the ordinary files queue remains available to its own worker.
+        # Both queues are best-effort: an unavailable server must never discard
+        # either queue or turn a successful approved command into data loss.
+        flush_calls = ([lambda: flush(queue, config, state)] if config.get("bindings") else [])
+        flush_calls.append(lambda: flush_tracemini(config, state))
+        for flush_call in flush_calls:
+            try:
+                flush_call()
+            except RuntimeError:
+                pass
         return return_code
     finally:
         if read_fd >= 0:
@@ -630,6 +1034,17 @@ def build_parser() -> argparse.ArgumentParser:
     listing.add_argument("--limit", type=int, default=500)
     upload = commands.add_parser("flush", help="upload queued metadata")
     upload.add_argument("--quiet", action="store_true")
+    bind = commands.add_parser("bind", help="bind this checkout with a server-issued one-use code")
+    bind.add_argument("--code", required=True)
+    bind.add_argument("--root", default=os.getcwd())
+    bind.add_argument("--label", default="")
+    commands.add_parser("heartbeat", help="send an authenticated heartbeat")
+    tmflush = commands.add_parser("tracemini-flush", help="upload queued TraceMini provenance")
+    tmflush.add_argument("--quiet", action="store_true")
+    service = commands.add_parser("service", help="run the managed heartbeat and flush loop")
+    service.add_argument("--interval", type=float, default=60.0)
+    discover = commands.add_parser("discover", help="discover local Git/non-Git metadata")
+    discover.add_argument("--root", default=os.getcwd())
     return parser
 
 
@@ -638,7 +1053,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.subcommand == "exec":
             return execute(args.agent, args.command)
-        _config_path, state = paths()
+        config_path, state = paths()
         queue = Queue(state / "queue.sqlite3")
         if args.subcommand == "status":
             config = load_config(required=False)
@@ -649,7 +1064,56 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.subcommand == "list":
             print(json.dumps(queue.pending(max(0, args.limit)), indent=2))
             return 0
+        if args.subcommand == "discover":
+            print(json.dumps(repository_metadata(_canonical_root(args.root)), indent=2))
+            return 0
         config = load_config()
+        if args.subcommand == "heartbeat":
+            heartbeat(config)
+            return 0
+        if args.subcommand == "service":
+            interval = max(5.0, min(float(args.interval), 3600.0))
+            while True:
+                try:
+                    heartbeat(config)
+                except RuntimeError:
+                    pass
+                try:
+                    flush(queue, config, state)
+                except RuntimeError:
+                    pass
+                try:
+                    flush_tracemini(config, state)
+                except RuntimeError:
+                    pass
+                try:
+                    poll_reports(config)
+                except RuntimeError:
+                    pass
+                time.sleep(interval)
+        if args.subcommand == "tracemini-flush":
+            uploaded = flush_tracemini(config, state)
+            if not args.quiet:
+                print(json.dumps({"uploaded": uploaded}))
+            return 0
+        if args.subcommand == "bind":
+            root = _canonical_root(args.root)
+            endpoint = config.get("bind_url") or config.get("tracemini_endpoint", "") + "/bind"
+            result = _post_json(endpoint, config,
+                                {"code": args.code, "root_hash": root_binding_hash(root, args.code),
+                                 "repository_key": repository_metadata(root).get("repository_key")},
+                                binding={"binding_id": "enrollment", "binding_secret": args.code})
+            binding = {"root": root, "binding_id": result["binding_id"],
+                       "binding_secret": result["binding_secret"], "root_hash": result["root_hash"],
+                       "root_label": result.get("root_label", os.path.basename(root))}
+            config["bindings"] = [item for item in config.get("bindings", []) if item.get("root") != root]
+            binding["endpoint"] = config.get("tracemini_endpoint", "")
+            config["bindings"].append(binding)
+            config_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+            config_path.chmod(0o600)
+            print(json.dumps({"binding_id": result["binding_id"], "root_hash": result["root_hash"]}))
+            return 0
         uploaded = flush(queue, config, state)
         if not args.quiet:
             print(json.dumps({"uploaded": uploaded, "pending": queue.count()}))

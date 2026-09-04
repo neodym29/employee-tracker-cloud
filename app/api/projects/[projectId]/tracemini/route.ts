@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiErrorResponse, assertSameOrigin, jsonBody, requireApiSession } from '@/lib/api';
-import { getTraceMiniConfig, removeTraceMiniConfig, saveTraceMiniConfig, setTraceMiniEnabled, testTraceMiniConnection } from '@/lib/tracemini';
+import { getTraceMiniConfig, removeTraceMiniConfig, saveTraceMiniConfig, setTraceMiniEnabled, testTraceMiniConnection, wipeTraceMiniTelemetry } from '@/lib/tracemini';
 
 type Context = { params: Promise<{ projectId: string }> };
 const privateHeaders = { 'cache-control': 'no-store, private' };
@@ -25,6 +25,7 @@ export async function POST(request: NextRequest, context: Context) {
     const session = await requireApiSession();
     const body = await jsonBody(request);
     if (body.action === 'test') return NextResponse.json({ ok: true, test: await testTraceMiniConnection(session, projectId) }, { headers: privateHeaders });
+    if (body.action === 'wipe') return NextResponse.json({ ok: true, result: await wipeTraceMiniTelemetry(session, projectId) }, { headers: privateHeaders });
     if (body.action === 'enable' || body.action === 'disable') return NextResponse.json({ ok: true, config: await setTraceMiniEnabled(session, projectId, body.action === 'enable') }, { headers: privateHeaders });
     return NextResponse.json({ ok: false, error: 'Invalid TraceMini action', code: 'invalid_request' }, { status: 400, headers: privateHeaders });
   } catch (error) { return apiErrorResponse(error); }
