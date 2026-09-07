@@ -10,7 +10,8 @@ test-results/
 playwright-report/
 coverage/
 docs/
-tests/
+/tests/
+!vendor/tracemini/pristine/tests/**
 *.tsbuildinfo
 *.log
 .env
