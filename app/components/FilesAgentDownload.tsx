@@ -14,12 +14,19 @@ type FilesAgentDevice = {
   revoked_at: string | null;
 };
 
-export default function FilesAgentDownload() {
+type Props = { projectId?: string };
+type FolderBinding = { code: string; expiresAt: string; rootLabel: string };
+
+export default function FilesAgentDownload({ projectId }: Props = {}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [devices, setDevices] = useState<FilesAgentDevice[]>([]);
   const [devicesLoading, setDevicesLoading] = useState(true);
   const [revokingId, setRevokingId] = useState('');
+  const [selectedDeviceId, setSelectedDeviceId] = useState('');
+  const [rootLabel, setRootLabel] = useState('');
+  const [binding, setBinding] = useState<FolderBinding | null>(null);
+  const [bindingBusy, setBindingBusy] = useState(false);
 
   async function refreshDevices() {
     setDevicesLoading(true);
@@ -27,7 +34,9 @@ export default function FilesAgentDownload() {
       const response = await fetch('/api/files-agent/devices', { credentials: 'same-origin', cache: 'no-store' });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || 'Could not load devices');
-      setDevices(Array.isArray(result.devices) ? result.devices : []);
+      const nextDevices: FilesAgentDevice[] = Array.isArray(result.devices) ? result.devices : [];
+      setDevices(nextDevices);
+      setSelectedDeviceId((current) => current || nextDevices.find((device) => !device.revoked_at)?.id || '');
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not load devices');
     } finally {
@@ -89,18 +98,62 @@ export default function FilesAgentDownload() {
     }
   }
 
+  async function createFolderBinding(event: React.FormEvent) {
+    event.preventDefault();
+    if (!projectId) return;
+    setBindingBusy(true);
+    setBinding(null);
+    setError('');
+    try {
+      const response = await fetch(`/api/projects/${projectId}/tracemini/roots`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({ device_id: selectedDeviceId, root_label: rootLabel }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.ok) throw new Error(result.error || 'Folder connection could not be prepared');
+      setBinding(result.binding);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Folder connection could not be prepared');
+    } finally {
+      setBindingBusy(false);
+    }
+  }
+
   return (
-    <section className="card" style={{ marginTop: 16 }}>
-      <span className="pill">Files only</span>
-      <h2>AI files tracker</h2>
+    <section className={projectId ? 'dashboardPanel desktopCliPanel' : 'card desktopCliPanel'} style={{ marginTop: 16 }}>
+      <span className="pill">Desktop connection</span>
+      <h2>Connect the Trace desktop CLI</h2>
       <p className="muted">
-        Reports file-change metadata only: path, action, time, and device. It does not collect file contents,
-        screenshots, keyboard input, browser activity, clipboard data, or audio.
+        Install the CLI on your computer, connect an approved project folder, then run Codex, Claude, or Hermes
+        through it. Trace records file changes made by that approved AI CLI process tree only. It reports
+        file-change metadata only and does not collect file contents, screenshots, input, browser activity,
+        clipboard data, audio, or unrelated operating-system files.
       </p>
-      <button type="button" onClick={download} disabled={busy}>
-        {busy ? 'Preparing secure download…' : 'Download AI files tracker'}
+      <ol className="cliSteps">
+        <li><strong>Download and install</strong><code>unzip neodym-ai-files-tracker.zip &amp;&amp; bash files-agent/install.sh</code></li>
+        <li><strong>Connect a project folder</strong><span>{projectId ? 'Choose an enrolled device below and generate its one-time folder command.' : 'Create or open a project, then connect its exact local folder from the project workspace.'}</span></li>
+        <li><strong>Run an approved AI CLI</strong><code>files-agent exec --agent codex -- codex</code></li>
+      </ol>
+      <button type="button" aria-label="Download AI files tracker" onClick={download} disabled={busy}>
+        {busy ? 'Preparing secure download…' : 'Download Trace desktop CLI'}
       </button>
       <p className="muted smallNote">The download contains a short-lived, one-time enrollment token tied to your signed-in account. Do not share the package.</p>
+
+      {projectId && <div className="folderConnection">
+        <h3>Connect this project folder</h3>
+        {devices.some((device) => !device.revoked_at) ? <form onSubmit={createFolderBinding}>
+          <label>Enrolled device<select required value={selectedDeviceId} onChange={(event) => setSelectedDeviceId(event.target.value)}>{devices.filter((device) => !device.revoked_at).map((device) => <option key={device.id} value={device.id}>{device.device_label || device.hostname || `Device ${device.id}`}</option>)}</select></label>
+          <label>Folder label<input required maxLength={160} value={rootLabel} onChange={(event) => setRootLabel(event.target.value)} placeholder="Project name, not a filesystem path" /></label>
+          <button disabled={bindingBusy || !selectedDeviceId || !rootLabel.trim()}>{bindingBusy ? 'Preparing command…' : 'Generate folder connection command'}</button>
+        </form> : <p className="muted">Install and enroll the desktop CLI first. This page will then show your device here.</p>}
+        {binding && <div className="bindingCommand" role="status">
+          <strong>Run this once on {devices.find((device) => device.id === selectedDeviceId)?.device_label || 'the selected device'}:</strong>
+          <code>files-agent bind --code {binding.code} --root /absolute/path/to/project</code>
+          <p className="muted smallNote">Replace the example path with the exact local project folder. The one-time command expires at {new Date(binding.expiresAt).toLocaleString()}.</p>
+        </div>}
+      </div>}
 
       <div style={{ marginTop: 20 }}>
         <h3>Enrolled files-agent devices</h3>
@@ -122,7 +175,7 @@ export default function FilesAgentDownload() {
           </div>
         )}
       </div>
-      {error && <p className="bad">{error}</p>}
+      {error && <p className="bad" role="alert">{error}</p>}
     </section>
   );
 }

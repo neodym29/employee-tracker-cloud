@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { renderTraceMiniConfirmation } from '../../../lib/tracemini-confirmation';
+import DesktopCliConnection from '../../components/DesktopCliConnection';
 
 type Project = { id: string; title: string; description: string; status: 'draft' | 'open' | 'active' | 'completed' | 'archived'; gitRemote: string | null; createdAt: string; updatedAt: string };
 type Membership = { id: string; display_name: string; membership_type: 'request' | 'invitation' | 'creator'; membership_status: string };
@@ -324,6 +325,8 @@ export default function WorkspaceClient({ projectId, accountType, canManageTrace
             </div>
           </>}
         </section>
+
+        {accountType !== 'admin' && <DesktopCliConnection projectId={projectId} />}
 
             {canManageTraceMini && <details className="dashboardPanel traceMiniSettings">
           <summary>TraceMini settings</summary>

@@ -100,13 +100,12 @@ export async function ingestEmbeddedEvents(credential:string, rawBody:Buffer, bo
 }
 
 export async function issueEmbeddedBindingCode(session:SessionUser,projectValue:unknown,input:Record<string,unknown>){
-  exact(input,new Set(['user_id','device_id','root_label']),'request'); const project=String(projectValue??''); if(!/^\d+$/.test(project)) throw new FilesAgentError('invalid project id',400);
-  const userId=text(input.user_id,'user_id',30); if(!/^\d+$/.test(userId)) throw new FilesAgentError('user_id is invalid',400);
+  exact(input,new Set(['device_id','root_label']),'request'); const project=String(projectValue??''); if(!/^\d+$/.test(project)) throw new FilesAgentError('invalid project id',400);
   const deviceId=text(input.device_id,'device_id',30); if(!/^\d+$/.test(deviceId)) throw new FilesAgentError('device_id is invalid',400);
   const label=text(input.root_label,'root_label',160); if(/[\\/]/.test(label)) throw new FilesAgentError('root_label must not be a path',400);
   await ensureSchema(); const pool=getPool(); const code=`tmb_${crypto.randomBytes(32).toString('base64url')}`; const expires=new Date(Date.now()+10*60_000);
-  const result=await pool.query(`insert into project_tracemini_binding_codes(project_id,requested_for_user_id,code_hash,root_label,expires_at,issued_by) select p.id,m.user_id,$3,$4,$5,$6 from projects p join project_memberships m on m.project_id=p.id and m.user_id=$2 and m.membership_status='active' join files_agent_devices d on d.id=$7 and d.user_id=m.user_id and d.revoked_at is null where p.id=$1 and p.approval_status='approved' and (p.client_id=$6 or ($8 and $9)) returning id`,[project,userId,hashFilesAgentSecret(code),label,expires,session.id,deviceId,session.role==='admin',session.account_type==='admin']);
-  if(!result.rows[0]) throw new FilesAgentError('owner approval and active project member required',403); return {code,expiresAt:expires.toISOString(),rootLabel:label};
+  const result=await pool.query(`insert into project_tracemini_binding_codes(project_id,requested_for_user_id,code_hash,root_label,expires_at,issued_by) select p.id,$2,$3,$4,$5,$2 from projects p join files_agent_devices d on d.id=$6 and d.user_id=$2 and d.company_id=$7 and d.revoked_at is null where p.id=$1 and p.approval_status='approved' and p.company_id=$7 and (p.client_id=$2 or exists(select 1 from project_memberships m where m.project_id=p.id and m.user_id=$2 and m.membership_status='active')) returning id`,[project,session.id,hashFilesAgentSecret(code),label,expires,deviceId,session.company_id]);
+  if(!result.rows[0]) throw new FilesAgentError('active project access and an enrolled device are required',403); return {code,expiresAt:expires.toISOString(),rootLabel:label};
 }
 
 export async function bindEmbeddedRoot(credential:string,rawBody:Buffer,input:Record<string,unknown>,auth:{signature:string;timestamp:string;nonce:string;path?:string}){

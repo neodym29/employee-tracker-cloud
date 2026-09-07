@@ -118,6 +118,18 @@ select:focus, input:focus, textarea:focus, a:focus-visible, button:focus-visible
 .textLink { font-weight: 700; }
 
 .traceMiniPanel { margin-top: 18px; padding-bottom: 20px; }
+.desktopCliPanel { padding: 26px; }
+.desktopCliPanel > p { max-width: 780px; line-height: 1.55; }
+.cliSteps { display: grid; gap: 12px; margin: 22px 0; padding: 0; list-style: none; counter-reset: cli-step; }
+.cliSteps li { position: relative; display: grid; gap: 5px; padding: 14px 16px 14px 50px; border: 1px solid var(--line); border-radius: 13px; background: #fbfaf8; counter-increment: cli-step; }
+.cliSteps li::before { content: counter(cli-step); position: absolute; top: 14px; left: 15px; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 8px; color: #fff; background: var(--dark); font-size: 11px; font-weight: 800; }
+.cliSteps span { color: var(--muted); font-size: 13px; line-height: 1.45; }
+.cliSteps code, .bindingCommand code { display: block; overflow-wrap: anywhere; color: #4c456f; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.55; }
+.folderConnection { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 22px; }
+.folderConnection form { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) auto; gap: 12px; align-items: end; }
+.folderConnection label { display: grid; gap: 7px; font-size: 12px; font-weight: 700; }
+.bindingCommand { display: grid; gap: 8px; margin-top: 14px; border: 1px solid #d9d3ff; border-radius: 13px; padding: 14px 16px; background: #f8f6ff; }
+.bindingCommand p { margin-bottom: 0; }
 .traceMiniHeader { padding: 22px 24px; border-bottom: 1px solid var(--line); }
 .traceFreshness { margin: 14px 24px 0; color: var(--muted); font-size: 12px; }
 .traceMiniPanel > .errorBanner { margin: 14px 24px 0; }
@@ -357,6 +369,9 @@ button:disabled { cursor: not-allowed; opacity: .55; transform: none; box-shadow
   .panelHeader { align-items: flex-start; flex-direction: column; }
   .changeRow time { display: none; }
   .card { padding: 22px 18px; }
+  .desktopCliPanel { padding: 22px 18px; }
+  .folderConnection form { grid-template-columns: minmax(0,1fr); }
+  .folderConnection form button { width: 100%; }
   .projectTools, .rolePicker { grid-template-columns: 1fr; }
   .projectContext { min-width: 0; align-items: flex-start; flex-direction: column; padding: 16px; }
   .projectContextMeta { width: 100%; justify-items: start; }
