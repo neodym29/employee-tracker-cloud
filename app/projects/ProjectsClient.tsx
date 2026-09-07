@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import TraceMiniProjectDiscovery, { type TraceRepositoryCandidate } from '@/app/components/TraceMiniProjectDiscovery';
+import DesktopCliConnection from '@/app/components/DesktopCliConnection';
+
 
 type Project = { id: string; title: string; description: string; status: string; approval_status: 'pending' | 'approved' | 'rejected'; git_remote_url?: string | null; membership_id?: string | null; membership_type?: 'invitation' | 'request' | 'creator' | null; membership_status?: string | null };
 type Membership = { id: string; project_id: string; display_name: string; membership_type: 'invitation' | 'request' | 'creator'; membership_status: string };
@@ -38,7 +39,7 @@ export default function ProjectsClient({ accountType }: Props) {
   const createRequestFingerprintRef = useRef<string | null>(null);
   const [error, setError] = useState('');
   const [traceSetupOpen, setTraceSetupOpen] = useState(false);
-  const [selectedCandidateId, setSelectedCandidateId] = useState('');
+
   const [createdProjectId, setCreatedProjectId] = useState('');
 
   const load = useCallback(async () => {
@@ -142,17 +143,11 @@ export default function ProjectsClient({ accountType }: Props) {
     return <article className="projectCard" key={project.id}><div className="cardTop"><span className="statusBadge">{project.status}</span><span className="statusBadge subtle">{project.approval_status}</span>{project.membership_status && <span className="statusBadge subtle">{project.membership_status}</span>}</div><h3>{project.title}</h3><p>{project.description || 'No description yet.'}</p>{(accountType === 'client' || project.membership_status === 'active') && <p className="muted"><strong>Git remote:</strong> {project.git_remote_url || 'Git link missing'}</p>}<div className="rowActions">{project.approval_status === 'approved' && (accountType === 'client' || project.membership_status === 'active') && <a className="secondaryButton" href={`/projects/${project.id}`}>Open workspace</a>}{action}</div>{accountType === 'client' && decisions('Pending join requests', joinRequests)}</article>;
   };
 
-  function chooseRepository(candidate: TraceRepositoryCandidate) {
-    if (createBusy || candidate.repository_key.startsWith('local:')) return;
-    setSelectedCandidateId(candidate.id);
-    setGitRemote(`https://${candidate.repository_key}`);
-    if (!title.trim()) setTitle(candidate.display_name.slice(0, 120));
-  }
 
   const traceSetup = <>
     <details open={traceSetupOpen} onToggle={event => setTraceSetupOpen(event.currentTarget.open)}>
       <summary>Set up Trace CLI &amp; choose a repository (optional)</summary>
-      {traceSetupOpen && <TraceMiniProjectDiscovery projectId={createdProjectId || undefined} selectedCandidateId={selectedCandidateId} onChoose={chooseRepository} disabled={createBusy && !createdProjectId} />}
+      {traceSetupOpen && <DesktopCliConnection projectId={createdProjectId || undefined} />}
     </details>
     {createdProjectId && <div role="status"><p>Project created. Finish repository tracking above, or continue without waiting.</p><a className="primaryButton" href={`/projects/${createdProjectId}`}>Open workspace</a></div>}
   </>;

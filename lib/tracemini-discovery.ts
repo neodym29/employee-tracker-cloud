@@ -39,6 +39,12 @@ function pushRef(value: unknown): string {
   return ref;
 }
 function fingerprint(value: unknown): Record<string, string | number> {
+  // Original Node CLI hashes Git directory dev/inode/birthtime. No local paths.
+  if (value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 1 && 'digest' in value) {
+    const digest = (value as {digest:unknown}).digest;
+    if (typeof digest !== 'string' || !/^[a-f0-9]{64}$/.test(digest)) invalid('fingerprint.digest is invalid');
+    return {digest};
+  }
   if (!value || typeof value !== 'object' || Array.isArray(value)) invalid('fingerprint must be an object');
   const input = value as Record<string, unknown>;
   if (Object.keys(input).some((key) => !MAX_FINGERPRINT_KEYS.has(key))) invalid('fingerprint contains unsupported fields');
@@ -61,11 +67,22 @@ async function transaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T
   catch (error) { await client.query('rollback'); throw error; }
   finally { client.release(); }
 }
-async function deviceForCredential(client: PoolClient, credential: string) {
+export type DiscoveryCredential = string | {nodeToken: string};
+export async function deviceForCredential(client: PoolClient, credential: DiscoveryCredential) {
+  if (typeof credential !== 'string') {
+    if (!/^etn_[A-Za-z0-9_-]{43}$/.test(credential.nodeToken)) throw new ProjectServiceError('Invalid Node credential',401,'unauthorized');
+    const result = await client.query(`select d.id,d.company_id,d.user_id,n.context_id from files_agent_devices d
+      join tracemini_node_devices n on n.id=d.node_device_id and n.company_id=d.company_id and n.user_id=d.user_id
+      join app_users u on u.id=d.user_id and u.company_id=d.company_id
+      where n.credential_hash=$1 and n.capability='node-git-v1' and n.revoked_at is null and n.expires_at>now()
+      and d.revoked_at is null and u.approval_status='approved' for update of d,n`,[credentialHash(credential.nodeToken)]);
+    if (!result.rows[0]) throw new ProjectServiceError('Invalid Node credential',401,'unauthorized');
+    return result.rows[0] as {id:string;company_id:string;user_id:string;context_id?:string};
+  }
   if (!credential || credential.length > 512) throw new ProjectServiceError('Invalid device credential', 401, 'unauthorized');
   const result = await client.query(`select d.id,d.company_id,d.user_id from files_agent_devices d join app_users u on u.id=d.user_id and u.company_id=d.company_id and u.approval_status='approved' where d.credential_hash=$1 and d.revoked_at is null for update of d`, [credentialHash(credential)]);
   if (!result.rows[0]) throw new ProjectServiceError('Invalid device credential', 401, 'unauthorized');
-  return result.rows[0] as { id: string; company_id: string; user_id: string };
+  return result.rows[0] as { id: string; company_id: string; user_id: string; context_id?: string };
 }
 async function ownedDevice(client: PoolClient, session: SessionUser, deviceId: unknown) {
   const result = await client.query(`select d.id from files_agent_devices d join app_users u on u.id=d.user_id and u.company_id=d.company_id and u.approval_status='approved'
@@ -75,10 +92,11 @@ async function ownedDevice(client: PoolClient, session: SessionUser, deviceId: u
 }
 function iso(value: unknown): string | null { return value ? new Date(value as string).toISOString() : null; }
 
-// Resolve against current project ownership/membership, never a cached match.
+// Projects have no company_id: tenant scope derives from the project owner.
+// Retain owner-or-active-member authority, never a cached match.
 async function authorizedMatch(client: PoolClient, company: string, user: string, key: string): Promise<string | null> {
   const result = await client.query(`select p.id from projects p join app_users owner on owner.id=p.client_id
-    where owner.company_id=$1 and p.company_id=$1 and p.approval_status='approved' and p.git_repository_key=$3
+    where owner.company_id=$1 and p.approval_status='approved' and p.git_repository_key=$3
     and exists(select 1 from app_users u where u.id=$2 and u.company_id=$1 and u.approval_status='approved')
     and (p.client_id=$2 or exists(select 1 from project_memberships m where m.project_id=p.id and m.user_id=$2 and m.membership_status='active'))`, [company,user,key]);
   return result.rows.length === 1 ? String(result.rows[0].id) : null;
@@ -143,7 +161,7 @@ export async function listRepositoryCandidates(session: SessionUser) {
       join app_users u on u.id=d.user_id and u.company_id=d.company_id and u.approval_status='approved'
       cross join lateral (select count(*) as n,min(p.id) as project_id from projects p
         join app_users owner on owner.id=p.client_id and owner.company_id=$1
-        where p.company_id=$1 and p.approval_status='approved' and p.git_repository_key=c.repository_key
+        where p.approval_status='approved' and p.git_repository_key=c.repository_key
         and (p.client_id=$2 or exists(select 1 from project_memberships m
           where m.project_id=p.id and m.user_id=$2 and m.membership_status='active'))) access
       where c.company_id=$1 order by c.created_at desc limit 500`, [session.company_id, session.id]);
@@ -173,7 +191,7 @@ export async function selectRepositoryCandidate(session: SessionUser, candidateV
   });
 }
 
-export async function claimDeviceWork(credential: string) {
+export async function claimDeviceWork(credential: DiscoveryCredential) {
   return transaction(async (client) => {
     const device = await deviceForCredential(client, credential);
     // Idle devices have no binding heartbeat; valid work polls are liveness too.
@@ -211,7 +229,7 @@ function repositoryInput(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) invalid('repository entry must be an object');
   return value as Record<string, unknown>;
 }
-export async function publishRepositoryCandidates(credential: string, body: Record<string, unknown>) {
+export async function publishRepositoryCandidates(credential: DiscoveryCredential, body: Record<string, unknown>) {
   const repositories = body.repositories;
   if (!Array.isArray(repositories) || repositories.length > MAX_REPOSITORIES) invalid('repositories must contain at most 500 entries');
   const scanId = numericId(body.scan_id, 'scan_id');
@@ -235,7 +253,7 @@ export async function publishRepositoryCandidates(credential: string, body: Reco
       await client.query(`update tracemini_repository_candidates set matched_project_id=null,match_status='unmatched' where id=$1`, [candidateId]);
       await client.query(`with matches as (select p.id,count(*) over() as n from projects p join app_users owner on owner.id=p.client_id and owner.company_id=$3
         left join project_memberships m on m.project_id=p.id and m.user_id=$2 and m.membership_status='active'
-        where p.company_id=$3 and p.approval_status='approved' and p.git_repository_key=$4 and (p.client_id=$2 or m.user_id=$2))
+        where p.approval_status='approved' and p.git_repository_key=$4 and (p.client_id=$2 or m.user_id=$2))
         update tracemini_repository_candidates c set match_status=case when matches.n=1 then 'matched' when matches.n>1 then 'ambiguous' else 'unmatched' end,
         matched_project_id=case when matches.n=1 then matches.id else null end,updated_at=now() from matches where c.id=$1`, [candidateId, device.user_id, device.company_id, key]);
       const changed = await client.query(`update tracemini_repository_candidates set revision=revision+1,tracking_state='unselected'
@@ -252,7 +270,7 @@ export async function publishRepositoryCandidates(credential: string, body: Reco
   });
 }
 
-export async function completeDeviceWork(credential: string, body: Record<string, unknown>) {
+export async function completeDeviceWork(credential: DiscoveryCredential, body: Record<string, unknown>) {
   const kind = body.kind;
   if (kind !== 'scan' && kind !== 'selection' && kind !== 'push') invalid('kind is invalid');
   const workId = numericId(body.work_id, 'work_id');
@@ -294,7 +312,7 @@ export async function completeDeviceWork(credential: string, body: Record<string
   });
 }
 
-export async function createPendingPush(credential: string, body: Record<string, unknown>) {
+export async function createPendingPush(credential: DiscoveryCredential, body: Record<string, unknown>) {
   const key = canonicalKey(body.repository_key);
   const branch = pushRef(body.branch);
   const expected = sha(body.expected_head_sha, 'expected_head_sha', true)!;

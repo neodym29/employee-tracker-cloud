@@ -17,15 +17,18 @@ test('discovery control plane has a final-state schema without path or secret le
   assert.doesNotMatch(migration, /credential-bearing/i);
 });
 
-test('browser discovery UI uses the explicit Detect projects flow and safe candidate fields', () => {
+test('browser Node discovery uses explicit scans, selection and safe candidate fields', () => {
   const page = read('app/projects/page.tsx');
-  const component = read('app/components/TraceMiniProjectDiscovery.tsx');
+  const component = read('app/components/trace-node/RepositorySelection.tsx');
   assert.doesNotMatch(page, /<TraceMiniProjectDiscovery/);
-  assert.match(read('app/projects/ProjectsClient.tsx'), /<TraceMiniProjectDiscovery/);
-  assert.match(component, />Detect projects</);
-  assert.match(component, /Track|Stop tracking/);
-  assert.match(component, /matched|unmatched|ambiguous/i);
-  assert.doesNotMatch(component, /absolute path|local path/i);
+  assert.match(read('app/projects/ProjectsClient.tsx'), /<DesktopCliConnection/);
+  assert.match(read('app/components/DesktopCliConnection.tsx'), /<Discovery\s*\/>/);
+  assert.match(component, /Scan repositories on my devices/);
+  assert.match(component, /role="switch"/);
+  assert.match(component, /No unique authorized project match/);
+  assert.match(component, /revision: candidate.revision/);
+  assert.match(component, /Open existing project/);
+  assert.doesNotMatch(component, /candidate\.(local_key|normalized_remote)|FilesAgentDownload|type="file"/);
 });
 
 test('discovery APIs separate authenticated browser scans from device work', () => {
@@ -41,12 +44,16 @@ test('discovery APIs separate authenticated browser scans from device work', () 
 });
 
 test('installer and projects page advertise install-once discovery', () => {
-  const installer = read('files-agent/install.sh.template');
+  const installer = read('app/components/trace-node/Install.tsx');
   const page = read('app/projects/page.tsx');
-  const component = read('app/components/TraceMiniProjectDiscovery.tsx');
-  assert.match(installer, /systemd|service/i);
-  assert.match(installer, /discovery root/i);
+  const component = read('app/components/trace-node/RepositorySelection.tsx');
+  assert.match(installer, /automatically starts the namespaced background service/);
+  assert.match(installer, /folders you approve/);
+  assert.match(installer, /no ZIP upload is needed/);
+  assert.match(installer, /explicit repository selection and device confirmation/);
   assert.doesNotMatch(page, /<TraceMiniProjectDiscovery/);
-  assert.match(read('app/projects/ProjectsClient.tsx'), /<TraceMiniProjectDiscovery/);
-  assert.match(component, /Detect projects/);
+  assert.match(read('app/projects/ProjectsClient.tsx'), /<DesktopCliConnection/);
+  assert.match(component, /Scan repositories on my devices/);
+  const route = read('app/api/agents/discovery/route.ts');
+  for (const marker of ['requireApiSession', 'assertSameOrigin', 'boundedAgentJson', 'nodeBrowserDiscovery', 'nodeBrowserMutation']) assert.ok(route.includes(marker), marker);
 });

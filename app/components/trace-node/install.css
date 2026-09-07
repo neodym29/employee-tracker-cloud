@@ -1,0 +1,16 @@
+/* Scoped styles for the extracted original Install component; cloud palette inherited. */
+.trace-node-install { display:grid; gap:1.25rem; min-width:0; }
+.trace-node-install .page-heading h2 { margin:.4rem 0; }
+.trace-node-install .card { padding:1.25rem; min-width:0; }
+.trace-node-install .install-card { display:grid; grid-template-columns:2rem minmax(0,1fr); gap:1rem; }
+.trace-node-install .step-number { opacity:.65; font-size:1.2rem; }
+.trace-node-install .command { display:flex; align-items:center; gap:1rem; margin:1rem 0; }
+.trace-node-install .command > div { flex:1; min-width:0; }
+.trace-node-install pre { white-space:pre-wrap; overflow-wrap:anywhere; padding:1rem; border:1px solid currentColor; border-radius:.5rem; font-size:.8rem; }
+.trace-node-install button { min-height:44px; }
+.trace-node-install button:focus-visible { outline:2px solid currentColor; outline-offset:3px; }
+.trace-node-install .busy-indicator { display:inline-flex; align-items:center; gap:.5rem; }
+.trace-node-install .spinner { width:1em; height:1em; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:trace-install-spin 1s linear infinite; }
+@keyframes trace-install-spin { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion:reduce) { .trace-node-install .spinner { animation:none; } }
+@media (max-width:600px) { .trace-node-install .install-card { grid-template-columns:minmax(0,1fr); } .trace-node-install .command { flex-direction:column; align-items:stretch; } }

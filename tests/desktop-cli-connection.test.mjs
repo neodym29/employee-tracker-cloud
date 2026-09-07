@@ -7,15 +7,18 @@ const read = (path) => readFileSync(new URL(path, root), 'utf8');
 
 test('projects onboarding visibly offers the installable desktop CLI', () => {
   const page = read('app/projects/page.tsx');
-  const component = read('app/components/FilesAgentDownload.tsx');
+  const component = read('app/components/DesktopCliConnection.tsx');
 
   assert.doesNotMatch(page, /<DesktopCliConnection/);
-  assert.match(read('app/projects/ProjectsClient.tsx'), /<TraceMiniProjectDiscovery/);
-  assert.match(read('app/components/TraceMiniProjectDiscovery.tsx'), /<DesktopCliConnection\s+projectId=\{projectId\}/);
-  assert.match(component, /Connect the Trace desktop CLI/);
-  assert.match(component, /files-agent\/install\.sh/);
-  assert.match(component, /files-agent exec --agent codex -- codex/);
-  assert.match(component, /approved AI CLI process tree/i);
+  assert.match(read('app/projects/ProjectsClient.tsx'), /<DesktopCliConnection\s+projectId=\{createdProjectId \|\| undefined\}/);
+  assert.match(component, /<TraceNodeInstall\s*\/>/);
+  assert.match(component, /<Discovery\s*\/>/);
+  assert.doesNotMatch(component, /FilesAgentDownload|TraceMiniProjectDiscovery/);
+  const install = read('app/components/trace-node/Install.tsx');
+  assert.match(install, /\/agents\/installations/);
+  assert.match(install, /employee-trace\.service/);
+  assert.match(install, /folders you approve/);
+  assert.match(install, /explicit repository selection/);
 });
 
 test('project workspace creates a server-derived one-time folder binding', () => {

@@ -1,0 +1,58 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import {execFileSync} from 'node:child_process';
+import {createRequire} from 'node:module';
+import {build} from 'esbuild';
+const require=createRequire(import.meta.url);
+
+test('full production bootstrap: Git route, browser discovery, owner/member isolation and telemetry', async t=>{
+ const root=process.cwd(),tmp=fs.mkdtempSync(path.join(root,'tests/.full-schema-'));
+ const container=execFileSync('docker',['run','-d','--rm','-e','POSTGRES_PASSWORD=test','-e','POSTGRES_DB=test','-P','postgres:16-alpine'],{encoding:'utf8'}).trim();
+ let pool;
+ t.after(async()=>{await pool?.end();execFileSync('docker',['rm','-f',container],{stdio:'ignore'});fs.rmSync(tmp,{recursive:true,force:true});});
+ const port=execFileSync('docker',['port',container,'5432/tcp'],{encoding:'utf8'}).trim().split('\n')[0].split(':').pop();
+ process.env.DATABASE_URL=`postgres://postgres:test@localhost:${port}/test`;
+ process.env.FILES_AGENT_BINDING_KEY='test-only-binding-key'.repeat(3);
+ const outfile=path.join(tmp,'cloud.cjs');
+ await build({stdin:{contents:"export * from './lib/db';export * from './lib/tracemini-node-git';export * from './lib/tracemini-discovery';export {POST} from './app/api/agents/git/[operation]/route';",resolveDir:root},bundle:true,platform:'node',format:'cjs',packages:'external',outfile,plugins:[{name:'server-marker-only',setup(b){b.onResolve({filter:/^server-only$/},()=>({path:'empty',namespace:'marker'}));b.onLoad({filter:/.*/,namespace:'marker'},()=>({contents:''}));}}]});
+ const cloud=require(outfile);pool=cloud.getPool();
+ for(let n=0;;n++){try{await pool.query('select 1');break;}catch(e){if(n>80)throw e;await new Promise(r=>setTimeout(r,100));}}
+ await cloud.ensureSchema();
+ for(const name of ['020_tracemini_project_discovery.sql','021_tracemini_node_install.sql','022_tracemini_node_git.sql'])await pool.query(fs.readFileSync('migrations/'+name,'utf8'));
+ assert.equal((await pool.query("select 1 from information_schema.columns where table_name='projects' and column_name='company_id'")).rowCount,0);
+ await pool.query(`insert into companies(id,name,domain) values(1,'One','one.test'),(2,'Two','two.test');
+ insert into app_users(id,company_id,email,role,approval_status,account_type,display_name) values(11,1,'owner@one.test','employee','approved','client','Owner'),(12,1,'member@one.test','employee','approved','engineer','Member'),(13,1,'stranger@one.test','employee','approved','engineer','Stranger'),(21,2,'owner@two.test','employee','approved','client','Foreign');
+ insert into projects(id,client_id,title,approval_status,git_repository_key,git_remote_url,status) values(700,11,'Widget','approved','github.com/acme/widget','https://github.com/acme/widget.git','completed'),(701,21,'Foreign','approved','github.com/acme/widget','https://github.com/acme/widget.git','completed');
+ insert into tracemini_node_contexts(id,company_id,user_id) values(50,1,11);`);
+ const token='etn_'+crypto.randomBytes(32).toString('base64url');
+ await pool.query(`insert into tracemini_node_devices(id,context_id,company_id,user_id,installation_hash,credential_hash,machine_name) values(5,50,1,11,$1,$2,'test')`,['a'.repeat(64),crypto.createHash('sha256').update(token).digest('hex')]);
+ const session={id:'11',company_id:'1'};
+ await t.test('sync route works without synthetic project company',async()=>{
+  const response=await cloud.POST(new Request('http://localhost/api/agents/git/sync',{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:'{}'}),{params:Promise.resolve({operation:'sync'})});
+  assert.equal(response.status,200);assert.deepEqual((await response.json()).workspaceIds,[]);
+ });
+ await t.test('browser query works on empty full schema',async()=>{assert.deepEqual((await cloud.nodeBrowserDiscovery(session)).candidates,[]);});
+ const scan=await cloud.createNodeRepositoryScan(session,5);
+ const work=(await cloud.nodeGitRequest(token,'sync')).work.find(w=>w.kind==='scan');
+ await cloud.nodeGitRequest(token,'candidates',{scan_id:scan.requestId,claim_token:work.claim_token,repositories:[{repository_key:'github.com/acme/widget',display_name:'Widget',fingerprint:{digest:'b'.repeat(64)}}]});
+ let candidate=(await cloud.listRepositoryCandidates(session))[0];assert.equal(candidate.matched_project_id,'700');
+ assert.deepEqual(await cloud.listRepositoryCandidates({id:'13',company_id:'1'}),[]);
+ await cloud.selectRepositoryCandidate(session,candidate.id,true,candidate.revision);
+ const selection=(await cloud.nodeGitRequest(token,'sync')).work.find(w=>w.kind==='selection');
+ const identity={candidate_id:candidate.id,digest:'b'.repeat(64),repository_key:candidate.repository_key,claim_token:selection.claim_token};
+ await cloud.nodeGitRequest(token,'register',{...identity,revision:selection.revision,project_id:700});
+ await cloud.nodeGitRequest(token,'complete',{kind:'selection',work_id:candidate.id,claim_token:selection.claim_token,revision:selection.revision,tracked:true});
+ await pool.query('update projects set tracemini_telemetry_paused=false where id=700');
+ await cloud.nodeGitRequest(token,'activity',{...identity,event_key:'c'.repeat(64),kind:'commit',occurred_at:new Date().toISOString(),provenance:{head_sha:'d'.repeat(40)}});
+ assert.equal((await cloud.nodeBrowserDiscovery(session)).candidates[0].traced,true);
+ assert.deepEqual((await cloud.nodeGitRequest(token,'sync')).workspaceIds,[700]);
+ await pool.query("update projects set client_id=12 where id=700");
+ await assert.rejects(cloud.nodeGitRequest(token,'workspace',{workspaceId:700}));
+ await pool.query("insert into project_memberships(project_id,user_id,membership_status,membership_type,created_by) values(700,11,'active','invitation',12)");
+ assert.equal((await cloud.nodeGitRequest(token,'workspace',{workspaceId:700})).workspaceId,700);
+ await pool.query("update project_memberships set membership_status='rejected' where project_id=700 and user_id=11");
+ await assert.rejects(cloud.nodeGitRequest(token,'workspace',{workspaceId:700}));
+});

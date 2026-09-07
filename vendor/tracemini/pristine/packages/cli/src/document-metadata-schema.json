@@ -1,0 +1,38 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "shortSummary", "keyPoints", "decisions", "actionItems", "projects", "people", "relevantDates", "warnings"],
+  "properties": {
+    "title": {"type": "string"},
+    "shortSummary": {"type": "string"},
+    "keyPoints": {"type": "array", "items": {"$ref": "#/$defs/referenced"}},
+    "decisions": {"type": "array", "items": {"$ref": "#/$defs/referenced"}},
+    "actionItems": {"type": "array", "items": {"$ref": "#/$defs/action"}},
+    "projects": {"type": "array", "items": {"type": "string"}},
+    "people": {"type": "array", "items": {"type": "string"}},
+    "relevantDates": {"type": "array", "items": {"type": "string"}},
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "referenced": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "references"],
+      "properties": {
+        "text": {"type": "string"},
+        "references": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "owner", "dueDate", "references"],
+      "properties": {
+        "text": {"type": "string"},
+        "owner": {"type": ["string", "null"]},
+        "dueDate": {"type": ["string", "null"]},
+        "references": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

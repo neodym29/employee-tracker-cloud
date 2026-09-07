@@ -1,9 +1,11 @@
 {
   "scripts": {
+    "build:tracemini": "node scripts/build-tracemini.mjs",
+    "test:tracemini": "npm run build:tracemini && node --test tests/tracemini-direct-source.test.mjs",
     "dev": "next dev",
-    "build": "next build",
+    "build": "npm run build:tracemini && node scripts/extract-tracemini-install.mjs && next build",
     "start": "next start",
-    "test": "node --test tests/*.test.mjs && (for f in tests/*test.py; do python3 \"$f\" -v || exit $?; done) && npm run test:postgres",
+    "test": "npm run build:tracemini && node --test tests/*.test.mjs && (for f in tests/*test.py; do python3 \"$f\" -v || exit $?; done) && npm run test:postgres",
     "test:postgres": "node --test tests/postgres-embedded-gate.mjs",
     "test:project-agent-bridge": "node --test tests/project-agent-bridge.test.mjs",
     "project-agent-bridge": "node scripts/project-agent-bridge.mjs",
@@ -23,6 +25,7 @@
     "typescript": "latest"
   },
   "devDependencies": {
-    "@types/pg": "^8.20.0"
+    "@types/pg": "^8.20.0",
+    "esbuild": "0.28.2"
   }
 }

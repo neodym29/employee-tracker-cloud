@@ -1,0 +1,2 @@
+import type {Config} from './config.js';
+export async function api<T=any>(c:Config,url:string,init:RequestInit={},agent=true):Promise<T>{const tok=agent?c.agentToken:c.userToken;const r=await fetch(c.serverUrl.replace(/\/$/,'')+url,{...init,headers:{'content-type':'application/json',...(tok?{authorization:`Bearer ${tok}`}:{}) ,...init.headers}});const text=await r.text();if(!r.ok)throw new Error(`${r.status} ${text}`);return text?JSON.parse(text):undefined as T}
