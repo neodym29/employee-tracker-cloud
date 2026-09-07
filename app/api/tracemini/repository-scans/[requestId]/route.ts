@@ -1,0 +1,2 @@
+import { NextResponse } from 'next/server'; import { apiErrorResponse,requireApiSession } from '@/lib/api'; import { repositoryScanStatus } from '@/lib/tracemini-discovery';
+export async function GET(_req:Request,c:{params:Promise<{requestId:string}>}){try{const session=await requireApiSession();const p=await c.params;return NextResponse.json({ok:true,scan:await repositoryScanStatus(session,p.requestId)},{headers:{'cache-control':'no-store, private'}})}catch(e){return apiErrorResponse(e)}}

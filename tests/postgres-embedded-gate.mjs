@@ -7,6 +7,26 @@ import { readFileSync } from 'node:fs';
 const { Client } = pg;
 const migration = readFileSync(new URL('../migrations/019_embedded_tracemini.sql', import.meta.url), 'utf8');
 const compatibility = readFileSync(new URL('../migrations/018_project_git_link_and_tracemini_evidence.sql', import.meta.url), 'utf8');
+const discoveryMigration = readFileSync(new URL('../migrations/020_tracemini_project_discovery.sql', import.meta.url), 'utf8');
+
+test('Postgres executes migration 020 and enforces its ownership-safe final schema', async (t) => {
+  let id;
+  try { id = execFileSync('docker', ['run','-d','--rm','-e','POSTGRES_PASSWORD=test','-e','POSTGRES_DB=test','-P','postgres:16-alpine'], { encoding: 'utf8' }).trim(); }
+  catch (error) { t.skip(`Docker unavailable: ${error.message}`); return; }
+  t.after(() => { try { execFileSync('docker', ['rm','-f',id]); } catch {} });
+  let port;
+  for (let attempt=0; attempt<40; attempt++) { try { port=execFileSync('docker',['port',id,'5432/tcp'],{encoding:'utf8'}).trim().split(':').pop(); const probe=new Client({host:'127.0.0.1',port:Number(port),user:'postgres',password:'test',database:'test'}); await probe.connect(); await probe.end(); break; } catch { await new Promise((resolve)=>setTimeout(resolve,250)); } }
+  assert.ok(port);
+  const client = new Client({ host:'127.0.0.1', port:Number(port), user:'postgres', password:'test', database:'test' }); await client.connect();
+  try {
+    await client.query(`create table companies(id bigint primary key); create table app_users(id bigint primary key, company_id bigint references companies(id)); create table files_agent_devices(id bigint primary key, company_id bigint references companies(id), user_id bigint references app_users(id)); create table projects(id bigint primary key); create table project_memberships(id bigint primary key); insert into companies values(1); insert into app_users values(1,1); insert into files_agent_devices values(1,1,1); insert into projects values(1);`);
+    await client.query(discoveryMigration);
+    await client.query(`insert into tracemini_scan_requests(company_id,user_id,device_id) values(1,1,1)`);
+    await assert.rejects(client.query(`insert into tracemini_repository_candidates(scan_id,company_id,device_id,display_name,repository_key) values(1,1,1,'x',E'bad\\nkey')`), /check|violates/i);
+    const columns = await client.query(`select column_name from information_schema.columns where table_name='tracemini_scan_requests'`);
+    assert.ok(columns.rows.some((row) => row.column_name === 'repositories_found'));
+  } finally { await client.end(); }
+});
 
 test('Postgres embedded schema rejects direct evidence UPDATE/DELETE and cascades project data', async (t) => {
   const name = `embedded-tracemini-${process.pid}-${Date.now()}`;

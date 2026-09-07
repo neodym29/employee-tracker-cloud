@@ -87,9 +87,12 @@ export function buildFilesAgentPackage(root: string, origin: string, token: stri
     tracemini_endpoint: `${origin}/api/files-agent/tracemini`,
     bind_url: `${origin}/api/files-agent/tracemini/bind`,
     heartbeat_url: `${origin}/api/files-agent/tracemini/heartbeat`,
+    work_url: `${origin}/api/files-agent/work`,
+    candidates_url: `${origin}/api/files-agent/repository-candidates`,
     enrollment_token: token,
     expires_at: expiresAt,
     authorization: 'Send credentials as Authorization: Bearer',
+    discovery_roots: [],
   };
   const payload = readFileSync(/*turbopackIgnore: true*/ join(root, 'files_agent.py'));
   const requestedAgents = new Set((process.env.FILES_AGENT_APPROVED_AGENTS || APPROVED_AGENT_NAMES.join(','))
@@ -97,7 +100,7 @@ export function buildFilesAgentPackage(root: string, origin: string, token: stri
   const approvedAgents = APPROVED_AGENT_NAMES.filter((agent) => requestedAgents.has(agent));
   const encode = (value: string | Buffer) => Buffer.from(value).toString('base64');
   const installer = `#!/bin/sh
-# Per-user, files-only installer. No root access or background service is installed.
+# Per-user, files-only installer. Discovery roots are explicit and persisted.
 set -eu
 command -v python3 >/dev/null 2>&1 || { echo 'python3 is required' >&2; exit 1; }
 command -v strace >/dev/null 2>&1 || { echo 'strace is required' >&2; exit 1; }
@@ -153,12 +156,21 @@ try:
 except FileNotFoundError:
     pass
 link.symlink_to(program)
+existing_config = {}
+try:
+    existing_config = json.loads((config_dir / 'config.json').read_text(encoding='utf-8'))
+except (FileNotFoundError, json.JSONDecodeError):
+    pass
 config = {
+    **existing_config,
     'endpoint': ingest_url,
     'tracemini_endpoint': tracemini_endpoint,
     'bind_url': bind_url,
     'heartbeat_url': heartbeat_url,
-    'bindings': [],
+    'work_url': base64.b64decode('${encode(config.work_url)}').decode(),
+    'candidates_url': base64.b64decode('${encode(config.candidates_url)}').decode(),
+    'bindings': existing_config.get('bindings', []),
+    'discovery_roots': existing_config.get('discovery_roots', []),
     'device_token': credential,
     'auth': 'bearer',
     'agents': list(agent_commands),
@@ -167,11 +179,23 @@ config = {
 config_path = config_dir / 'config.json'
 config_path.write_text(json.dumps(config, indent=2) + '\\n', encoding='utf-8')
 config_path.chmod(0o600)
+service = home / '.config/systemd/user/files-agent.service'
+try:
+    service.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    service.write_text('[Unit]\\nDescription=Files Agent TraceMini service\\n[Service]\\nExecStart=%h/.local/bin/files-agent service --interval 30\\nRestart=on-failure\\n[Install]\\nWantedBy=default.target\\n', encoding='utf-8')
+    if shutil.which('systemctl'):
+        os.system('systemctl --user daemon-reload >/dev/null 2>&1 || true')
+        os.system('systemctl --user enable --now files-agent.service >/dev/null 2>&1 || true')
+except OSError:
+    pass
 print('Installed files-agent in', bin_dir)
 print('Usage: files-agent exec --agent NAME -- REALCMD...')
+print('Discovery is opt-in; approve each folder explicitly:')
+print('  files-agent approve-root /absolute/path/to/folder')
+print('No home-directory-wide scan is performed.')
 PY
 `;
-  const readme = `Neodym AI files tracker\n\nThis package reports file-change metadata only: path, action, time, and device. It does not collect file contents, screenshots, keyboard input, browser activity, clipboard data, or audio.\n\nRun: sh files-agent/install.sh\n\nThe one-time enrollment token in this generated package expires at ${expiresAt}. The installer exchanges it for a random per-device credential, stores that credential in a mode-0600 config file, and never installs the old activity tracker or a background service.\n`;
+  const readme = `Neodym AI files tracker\n\nThis package reports file-change metadata only: path, action, time, and device. It does not collect file contents, screenshots, keyboard input, browser activity, clipboard data, or audio.\n\nRun: sh files-agent/install.sh\n\nThe one-time enrollment token in this generated package expires at ${expiresAt}. Discovery scans only roots explicitly approved by the user.\n`;
   return zipPackage([
     ...sourceEntries(root),
     ['files-agent/install.sh', Buffer.from(installer)],

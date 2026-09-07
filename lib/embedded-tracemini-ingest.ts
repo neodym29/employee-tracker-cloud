@@ -5,7 +5,7 @@ import type { SessionUser } from './auth';
 
 const EVENT_KINDS = new Set(['file_activity','non_git','dirty','commit','branch','merge','rewrite','pull','stage','push']);
 const EVENT_FIELDS = new Set(['event_key','kind','repository_key','occurred_at','provenance','action','agent','run_id']);
-const PROVENANCE_FIELDS = new Set(['branch','head_sha','remote_head_sha','files_changed','insertions','deletions','old_head_sha','new_head_sha','approved_agent','run_id','dirty','dirty_paths','root_label','repository_key']);
+const PROVENANCE_FIELDS = new Set(['branch','head_sha','remote_head_sha','files_changed','insertions','deletions','old_head_sha','new_head_sha','approved_agent','run_id','dirty','dirty_paths','root_label','repository_key','execution_id']);
 const AGENTS = new Set(['hermes','codex','claude']);
 const MAX_EVENTS = 250;
 
@@ -48,10 +48,16 @@ export function normalizeEmbeddedIngest(body: Record<string,unknown>) {
     if (!raw || typeof raw!=='object' || Array.isArray(raw)) throw new FilesAgentError(`events[${index}] must be an object`,400);
     const event=raw as Record<string,unknown>; exact(event,EVENT_FIELDS,`events[${index}]`);
     const kind=text(event.kind,`events[${index}].kind`,32); if(!EVENT_KINDS.has(kind)) throw new FilesAgentError('unsupported event kind',400);
-    const agent=text(event.agent,`events[${index}].agent`,16); if(!AGENTS.has(agent)) throw new FilesAgentError('unsupported approved agent',400);
-    const runId=text(event.run_id,`events[${index}].run_id`,64); if(!/^[a-f0-9]{32,64}$/.test(runId)) throw new FilesAgentError('run_id is invalid',400);
+    // Historical Git metadata is not attributed to an AI agent or invented run.
+    const history = kind === 'commit' && event.action === 'commit_history';
+    if (history && (event.agent != null || event.run_id != null)) throw new FilesAgentError('history must not assert AI attribution',400);
+    const gitMetadata = history || new Set(['commit:git_commit','branch:git_branch','merge:git_merge','rewrite:git_rewrite','stage:git_stage']).has(`${kind}:${event.action}`);
+    if (gitMetadata && (event.agent != null || event.run_id != null)) throw new FilesAgentError('Git metadata must not assert AI attribution',400);
+    if (gitMetadata && event.provenance && typeof event.provenance === 'object') exact(event.provenance as Record<string,unknown>, new Set(['branch','head_sha','old_head_sha','new_head_sha','files_changed']), 'Git provenance');
+    const agent=gitMetadata ? null : text(event.agent,`events[${index}].agent`,16); if(agent !== null && !AGENTS.has(agent)) throw new FilesAgentError('unsupported approved agent',400);
+    const runId=gitMetadata ? null : text(event.run_id,`events[${index}].run_id`,64); if(runId !== null && !/^[a-f0-9]{32,64}$/.test(runId)) throw new FilesAgentError('run_id is invalid',400);
     const occurred=new Date(text(event.occurred_at,`events[${index}].occurred_at`,100));
-    if(Number.isNaN(occurred.getTime()) || occurred.getTime()>Date.now()+300000 || occurred.getTime()<Date.now()-7*86400000) throw new FilesAgentError('occurred_at is outside the allowed window',400);
+    if(Number.isNaN(occurred.getTime()) || occurred.getTime()>Date.now()+300000 || occurred.getTime()<Date.now()-(history ? 91 : 7)*86400000) throw new FilesAgentError('occurred_at is outside the allowed window',400);
     const repositoryKey=event.repository_key==null?null:text(event.repository_key,`events[${index}].repository_key`,1024);
     if(['commit','branch','merge','rewrite','pull','stage','push'].includes(kind) && !repositoryKey) throw new FilesAgentError('Git event requires repository_key',400);
     return {eventKey:text(event.event_key,`events[${index}].event_key`,200),kind,action:event.action==null?null:text(event.action,'action',64),agent,runId,repositoryKey,occurredAt:occurred.toISOString(),provenance:safeProvenance(event.provenance)};
@@ -66,6 +72,17 @@ export function verifyEmbeddedBinding(rawBody: Buffer, signature: string, bindin
   if(!safeEqualHex(signature,expected)) throw new FilesAgentError('invalid TraceMini binding signature',401);
 }
 
+async function requireCurrentBindingAccess(client: import('pg').PoolClient, rootId: string) {
+  const access = await client.query(`select 1 from project_tracemini_roots r
+    join files_agent_devices d on d.id=r.device_id and d.revoked_at is null
+    join app_users u on u.id=d.user_id and u.company_id=d.company_id and u.approval_status='approved'
+    join projects p on p.id=r.project_id and p.company_id=d.company_id and p.approval_status='approved'
+    where r.id=$1 and r.status='approved' and r.revoked_at is null
+    and (r.repository_key is null or r.repository_key=p.git_repository_key)
+    and (p.client_id=u.id or exists(select 1 from project_memberships m where m.project_id=p.id and m.user_id=u.id and m.membership_status='active'))`,[rootId]);
+  if (!access.rows[0]) throw new FilesAgentError('project binding access is no longer active',403);
+}
+
 export async function ingestEmbeddedEvents(credential:string, rawBody:Buffer, body:Record<string,unknown>, auth:{bindingId:string;signature:string;timestamp:string;nonce:string;path?:string}) {
   if(!credential.startsWith('fad_')) throw new FilesAgentError('invalid device credential',401);
   const events=normalizeEmbeddedIngest(body); await ensureSchema(); const pool=getPool(); const client=await pool.connect();
@@ -75,6 +92,7 @@ export async function ingestEmbeddedEvents(credential:string, rawBody:Buffer, bo
     if(!device) throw new FilesAgentError('invalid or revoked device credential',401);
     const binding=(await client.query(`select r.id,r.project_id,r.device_id,r.binding_id,r.binding_secret_hash from project_tracemini_roots r where r.binding_id=$1 and r.device_id=$2 and r.status='approved' and r.revoked_at is null and r.last_heartbeat_at > now()-interval '15 minutes' for update`,[auth.bindingId,device.id])).rows[0];
     if(!binding) throw new FilesAgentError('invalid, revoked, or stale TraceMini binding',401);
+    await requireCurrentBindingAccess(client,binding.id);
     const derived=deriveBindingSecret(binding.binding_id,String(device.id),String(binding.project_id));
     if(!safeEqualHex(binding.binding_secret_hash,hashFilesAgentSecret(derived))) throw new FilesAgentError('invalid binding secret',401);
     verifyEmbeddedBinding(rawBody,auth.signature,binding.binding_id,String(device.id),String(binding.project_id),auth);
@@ -86,11 +104,25 @@ export async function ingestEmbeddedEvents(credential:string, rawBody:Buffer, bo
     if(!rate.rows[0]) throw new FilesAgentError('ingest_rate exceeded; retry later',429);
     let accepted=0;
     for(const event of events) {
+      const rootKey = (await client.query(`select repository_key from project_tracemini_roots where id=$1`,[binding.id])).rows[0]?.repository_key;
+      if (event.repositoryKey && rootKey !== event.repositoryKey) throw new FilesAgentError('repository does not match binding',403);
       // A client assertion such as push_verified is never accepted as proof.
       // Push evidence is eligible only after a future server-side remote check.
-      const evidenceEligible=['file_activity','non_git','dirty'].includes(event.kind)
-        && event.provenance.approved_agent === true
-        && event.provenance.run_id === event.runId;
+      // Eligibility is derived from the authenticated device and the durable
+      // files-agent run record.  Client provenance flags are intentionally not
+      // consulted.
+      // The run identity is domain-separated by this authenticated project's
+      // root binding secret, so another root's file run cannot correlate here.
+      const executionId = event.provenance.execution_id;
+      const scopedRun = typeof executionId === 'string' && /^[a-f0-9]{32}$/.test(executionId)
+        && safeEqualHex(event.runId || '', crypto.createHmac('sha256', derived).update(`approved-execution:${executionId}`).digest('hex'));
+      const evidenceMatch = scopedRun && ['file_activity','non_git','dirty'].includes(event.kind)
+        ? await client.query(`select 1 from files_agent_events f
+            where f.device_id=$1 and f.payload->>'run_id'=$2 and f.payload->>'agent'=$3
+              and f.captured_at between ($4::timestamptz - interval '15 minutes') and ($4::timestamptz + interval '15 minutes')
+            limit 1`, [device.id, event.runId, event.agent, event.occurredAt])
+        : { rowCount: 0 } as { rowCount: number };
+      const evidenceEligible=(evidenceMatch.rowCount ?? 0) > 0;
       const result=await client.query(`insert into project_tracemini_events(project_id,device_id,root_id,event_key,kind,action,agent,run_id,repository_key,occurred_at,provenance,evidence_eligible,resume_epoch) select r.project_id,r.device_id,r.id,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,p.tracemini_resume_epoch from project_tracemini_roots r join projects p on p.id=r.project_id where r.id=$1 and r.device_id=$2 and r.status='approved' and p.tracemini_telemetry_paused=false on conflict(root_id,event_key) do nothing`,[binding.id,device.id,event.eventKey,event.kind,event.action,event.agent,event.runId,event.repositoryKey,event.occurredAt,JSON.stringify(event.provenance),evidenceEligible]);
       accepted+=result.rowCount||0;
     }
@@ -126,4 +158,4 @@ export async function bindEmbeddedRoot(credential:string,rawBody:Buffer,input:Re
 }
 
 export async function heartbeatEmbeddedBinding(credential:string,rawBody:Buffer,auth:{bindingId:string;signature:string;timestamp:string;nonce:string;path?:string}){
-  await ensureSchema(); const pool=getPool(); const client=await pool.connect(); try{await client.query('begin'); const row=(await client.query(`select r.id,r.project_id,r.device_id,r.binding_id from project_tracemini_roots r join files_agent_devices d on d.id=r.device_id where r.binding_id=$1 and d.credential_hash=$2 and d.revoked_at is null and r.status='approved' for update`,[auth.bindingId,hashFilesAgentSecret(credential)])).rows[0]; if(!row) throw new FilesAgentError('invalid binding',401); verifyEmbeddedBinding(rawBody,auth.signature,row.binding_id,String(row.device_id),String(row.project_id),auth); const replay=await client.query(`insert into tracemini_request_nonces(binding_id,nonce) values($1,$2) on conflict do nothing returning nonce`,[row.binding_id,auth.nonce]); if(!replay.rows[0]) throw new FilesAgentError('replayed binding proof',401); await client.query(`update project_tracemini_roots set last_heartbeat_at=now() where id=$1`,[row.id]); await client.query('commit'); return {ok:true};}catch(error){await client.query('rollback');throw error;}finally{client.release();}}
+  await ensureSchema(); const pool=getPool(); const client=await pool.connect(); try{await client.query('begin'); const row=(await client.query(`select r.id,r.project_id,r.device_id,r.binding_id from project_tracemini_roots r join files_agent_devices d on d.id=r.device_id where r.binding_id=$1 and d.credential_hash=$2 and d.revoked_at is null and r.status='approved' for update`,[auth.bindingId,hashFilesAgentSecret(credential)])).rows[0]; if(!row) throw new FilesAgentError('invalid binding',401); await requireCurrentBindingAccess(client,row.id); verifyEmbeddedBinding(rawBody,auth.signature,row.binding_id,String(row.device_id),String(row.project_id),auth); const replay=await client.query(`insert into tracemini_request_nonces(binding_id,nonce) values($1,$2) on conflict do nothing returning nonce`,[row.binding_id,auth.nonce]); if(!replay.rows[0]) throw new FilesAgentError('replayed binding proof',401); await client.query(`update project_tracemini_roots set last_heartbeat_at=now() where id=$1`,[row.id]); await client.query('commit'); return {ok:true};}catch(error){await client.query('rollback');throw error;}finally{client.release();}}

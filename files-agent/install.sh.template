@@ -1,6 +1,6 @@
 #!/bin/sh
 # Generated per-user installer template. Replace {{...}} server-side, then deliver
-# over an authenticated channel. No root privileges or system service required.
+# over an authenticated channel. Discovery roots are always explicitly approved.
 set -eu
 
 command -v python3 >/dev/null 2>&1 || { printf '%s\n' 'python3 is required' >&2; exit 1; }
@@ -18,6 +18,11 @@ printf '%s' '{{PAYLOAD_BASE64}}' | python3 -c 'import base64,sys; sys.stdout.buf
 chmod 700 "$LIB/files_agent.py"
 ln -sf "$LIB/files_agent.py" "$BIN/files-agent"
 
+# Preserve existing configuration and approved roots across reinstallations.
+if [ -f "$CONFIG_DIR/config.json" ]; then
+  cp "$CONFIG_DIR/config.json" "$CONFIG_DIR/config.json.previous"
+fi
+
 # JSON replacement values must be JSON-string escaped by the installer generator.
 cat > "$CONFIG_DIR/config.json" <<'CONFIG'
 {
@@ -27,6 +32,47 @@ cat > "$CONFIG_DIR/config.json" <<'CONFIG'
   "agents": {{APPROVED_AGENTS_JSON}}
 }
 CONFIG
+# Merge only durable local state from the prior install; enrollment credentials and
+# server settings above always come from this authenticated package.
+if [ -f "$CONFIG_DIR/config.json.previous" ]; then
+  python3 - "$CONFIG_DIR/config.json.previous" "$CONFIG_DIR/config.json" <<'PY'
+import json, os, sys
+old_path, new_path = sys.argv[1:]
+try:
+    old = json.load(open(old_path, encoding="utf-8"))
+    new = json.load(open(new_path, encoding="utf-8"))
+    for key in ("bindings", "discovery_roots", "clones"):
+        if key in old:
+            new[key] = old[key]
+    temporary = new_path + ".merge.tmp"
+    with open(temporary, "w", encoding="utf-8") as stream:
+        json.dump(new, stream, indent=2, sort_keys=True)
+        stream.write("\n")
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, new_path)
+except (OSError, ValueError, TypeError) as error:
+    print("files-agent: unable to preserve prior bindings/roots: %s" % error, file=sys.stderr)
+    raise SystemExit(1)
+PY
+fi
 chmod 600 "$CONFIG_DIR/config.json"
+SERVICE="$HOME/.config/systemd/user/files-agent.service"
+if command -v systemctl >/dev/null 2>&1; then
+  mkdir -p "$(dirname "$SERVICE")"
+  cat > "$SERVICE" <<'UNIT'
+[Unit]
+Description=Files Agent persistent TraceMini discovery service
+[Service]
+ExecStart=%h/.local/bin/files-agent service --interval 30
+Restart=on-failure
+[Install]
+WantedBy=default.target
+UNIT
+  systemctl --user daemon-reload >/dev/null 2>&1 || true
+  systemctl --user enable --now files-agent.service >/dev/null 2>&1 || true
+fi
 printf '%s\n' "Installed files-agent in $BIN. Add that directory to PATH if needed."
 printf '%s\n' "Usage: files-agent exec --agent NAME -- REALCMD..."
+printf '%s\n' "Discovery is opt-in. Approve each folder explicitly, for example:"
+printf '%s\n' "  files-agent approve-root /absolute/path/to/folder"
+printf '%s\n' "No home-directory-wide scan is performed."

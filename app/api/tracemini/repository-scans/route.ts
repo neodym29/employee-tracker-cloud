@@ -1,0 +1,3 @@
+import { NextRequest,NextResponse } from 'next/server'; import { apiErrorResponse,assertSameOrigin,jsonBody,requireApiSession } from '@/lib/api'; import { createRepositoryScan,listRepositoryCandidates } from '@/lib/tracemini-discovery';
+export async function GET(){try{return NextResponse.json({ok:true,candidates:await listRepositoryCandidates(await requireApiSession())},{headers:{'cache-control':'no-store, private'}})}catch(e){return apiErrorResponse(e)}}
+export async function POST(req:NextRequest){try{assertSameOrigin(req);const b=await jsonBody(req);return NextResponse.json({ok:true,scan:await createRepositoryScan(await requireApiSession(),b.device_id)},{status:201,headers:{'cache-control':'no-store, private'}})}catch(e){return apiErrorResponse(e)}}

@@ -1,0 +1,2 @@
+import { NextRequest,NextResponse } from 'next/server'; import { bearerSecret,filesAgentHttpError,FilesAgentError } from '@/lib/files-agent'; import { claimDeviceWork } from '@/lib/tracemini-discovery';
+export async function POST(req:NextRequest){try{const c=bearerSecret(req);if(!c)throw new FilesAgentError('Bearer device credential required',401);return NextResponse.json({ok:true,...await claimDeviceWork(c)},{headers:{'cache-control':'no-store'}})}catch(e){const x=filesAgentHttpError(e);return NextResponse.json({ok:false,error:x.message},{status:x.status})}}

@@ -1,0 +1,2 @@
+import { NextRequest,NextResponse } from 'next/server'; import { apiErrorResponse,assertSameOrigin,jsonBody,requireApiSession } from '@/lib/api'; import { selectRepositoryCandidate } from '@/lib/tracemini-discovery';
+export async function PUT(req:NextRequest,c:{params:Promise<{candidateId:string}>}){try{assertSameOrigin(req);const b=await jsonBody(req),p=await c.params;return NextResponse.json({ok:true,selection:await selectRepositoryCandidate(await requireApiSession(),p.candidateId,b.desired_tracking===true,b.revision)})}catch(e){return apiErrorResponse(e)}}

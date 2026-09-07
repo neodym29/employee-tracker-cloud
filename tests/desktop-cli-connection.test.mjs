@@ -9,8 +9,9 @@ test('projects onboarding visibly offers the installable desktop CLI', () => {
   const page = read('app/projects/page.tsx');
   const component = read('app/components/FilesAgentDownload.tsx');
 
-  assert.match(page, /import DesktopCliConnection/);
-  assert.match(page, /<DesktopCliConnection\s*\/>/);
+  assert.doesNotMatch(page, /<DesktopCliConnection/);
+  assert.match(read('app/projects/ProjectsClient.tsx'), /<TraceMiniProjectDiscovery/);
+  assert.match(read('app/components/TraceMiniProjectDiscovery.tsx'), /<DesktopCliConnection\s+projectId=\{projectId\}/);
   assert.match(component, /Connect the Trace desktop CLI/);
   assert.match(component, /files-agent\/install\.sh/);
   assert.match(component, /files-agent exec --agent codex -- codex/);

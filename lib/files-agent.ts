@@ -76,6 +76,17 @@ export function bearerSecret(request: Request): string {
   return match?.[1] || '';
 }
 
+export async function boundedAgentJson(request: Request): Promise<Record<string, unknown>> {
+  const declared = Number(request.headers.get('content-length') || 0);
+  if (declared > 128 * 1024) throw new FilesAgentError('request body too large', 413);
+  const raw = await request.text();
+  if (raw.length > 128 * 1024) throw new FilesAgentError('request body too large', 413);
+  let value: unknown;
+  try { value = JSON.parse(raw); } catch { throw new FilesAgentError('invalid JSON body', 400); }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new FilesAgentError('JSON object required', 400);
+  return value as Record<string, unknown>;
+}
+
 export function requireSecureFilesAgentOrigin(value: string): string {
   let url: URL;
   try {
