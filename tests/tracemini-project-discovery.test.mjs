@@ -21,7 +21,7 @@ test('browser Node discovery uses explicit scans, selection and safe candidate f
   const page = read('app/projects/page.tsx');
   const component = read('app/components/trace-node/RepositorySelection.tsx');
   assert.doesNotMatch(page, /<TraceMiniProjectDiscovery/);
-  assert.match(read('app/projects/ProjectsClient.tsx'), /<DesktopCliConnection/);
+  assert.match(read('app/trace-setup/page.tsx'), /<DesktopCliConnection/);
   assert.match(read('app/components/DesktopCliConnection.tsx'), /<Discovery\s*\/>/);
   assert.match(component, /Scan repositories on my devices/);
   assert.match(component, /role="switch"/);
@@ -52,7 +52,7 @@ test('installer and projects page advertise install-once discovery', () => {
   assert.match(installer, /no ZIP upload is needed/);
   assert.match(installer, /explicit repository selection and device confirmation/);
   assert.doesNotMatch(page, /<TraceMiniProjectDiscovery/);
-  assert.match(read('app/projects/ProjectsClient.tsx'), /<DesktopCliConnection/);
+  assert.match(read('app/trace-setup/page.tsx'), /<DesktopCliConnection/);
   assert.match(component, /Scan repositories on my devices/);
   const route = read('app/api/agents/discovery/route.ts');
   for (const marker of ['requireApiSession', 'assertSameOrigin', 'boundedAgentJson', 'nodeBrowserDiscovery', 'nodeBrowserMutation']) assert.ok(route.includes(marker), marker);

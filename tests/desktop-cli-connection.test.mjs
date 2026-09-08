@@ -10,7 +10,8 @@ test('projects onboarding visibly offers the installable desktop CLI', () => {
   const component = read('app/components/DesktopCliConnection.tsx');
 
   assert.doesNotMatch(page, /<DesktopCliConnection/);
-  assert.match(read('app/projects/ProjectsClient.tsx'), /<DesktopCliConnection\s+projectId=\{createdProjectId \|\| undefined\}/);
+  assert.match(read('app/projects/ProjectsClient.tsx'), /href="\/trace-setup"/);
+  assert.match(read('app/trace-setup/page.tsx'), /<DesktopCliConnection\s*\/>/);
   assert.match(component, /<TraceNodeInstall\s*\/>/);
   assert.match(component, /<Discovery\s*\/>/);
   assert.doesNotMatch(component, /FilesAgentDownload|TraceMiniProjectDiscovery/);

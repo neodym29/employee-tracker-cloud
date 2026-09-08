@@ -33,15 +33,13 @@ const agent = {id:1, user_id:5, status:'online'};
 const candidate = {id:7, agent_id:1, owner_user_id:5, name:'Widget', machine_name:'Laptop', normalized_remote:'github.com/acme/widget', project_id:'99', selectable:true, traced:false, desired_traced:false, revision:3};
 const props = (c = candidate, agents = [agent]) => ({workspaceId:0, userId:5, agents, candidates:[c], reload:async()=>{}});
 
-test('Trace setup belongs to both creation cards, never below ProjectsClient', () => {
+test('both creation cards link to dedicated Trace setup without inline onboarding', () => {
   assert.doesNotMatch(read('app/projects/page.tsx'), /<TraceMiniProjectDiscovery|<DesktopCliConnection/);
   const ui = read('app/projects/ProjectsClient.tsx');
-  assert.match(ui, /<DesktopCliConnection/);
-  assert.doesNotMatch(ui, /<TraceMiniProjectDiscovery/);
+  assert.doesNotMatch(ui, /<DesktopCliConnection|<TraceMiniProjectDiscovery|traceSetupOpen|setCreatedProjectId/);
   assert.match(read('app/components/DesktopCliConnection.tsx'), /<Discovery\s*\/>/);
   assert.equal((ui.match(/\{traceSetup\}/g) || []).length, 2);
-  assert.match(ui, /if \(traceSetupOpen\)/);
-  assert.match(ui, /setCreatedProjectId\(data.project.id\)/);
+  assert.match(ui, /href="\/trace-setup">Set up Trace CLI/);
 });
 
 test('discovered repositories remain unselected without an explicit switch action', () => {

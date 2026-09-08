@@ -343,9 +343,10 @@ button:disabled { cursor: not-allowed; opacity: .55; transform: none; box-shadow
   .dashboardGrid { grid-template-columns: 1fr; }
 }
 @media (max-width: 720px) {
-  .nav { width: min(100% - 28px, 1180px); height: 64px; }
+  .nav { width: min(100% - 28px, 1180px); height: auto; min-height: 64px; padding: 8px 0; }
+  .navActions { flex-wrap: wrap; justify-content: flex-end; }
   .navLink { display: none; }
-  .navLink.active, .authNavLink, .dashboardNavLink { display: inline-flex; padding: 7px 10px; }
+  .navLink.active, .authNavLink, .dashboardNavLink, .traceSetupNavLink { display: inline-flex; padding: 7px 10px; }
   .navActions .inlineForm:first-of-type { display: none; }
   .navButton { min-height: 36px; padding: 7px 11px; }
   main { width: min(100% - 28px, 1180px); padding: 28px 0 56px; }

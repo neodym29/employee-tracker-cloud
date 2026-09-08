@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import DesktopCliConnection from '@/app/components/DesktopCliConnection';
+
 
 
 type Project = { id: string; title: string; description: string; status: string; approval_status: 'pending' | 'approved' | 'rejected'; git_remote_url?: string | null; membership_id?: string | null; membership_type?: 'invitation' | 'request' | 'creator' | null; membership_status?: string | null };
@@ -38,9 +38,7 @@ export default function ProjectsClient({ accountType }: Props) {
   const createRequestKeyRef = useRef<string | null>(null);
   const createRequestFingerprintRef = useRef<string | null>(null);
   const [error, setError] = useState('');
-  const [traceSetupOpen, setTraceSetupOpen] = useState(false);
 
-  const [createdProjectId, setCreatedProjectId] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -94,11 +92,7 @@ export default function ProjectsClient({ accountType }: Props) {
         ? { clientId, title, description, gitRemote, requestKey }
         : { title, description, gitRemote, status, engineerIds: sortedEngineerIds, requestKey };
       const data = await request('/api/projects', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(details) });
-      if (traceSetupOpen) {
-        setCreatedProjectId(data.project.id);
-        await load();
-        return;
-      }
+
       router.push(`/projects/${data.project.id}`);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Project could not be created.');
@@ -144,23 +138,17 @@ export default function ProjectsClient({ accountType }: Props) {
   };
 
 
-  const traceSetup = <>
-    <details open={traceSetupOpen} onToggle={event => setTraceSetupOpen(event.currentTarget.open)}>
-      <summary>Set up Trace CLI &amp; choose a repository (optional)</summary>
-      {traceSetupOpen && <DesktopCliConnection projectId={createdProjectId || undefined} />}
-    </details>
-    {createdProjectId && <div role="status"><p>Project created. Finish repository tracking above, or continue without waiting.</p><a className="primaryButton" href={`/projects/${createdProjectId}`}>Open workspace</a></div>}
-  </>;
+  const traceSetup = <p><a className="secondaryButton" href="/trace-setup">Set up Trace CLI</a></p>;
 
   return <div className="dashboardShell">
     <div className="dashboardHeading"><div><span className="pill">{accountType} workspace</span><h1>Projects</h1><p>{accountType === 'client' ? 'Create a project and add approved engineers as project creators.' : 'Start a project for an approved client, find open work, and manage invitations.'}</p><p className="muted">Platform Admins approve accounts; project owners decide later collaboration requests.</p></div></div>
     {error && <p className="errorBanner" role="alert">{error}</p>}
     {accountType === 'client' ? <>
-      <div className="projectGrid projectTools"><section className="card"><h2>Create project</h2>{traceSetup}<form onSubmit={createProject} hidden={Boolean(createdProjectId)} style={{ display: createdProjectId ? 'none' : undefined }} aria-busy={createBusy && !createdProjectId}><fieldset disabled={createBusy} className="formLock"><label>Title<input value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} required /></label><label>Description<textarea value={description} maxLength={4000} rows={4} onChange={(e) => setDescription(e.target.value)} /></label><label>Git remote<input value={gitRemote} maxLength={2048} placeholder="https://github.com/owner/repository.git" onChange={(e) => setGitRemote(e.target.value)} required /></label><label>Starting status<select value={status} onChange={(e) => setStatus(e.target.value)}><option value="open">Open</option><option value="draft">Draft</option></select></label><fieldset className="checkboxGroup"><legend>Add engineers (optional)</legend><p className="muted">Selected approved engineers join immediately as project creators with workspace access.</p>{engineers.length ? engineers.map((engineer) => <label className="checkboxLabel" key={engineer.id}><input type="checkbox" checked={selectedEngineerIds.includes(engineer.id)} onChange={() => toggleCreationEngineer(engineer.id)} />{engineer.display_name}</label>) : <p className="emptyLine">No approved engineers are available.</p>}</fieldset><button disabled={createBusy}>{createBusy ? 'Creating...' : 'Create project'}</button></fieldset></form></section>
+      <div className="projectGrid projectTools"><section className="card"><h2>Create project</h2>{traceSetup}<form onSubmit={createProject} aria-busy={createBusy}><fieldset disabled={createBusy} className="formLock"><label>Title<input value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} required /></label><label>Description<textarea value={description} maxLength={4000} rows={4} onChange={(e) => setDescription(e.target.value)} /></label><label>Git remote<input value={gitRemote} maxLength={2048} placeholder="https://github.com/owner/repository.git" onChange={(e) => setGitRemote(e.target.value)} required /></label><label>Starting status<select value={status} onChange={(e) => setStatus(e.target.value)}><option value="open">Open</option><option value="draft">Draft</option></select></label><fieldset className="checkboxGroup"><legend>Add engineers (optional)</legend><p className="muted">Selected approved engineers join immediately as project creators with workspace access.</p>{engineers.length ? engineers.map((engineer) => <label className="checkboxLabel" key={engineer.id}><input type="checkbox" checked={selectedEngineerIds.includes(engineer.id)} onChange={() => toggleCreationEngineer(engineer.id)} />{engineer.display_name}</label>) : <p className="emptyLine">No approved engineers are available.</p>}</fieldset><button disabled={createBusy}>{createBusy ? 'Creating...' : 'Create project'}</button></fieldset></form></section>
       <section className="card"><h2>Available engineers · later invitations</h2><p className="muted">Separately invite an approved engineer to an approved project for their response.</p>{Boolean(projects.some((project) => project.approval_status === 'approved') && engineers.length) ? <form onSubmit={invite}><label>Project<select value={inviteProject} onChange={(e) => setInviteProject(e.target.value)}>{projects.filter((project) => project.approval_status === 'approved').map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select></label><label>Engineer<select value={engineerId} onChange={(e) => setEngineerId(e.target.value)}>{engineers.map((engineer) => <option key={engineer.id} value={engineer.id}>{engineer.display_name}</option>)}</select></label><button disabled={busy === 'invite'}>{busy === 'invite' ? 'Sending...' : 'Invite'}</button></form> : <p className="emptyLine">Create or approve a project and wait for approved engineers to become available.</p>}</section></div>
       <section><div className="sectionHeading"><h2>Your projects and join requests</h2></div><div className="projectGrid">{clientProjects.length ? clientProjects.map((project) => projectCard(project)) : <p className="muted">No projects yet.</p>}</div></section>
     </> : <>
-      <section className="card projectTools"><h2>Start project</h2><p className="muted">Select an approved client. The client owns the project and workspace access is immediate.</p>{traceSetup}{clients.length ? <form onSubmit={createProject} hidden={Boolean(createdProjectId)} style={{ display: createdProjectId ? 'none' : undefined }} aria-busy={createBusy && !createdProjectId}><fieldset disabled={createBusy} className="formLock"><label>Client<select value={clientId} onChange={(e) => setClientId(e.target.value)} required>{clients.map((client) => <option key={client.id} value={client.id}>{client.display_name}</option>)}</select></label><label>Title<input value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} required /></label><label>Description<textarea value={description} maxLength={4000} rows={4} onChange={(e) => setDescription(e.target.value)} /></label><label>Git remote<input value={gitRemote} maxLength={2048} placeholder="https://github.com/owner/repository.git" onChange={(e) => setGitRemote(e.target.value)} required /></label><button disabled={createBusy}>{createBusy ? 'Creating...' : 'Create project'}</button></fieldset></form> : <p className="emptyLine">No approved clients are available.</p>}</section>
+      <section className="card projectTools"><h2>Start project</h2><p className="muted">Select an approved client. The client owns the project and workspace access is immediate.</p>{traceSetup}{clients.length ? <form onSubmit={createProject} aria-busy={createBusy}><fieldset disabled={createBusy} className="formLock"><label>Client<select value={clientId} onChange={(e) => setClientId(e.target.value)} required>{clients.map((client) => <option key={client.id} value={client.id}>{client.display_name}</option>)}</select></label><label>Title<input value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} required /></label><label>Description<textarea value={description} maxLength={4000} rows={4} onChange={(e) => setDescription(e.target.value)} /></label><label>Git remote<input value={gitRemote} maxLength={2048} placeholder="https://github.com/owner/repository.git" onChange={(e) => setGitRemote(e.target.value)} required /></label><button disabled={createBusy}>{createBusy ? 'Creating...' : 'Create project'}</button></fieldset></form> : <p className="emptyLine">No approved clients are available.</p>}</section>
       <section><div className="sectionHeading"><h2>Invited and requested</h2></div><div className="projectGrid">{pending.length ? pending.map((project) => projectCard(project, project.membership_type === 'invitation' ? <><button disabled={busy === project.id} onClick={() => act(project, 'accept')}>Accept</button><button className="secondaryButton" disabled={busy === project.id} onClick={() => act(project, 'decline')}>Decline</button></> : <span className="muted">Join request sent</span>)) : <p className="muted">No pending invitations or requests.</p>}</div></section>
       <section><div className="sectionHeading"><h2>Active projects</h2></div><div className="projectGrid">{active.length ? active.map((project) => projectCard(project)) : <p className="muted">No active projects yet.</p>}</div></section>
       <section><div className="sectionHeading"><h2>Declined and rejected</h2></div><div className="projectGrid">{terminal.length ? terminal.map((project) => projectCard(project, <span className="muted">No workspace access</span>)) : <p className="muted">No declined or rejected outcomes.</p>}</div></section>
