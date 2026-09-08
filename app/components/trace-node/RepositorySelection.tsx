@@ -10,7 +10,7 @@ async function request(url:string,init:RequestInit={}){
  const candidateId=url.match(/repository-candidates\/(\d+)$/)?.[1];
  const payload=scanId?{action:'status',scanId}:candidateId?{action:'select',candidateId,...body}:{action:'scan',nodeId:body.agentId};
  const response=await fetch('/api/agents/discovery',{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
- if(!response.ok)throw new Error(response.status===409?'State changed or Node is offline. Refresh and retry.':'Discovery request failed. Check your login and retry.');
+ if(!response.ok){const failure=await response.json().catch(()=>({}));throw new Error(failure.code==='local_repository_requires_hosted_remote'?'This repository has no hosted remote. Add a hosted Git remote on your device and rescan before linking.':failure.code==='stop_acknowledgement_required'?'Stop tracing and wait for the device to acknowledge cleanup before changing its project.':response.status===409?'State changed or Node is offline. Refresh and retry.':'Discovery request failed. Check your project access and retry.');}
  return response.json();
 }
 function InfoTip({label, children}: {label: string; children: ReactNode}) {
@@ -37,9 +37,11 @@ function ProgressTrack({ label }: { label: string }) {
   );
 }
 
-export default function RepositorySelection({workspaceId, candidates, agents, userId, reload}: {workspaceId: number; candidates: RepositoryCandidate[]; agents: any[]; userId: number; reload: () => Promise<void>}) {
+export default function RepositorySelection({workspaceId, candidates, agents, userId, reload, projects=[]}: {workspaceId: number; candidates: RepositoryCandidate[]; agents: any[]; userId: number; reload: () => Promise<void>; projects?: {id:string;title:string;status:string}[]}) {
   type ScanRequest = {id: number; agent_id?: number; agentId?: number; status: "queued" | "running" | "completed" | "error"; repositories_found?: number | null; error?: string | null};
   const [changing, setChanging] = useState<number>();
+  const [linking,setLinking]=useState<number>();
+  const [projectId,setProjectId]=useState('');
   const [scanning, setScanning] = useState(false);
   const [scanRequests, setScanRequests] = useState<ScanRequest[]>([]);
   const [message, setMessage] = useState("");
@@ -107,9 +109,18 @@ export default function RepositorySelection({workspaceId, candidates, agents, us
     {candidates.length ? <div className="repository-choice-list" role="group" tabIndex={candidates.length >= 10 ? 0 : undefined} aria-label="Discovered workspace repositories">{candidates.map(candidate => {
       const state = repositorySelectionState(candidate);
       const canSelect = candidate.owner_user_id === userId && (candidate.selectable || candidate.desired_traced || candidate.traced);
-      return <label className="repository-choice" key={candidate.id}>
+      return <div className="repository-choice" key={candidate.id}>
         <span><strong>{candidate.name}</strong><small>{candidate.owner_name ? `${candidate.owner_name} · ` : ""}{candidate.machine_name} · {candidate.branch || "detached"}</small>{candidate.project_id && <a href={`/projects/${candidate.project_id}`}>Open existing project</a>}{!candidate.selectable && <small>No unique authorized project match</small>}{candidate.error && <small className="error-text">{candidate.error}</small>}</span>
         <span className={`selection-state ${state.tone}`}>
+          {!candidate.selectable && candidate.owner_user_id===userId && <>
+            <button type="button" disabled={state.pending||candidate.traced||candidate.desired_traced||changing===candidate.id} onClick={()=>{setLinking(candidate.id);setProjectId('');}}>Link to existing project</button>
+            {linking===candidate.id && <span>
+              <select aria-label={`Existing project for ${candidate.name}`} value={projectId} onChange={e=>setProjectId(e.target.value)}><option value="">Choose authorized project</option>{projects.map(p=><option key={p.id} value={p.id}>{p.title} ({p.status})</option>)}</select>
+              {!projects.length&&<small>No authorized projects. Ask the project owner for active membership.</small>}
+              <button type="button" disabled={!projectId||changing===candidate.id} onClick={async()=>{setChanging(candidate.id);setError('');try{await request(`/workspaces/${workspaceId}/repository-candidates/${candidate.id}`,{body:JSON.stringify({action:'link',projectId,revision:candidate.revision})});setLinking(undefined);await reload();}catch(e:any){setError(e.message);}finally{setChanging(undefined);}}}>Confirm link</button>
+              <button type="button" onClick={()=>setLinking(undefined)}>Cancel</button>
+            </span>}
+          </>}
           {changing === candidate.id
             ? <><BusyIndicator label="Saving selection…" /><ProgressTrack label={`Saving ${candidate.name} selection`} /></>
             : state.pending
@@ -122,7 +133,7 @@ export default function RepositorySelection({workspaceId, candidates, agents, us
           catch (caught: any) { if (active()) setError(caught.message); }
           finally { if (active()) setChanging(undefined); }
         }} />
-      </label>;
+      </div>;
     })}</div> : <p className="muted">No repositories found yet. Request a scan after configuring an approved folder on your device.</p>}
   </section>;
 }

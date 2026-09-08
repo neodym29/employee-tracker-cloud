@@ -6,6 +6,8 @@ import crypto from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {build} from 'esbuild';
+import {AsyncLocalStorage} from 'node:async_hooks';
+globalThis.AsyncLocalStorage=AsyncLocalStorage;
 const require=createRequire(import.meta.url);
 
 test('full production bootstrap: Git route, browser discovery, owner/member isolation and telemetry', async t=>{
@@ -17,7 +19,7 @@ test('full production bootstrap: Git route, browser discovery, owner/member isol
  process.env.DATABASE_URL=`postgres://postgres:test@localhost:${port}/test`;
  process.env.FILES_AGENT_BINDING_KEY='test-only-binding-key'.repeat(3);
  const outfile=path.join(tmp,'cloud.cjs');
- await build({stdin:{contents:"export * from './lib/db';export * from './lib/tracemini-node-git';export * from './lib/tracemini-discovery';export {POST} from './app/api/agents/git/[operation]/route';",resolveDir:root},bundle:true,platform:'node',format:'cjs',packages:'external',outfile,plugins:[{name:'server-marker-only',setup(b){b.onResolve({filter:/^server-only$/},()=>({path:'empty',namespace:'marker'}));b.onLoad({filter:/.*/,namespace:'marker'},()=>({contents:''}));}}]});
+ await build({stdin:{contents:"export * from './lib/db';export * from './lib/tracemini-node-git';export * from './lib/tracemini-discovery';export {POST} from './app/api/agents/git/[operation]/route';export {POST as discoveryPOST} from './app/api/agents/discovery/route';export {createSessionToken} from './lib/auth';",resolveDir:root},bundle:true,platform:'node',format:'cjs',packages:'external',outfile,plugins:[{name:'server-marker-only',setup(b){b.onResolve({filter:/^server-only$/},()=>({path:'empty',namespace:'marker'}));b.onLoad({filter:/.*/,namespace:'marker'},()=>({contents:''}));}}]});
  const cloud=require(outfile);pool=cloud.getPool();
  for(let n=0;;n++){try{await pool.query('select 1');break;}catch(e){if(n>80)throw e;await new Promise(r=>setTimeout(r,100));}}
  await cloud.ensureSchema();
@@ -30,6 +32,15 @@ test('full production bootstrap: Git route, browser discovery, owner/member isol
  const token='etn_'+crypto.randomBytes(32).toString('base64url');
  await pool.query(`insert into tracemini_node_devices(id,context_id,company_id,user_id,installation_hash,credential_hash,machine_name) values(5,50,1,11,$1,$2,'test')`,['a'.repeat(64),crypto.createHash('sha256').update(token).digest('hex')]);
  const session={id:'11',company_id:'1'};
+ process.env.AUTH_SECRET='full-schema-test-secret';
+ const {NextRequest}=require('next/server');
+ const {workUnitAsyncStorage}=require('next/dist/server/app-render/work-unit-async-storage.external');
+ const {createRequestStoreForAPI}=require('next/dist/server/async-storage/request-store');
+ const browserPost=async(body,origin='http://localhost',authenticated=true)=>{
+  const cookie=cloud.createSessionToken({...session,email:'owner@one.test',role:'employee',account_type:'client',company_domain:'one.test'});
+  const req=new NextRequest('http://localhost/api/agents/discovery',{method:'POST',headers:{'content-type':'application/json',...(origin?{origin}:{}),...(authenticated?{cookie:'trace_session_v2='+cookie}:{})},body:JSON.stringify(body)});
+  return require('next/dist/server/app-render/work-async-storage.external').workAsyncStorage.run({route:'/api/agents/discovery'},()=>workUnitAsyncStorage.run(createRequestStoreForAPI(req,req.nextUrl,[],undefined,{}),()=>cloud.discoveryPOST(req)));
+ };
  await t.test('sync route works without synthetic project company',async()=>{
   const response=await cloud.POST(new Request('http://localhost/api/agents/git/sync',{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:'{}'}),{params:Promise.resolve({operation:'sync'})});
   assert.equal(response.status,200);assert.deepEqual((await response.json()).workspaceIds,[]);
@@ -40,11 +51,28 @@ test('full production bootstrap: Git route, browser discovery, owner/member isol
  await cloud.nodeGitRequest(token,'candidates',{scan_id:scan.requestId,claim_token:work.claim_token,repositories:[{repository_key:'github.com/acme/widget',display_name:'Widget',fingerprint:{digest:'b'.repeat(64)}}]});
  let candidate=(await cloud.listRepositoryCandidates(session))[0];assert.equal(candidate.matched_project_id,'700');
  assert.deepEqual(await cloud.listRepositoryCandidates({id:'13',company_id:'1'}),[]);
+ await t.test('explicit choice denies own candidate to foreign or cross-user project; CAS and ambiguity',async()=>{
+  await pool.query(`insert into projects(id,client_id,title,approval_status,git_repository_key,git_remote_url,status) values(702,12,'Private','approved','github.com/acme/widget','https://github.com/acme/widget.git','completed'),(703,11,'Alternative','approved','github.com/acme/widget','https://github.com/acme/widget.git','completed')`);
+  const state=await cloud.nodeBrowserDiscovery(session);
+  assert.ok(state.projects.some(p=>String(p.id)==='703'&&p.status==='completed'));
+  assert.ok(!state.projects.some(p=>['701','702'].includes(String(p.id))));
+  const link={action:'link',candidateId:candidate.id,projectId:700,revision:candidate.revision};
+  for(const origin of ['', 'https://evil.test'])assert.equal((await browserPost(link,origin)).status,403);
+  assert.equal((await browserPost(link,'http://localhost',false)).status,401);
+  assert.equal((await browserPost({...link,projectId:702})).status,403);
+  for(const projectId of [701,702]) await assert.rejects(cloud.nodeBrowserMutation(session,{action:'link',candidateId:candidate.id,projectId,revision:candidate.revision}),e=>e.status===403);
+  assert.equal((await cloud.nodeBrowserDiscovery(session)).candidates[0].selectable,false);
+  assert.equal((await browserPost(link)).status,200);
+  await assert.rejects(cloud.nodeBrowserMutation(session,{action:'link',candidateId:candidate.id,projectId:703,revision:candidate.revision}),e=>e.status===409);
+  candidate=(await cloud.listRepositoryCandidates(session))[0];
+  assert.equal(candidate.matched_project_id,'700');
+ });
  await cloud.selectRepositoryCandidate(session,candidate.id,true,candidate.revision);
  const selection=(await cloud.nodeGitRequest(token,'sync')).work.find(w=>w.kind==='selection');
  const identity={candidate_id:candidate.id,digest:'b'.repeat(64),repository_key:candidate.repository_key,claim_token:selection.claim_token};
  await cloud.nodeGitRequest(token,'register',{...identity,revision:selection.revision,project_id:700});
  await cloud.nodeGitRequest(token,'complete',{kind:'selection',work_id:candidate.id,claim_token:selection.claim_token,revision:selection.revision,tracked:true});
+ await assert.rejects(cloud.nodeBrowserMutation(session,{action:'link',candidateId:candidate.id,projectId:703,revision:selection.revision}),e=>e.code==='stop_acknowledgement_required');
  await pool.query('update projects set tracemini_telemetry_paused=false where id=700');
  await cloud.nodeGitRequest(token,'activity',{...identity,event_key:'c'.repeat(64),kind:'commit',occurred_at:new Date().toISOString(),provenance:{head_sha:'d'.repeat(40)}});
  assert.equal((await cloud.nodeBrowserDiscovery(session)).candidates[0].traced,true);
@@ -55,4 +83,12 @@ test('full production bootstrap: Git route, browser discovery, owner/member isol
  assert.equal((await cloud.nodeGitRequest(token,'workspace',{workspaceId:700})).workspaceId,700);
  await pool.query("update project_memberships set membership_status='rejected' where project_id=700 and user_id=11");
  await assert.rejects(cloud.nodeGitRequest(token,'workspace',{workspaceId:700}));
+ const stopped=await cloud.nodeBrowserMutation(session,{action:'select',candidateId:candidate.id,traced:false,revision:selection.revision});
+ const stopWork=(await cloud.nodeGitRequest(token,'sync')).work.find(w=>w.kind==='selection');
+ await assert.rejects(cloud.nodeBrowserMutation(session,{action:'link',candidateId:candidate.id,projectId:703,revision:stopped.revision}),e=>e.code==='stop_acknowledgement_required');
+ await assert.rejects(cloud.nodeGitRequest(token,'complete',{kind:'selection',work_id:candidate.id,claim_token:stopWork.claim_token,revision:stopWork.revision,tracked:false,error:'cleanup failed'}),e=>e.code==='stop_acknowledgement_required');
+ await cloud.nodeGitRequest(token,'complete',{kind:'selection',work_id:candidate.id,claim_token:stopWork.claim_token,revision:stopWork.revision,tracked:false});
+ await cloud.nodeBrowserMutation(session,{action:'link',candidateId:candidate.id,projectId:703,revision:stopped.revision});
+ assert.equal((await cloud.nodeBrowserDiscovery(session)).candidates[0].project_id,'703');
+ assert.equal((await pool.query('select git_repository_key from projects where id=703')).rows[0].git_repository_key,'github.com/acme/widget');
 });

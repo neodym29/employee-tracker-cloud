@@ -1,5 +1,7 @@
 import 'server-only';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { PoolClient } from 'pg';
 import { ensureSchema, getPool } from './db';
 import { type SessionUser } from './auth';
@@ -60,7 +62,8 @@ function fingerprint(value: unknown): Record<string, string | number> {
   return result;
 }
 function credentialHash(credential: string): string { return crypto.createHash('sha256').update(credential, 'utf8').digest('hex'); }
-async function db(): Promise<ReturnType<typeof getPool>> { await ensureSchema(); return getPool(); }
+let bindingSchema: Promise<unknown> | undefined;
+async function db(): Promise<ReturnType<typeof getPool>> { await ensureSchema(); await (bindingSchema ??= getPool().query(fs.readFileSync(path.join(process.cwd(),'migrations/023_tracemini_candidate_project_binding.sql'),'utf8')).catch(e=>{bindingSchema=undefined;throw e;})); return getPool(); }
 async function transaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await (await db()).connect();
   try { await client.query('begin'); const result = await fn(client); await client.query('commit'); return result; }
@@ -94,11 +97,11 @@ function iso(value: unknown): string | null { return value ? new Date(value as s
 
 // Projects have no company_id: tenant scope derives from the project owner.
 // Retain owner-or-active-member authority, never a cached match.
-async function authorizedMatch(client: PoolClient, company: string, user: string, key: string): Promise<string | null> {
+async function authorizedMatch(client: PoolClient, company: string, user: string, key: string, candidate?: string): Promise<string | null> {
   const result = await client.query(`select p.id from projects p join app_users owner on owner.id=p.client_id
-    where owner.company_id=$1 and p.approval_status='approved' and p.git_repository_key=$3
+    where owner.company_id=$1 and p.approval_status='approved' and (case when (select explicit_project_id from tracemini_repository_candidates where id=$4) is not null then p.id=(select explicit_project_id from tracemini_repository_candidates where id=$4) else p.git_repository_key=$3 end)
     and exists(select 1 from app_users u where u.id=$2 and u.company_id=$1 and u.approval_status='approved')
-    and (p.client_id=$2 or exists(select 1 from project_memberships m where m.project_id=p.id and m.user_id=$2 and m.membership_status='active'))`, [company,user,key]);
+    and (p.client_id=$2 or exists(select 1 from project_memberships m where m.project_id=p.id and m.user_id=$2 and m.membership_status='active'))`, [company,user,key,candidate??null]);
   return result.rows.length === 1 ? String(result.rows[0].id) : null;
 }
 
@@ -161,7 +164,7 @@ export async function listRepositoryCandidates(session: SessionUser) {
       join app_users u on u.id=d.user_id and u.company_id=d.company_id and u.approval_status='approved'
       cross join lateral (select count(*) as n,min(p.id) as project_id from projects p
         join app_users owner on owner.id=p.client_id and owner.company_id=$1
-        where p.approval_status='approved' and p.git_repository_key=c.repository_key
+        where p.approval_status='approved' and (case when c.explicit_project_id is not null then p.id=c.explicit_project_id else p.git_repository_key=c.repository_key end)
         and (p.client_id=$2 or exists(select 1 from project_memberships m
           where m.project_id=p.id and m.user_id=$2 and m.membership_status='active'))) access
       where c.company_id=$1 order by c.created_at desc limit 500`, [session.company_id, session.id]);
@@ -169,14 +172,18 @@ export async function listRepositoryCandidates(session: SessionUser) {
     revision: Number(row.revision), created_at: new Date(row.created_at).toISOString() }));
 }
 
-export async function selectRepositoryCandidate(session: SessionUser, candidateValue: unknown, desired: boolean, revisionValue: unknown) {
+export async function selectRepositoryCandidate(session: SessionUser, candidateValue: unknown, desired: boolean, revisionValue: unknown, requireNode = false) {
   const candidateId = numericId(candidateValue, 'candidateId');
   const revision = Number(revisionValue);
   if (!Number.isSafeInteger(revision) || revision < 1) invalid('revision is invalid');
   return transaction(async (client) => {
+    if(requireNode){
+      const live=await client.query(`select n.id from tracemini_node_devices n join files_agent_devices d on d.node_device_id=n.id and d.user_id=n.user_id and d.company_id=n.company_id join tracemini_repository_candidates c on c.device_id=d.id and c.company_id=d.company_id join app_users u on u.id=d.user_id and u.company_id=d.company_id and u.approval_status='approved' where c.id=$1 and n.user_id=$2 and n.company_id=$3 and n.capability='node-git-v1' and n.revoked_at is null and n.expires_at>now() and d.revoked_at is null for update of n,d,c`,[candidateId,session.id,session.company_id]);
+      if(!live.rowCount)throw new ProjectServiceError('Active Node candidate unavailable',404,'not_found');
+    }
     const candidate = await client.query(`select c.repository_key from tracemini_repository_candidates c join files_agent_devices d on d.id=c.device_id
       where c.id=$1 and c.company_id=$2 and d.company_id=$2 and d.user_id=$3 and d.revoked_at is null for update of c,d`, [candidateId,session.company_id,session.id]);
-    if (!candidate.rows[0] || (desired && !await authorizedMatch(client,session.company_id,session.id,candidate.rows[0].repository_key)))
+    if (!candidate.rows[0] || (desired && !await authorizedMatch(client,session.company_id,session.id,candidate.rows[0].repository_key,candidateId)))
       throw new ProjectServiceError('Candidate is not an authorized unique project match',409,'selection_unavailable');
     const result = await client.query(`update tracemini_repository_candidates c set tracking_state='pending',revision=c.revision+1,updated_at=now()
       from files_agent_devices d where c.id=$1 and c.device_id=d.id and c.company_id=$2 and d.user_id=$3 and d.revoked_at is null and c.revision=$4
@@ -207,7 +214,7 @@ export async function claimDeviceWork(credential: DiscoveryCredential) {
       from tracemini_repository_candidates c where s.candidate_id=c.id and c.device_id=$1 and s.owner_user_id=$2 and s.revision=c.revision and s.completed_at is null
       and (s.claimed_at is null or s.claimed_at<now()-interval '10 minutes') returning s.candidate_id,s.revision,s.desired_tracking,s.claim_token,c.repository_key,c.fingerprint`, [device.id, device.user_id]);
     for (const row of selections.rows) {
-      const project = await authorizedMatch(client,device.company_id,device.user_id,row.repository_key);
+      const project = await authorizedMatch(client,device.company_id,device.user_id,row.repository_key,String(row.candidate_id));
       if (row.desired_tracking && !project) {
         await client.query(`update tracemini_repository_candidates set tracking_state='stopped',matched_project_id=null,match_status='unmatched',revision=revision+1 where id=$1`, [row.candidate_id]);
         await client.query(`update project_tracemini_roots set status='revoked',revoked_at=now() where device_id=$1 and root_hash=$2`, [device.id,discoveryRootHash(String(row.candidate_id))]);
@@ -253,7 +260,7 @@ export async function publishRepositoryCandidates(credential: DiscoveryCredentia
       await client.query(`update tracemini_repository_candidates set matched_project_id=null,match_status='unmatched' where id=$1`, [candidateId]);
       await client.query(`with matches as (select p.id,count(*) over() as n from projects p join app_users owner on owner.id=p.client_id and owner.company_id=$3
         left join project_memberships m on m.project_id=p.id and m.user_id=$2 and m.membership_status='active'
-        where p.approval_status='approved' and p.git_repository_key=$4 and (p.client_id=$2 or m.user_id=$2))
+        where p.approval_status='approved' and (case when (select explicit_project_id from tracemini_repository_candidates where id=$1) is not null then p.id=(select explicit_project_id from tracemini_repository_candidates where id=$1) else p.git_repository_key=$4 end) and (p.client_id=$2 or m.user_id=$2))
         update tracemini_repository_candidates c set match_status=case when matches.n=1 then 'matched' when matches.n>1 then 'ambiguous' else 'unmatched' end,
         matched_project_id=case when matches.n=1 then matches.id else null end,updated_at=now() from matches where c.id=$1`, [candidateId, device.user_id, device.company_id, key]);
       const changed = await client.query(`update tracemini_repository_candidates set revision=revision+1,tracking_state='unselected'
@@ -292,7 +299,8 @@ export async function completeDeviceWork(credential: DiscoveryCredential, body: 
       const row = result.rows[0];
       if (!row || (!body.error && row.desired_tracking !== body.tracked)) throw new ProjectServiceError('Selection unavailable or stale', 409, 'selection_unavailable');
       if (body.error && body.tracked) invalid('failed activation cannot be tracked');
-      if (body.tracked && (!row.matched_project_id || await authorizedMatch(client,device.company_id,device.user_id,row.repository_key) !== String(row.matched_project_id))) throw new ProjectServiceError('Candidate is not an authorized project match', 409, 'selection_unavailable');
+      if (body.error && !row.desired_tracking) throw new ProjectServiceError('Device has not acknowledged successful stop cleanup',409,'stop_acknowledgement_required');
+      if (body.tracked && (!row.matched_project_id || await authorizedMatch(client,device.company_id,device.user_id,row.repository_key,workId) !== String(row.matched_project_id))) throw new ProjectServiceError('Candidate is not an authorized project match', 409, 'selection_unavailable');
       if (!body.tracked) await client.query(`update project_tracemini_roots set status='revoked',revoked_at=now() where device_id=$1 and root_hash=$2`, [device.id,discoveryRootHash(workId)]);
       await client.query(`update tracemini_repository_candidates set tracking_state=$2,updated_at=now() where id=$1`, [workId, body.tracked ? 'tracking' : 'stopped']);
       if (body.tracked) await client.query(`insert into tracemini_tracked_repositories(candidate_id,project_id,device_id,repository_key,fingerprint) values($1,$2,$3,$4,$5::jsonb)

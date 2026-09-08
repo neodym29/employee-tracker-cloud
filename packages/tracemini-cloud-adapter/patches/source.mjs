@@ -15,6 +15,16 @@ export function patchSource(name, original) {
   source = source.replace('  const documentServer = once ? undefined : startDocumentLoopbackServer(config);','').replace('} finally { documentServer?.close(); }','} finally { /* Git-only runtime: no document listener. */ }');
  }
  if (name === 'index.ts') {
+  source = source.replace('helpText, promptForWatchPaths', 'helpText, normalizeWatchPath, promptForWatchPaths');
+  source = source.replace('      const roots = await promptForWatchPaths();', `      const explicitRoots: string[] = [];
+      for (let i = 0; i < args.length; i++) {
+        if (args[i] !== '--watched-dir') continue;
+        const value = args[++i];
+        if (!value || value.startsWith('--')) throw new Error('--watched-dir requires an absolute repository path');
+        explicitRoots.push(normalizeWatchPath(value));
+      }
+      if (args.includes('--no-watched-dirs') && explicitRoots.length) throw new Error('Conflicting watched directory options');
+      const roots = explicitRoots.length ? [...new Set(explicitRoots)] : args.includes('--no-watched-dirs') ? [] : await promptForWatchPaths();`);
   // Consume the private descriptor before guided stdin or any subprocess runs.
   source = source.replace('const config = loadConfig();', `let descriptorInstallToken: string | undefined;
 function readInstallTokenDescriptor() {
@@ -57,7 +67,7 @@ const config = loadConfig();`);
   source = source.slice(0, start) + `export function linuxInstallCommand(origin: string, installToken: string) {
   const url = origin.replace(/\\/$/, '') + '/api/installers/linux';
   const body = JSON.stringify({installToken});
-  return '(umask 077; set -eu; cache=$(mktemp -d "$HOME/.employee-trace-install.XXXXXX"); cleanup() { status=$?; trap - EXIT HUP INT TERM; rm -rf -- "$cache" || true; exit "$status"; }; trap cleanup EXIT; trap "exit 129" HUP; trap "exit 130" INT; trap "exit 143" TERM; printf %s ' + shellQuote(body) + ' | curl --disable --fail --show-error --silent --request POST --header "Content-Type: application/json" --data-binary @- ' + shellQuote(url) + ' --output "$cache/install.sh"; sh "$cache/install.sh")';
+  return '(umask 077; set -eu; cache=$(mktemp -d "$HOME/.employee-trace-install.XXXXXX"); cleanup() { status=$?; trap - EXIT HUP INT TERM; rm -rf -- "$cache" || true; exit "$status"; }; trap cleanup EXIT; trap "exit 129" HUP; trap "exit 130" INT; trap "exit 143" TERM; printf %s ' + shellQuote(body) + ' | curl --disable --fail --show-error --silent --request POST --header "Content-Type: application/json" --data-binary @- ' + shellQuote(url) + ' --output "$cache/install.sh"; sh "$cache/install.sh" "$@")';
 }
 
 ` + source.slice(end);
@@ -68,7 +78,7 @@ const config = loadConfig();`);
 (
   exec 3< "$STAGE_DIR/install-credential"
   rm -- "$STAGE_DIR/install-credential"
-  exec "$BIN_DIR/employee-trace" setup --server \${shellQuote(serverUrl)} --install-token-fd 3 --transaction-dir "$STAGE_DIR"
+  exec "$BIN_DIR/employee-trace" setup --server \${shellQuote(serverUrl)} --install-token-fd 3 --transaction-dir "$STAGE_DIR" "$@"
 )`);
   source = source.replace('set -eu\n', 'set -eu\numask 077\n');
  }

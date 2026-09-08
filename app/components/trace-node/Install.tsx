@@ -123,7 +123,7 @@ export default function Install() {
           }
         }}
       >
-        {copyPending === label ? <BusyIndicator label="Copying…" /> : copied === label ? "Copied" : "Copy"}
+        {copyPending === label ? <BusyIndicator label="Copying…" /> : copied === label ? "Copied" : "COPY AGENT SETUP PROMPT"}
       </button>
     </div>
   );
@@ -132,7 +132,7 @@ export default function Install() {
       <PageHeading
         eyebrow="Local device"
         title="Install Trace CLI"
-        description="Connect this Linux Node CLI to your account, approve discovery folders in the terminal, then select repositories in this GUI. Source code stays local; existing approved AI tracking is unchanged."
+        description="Connect this Linux Node CLI to your account, let your local agent discover existing Git projects, then select repositories in this GUI. Source code stays local; existing approved AI tracking is unchanged."
       />
       <section className="card device-detection" aria-live="polite">
         <span>CLI connection</span>
@@ -165,15 +165,15 @@ export default function Install() {
                 ? <BusyIndicator label="Preparing connection…" />
                 : personalDevices.length
                   ? "Connect another device"
-                  : "Prepare install command"}
+                  : "Prepare agent setup prompt"}
             </button>
           ) : (
             <>
               <div className="alert progress" role="status">
-                Run this command once. It stages and verifies the original Node CLI, asks you to approve watched folders, enrolls the device, discovers repositories and starts the background agent. Folder approval permits discovery, not automatic repository tracking. Failed setup rolls back local installation changes.
+                Copy this single prompt into your trusted local coding agent. It discovers existing Git projects within bounded user-owned locations and supplies each repository path to setup automatically—no folder guessing. Running the prompt authorizes discovery and watch-list additions, not project tracking or upload. Failed setup rolls back local installation changes.
               </div>
-              <Copy label="Private install command" command={installation.installCommand} />
-              <button className="button secondary" onClick={mint} disabled={pending}>Generate a new command</button>
+              <Copy label="Copy agent setup prompt" command={installation.setupPrompt} />
+              <button className="button secondary" onClick={mint} disabled={pending}>Generate a new prompt</button>
             </>
           )}
         </div>
@@ -184,7 +184,7 @@ export default function Install() {
           <div>
             <h2>Complete setup in the terminal</h2>
             <p>
-              Copy a folder location from your file manager address bar and paste the full absolute path into the guided terminal prompt—for example, <code>/home/you/projects</code>. Approve only folders you want scanned, then choose whether to add another folder or proceed. Return here to check live Node polling, scan approved folders and select repositories in this GUI. Open an existing matched project rather than creating a duplicate; no ZIP upload is needed.
+              The agent reports skipped folders, worktree restrictions and scan limits rather than claiming every project on the computer was found. Existing installation and watch entries are preserved. Return here for explicit project association and tracking approval; no ZIP upload is needed.
             </p>
             <p className="muted">
               Add approved folders later with <code>employee-trace watch "$HOME/path"</code>, check device and service status with <code>employee-trace status</code>, or see commands with <code>employee-trace --help</code>. This install command expires at {new Date(installation.expiresAt).toLocaleTimeString()}.

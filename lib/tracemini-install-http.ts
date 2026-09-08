@@ -4,6 +4,7 @@ import { bearerSecret, boundedAgentJson, FilesAgentError } from './files-agent';
 import { NodeInstallError, exactBody, trustedNodeOrigin, mintNodeInstallation, listNodeInstallations, exchangeNodeInstallation, nodeDeviceStatus, validateNodeInstallation } from './tracemini-install';
 import { linuxInstallCommand, linuxInstaller } from '../build/tracemini/installer.mjs';
 import path from 'node:path';
+import { agentSetupPrompt } from './tracemini-setup-prompt';
 const headers={'cache-control':'no-store, private','referrer-policy':'no-referrer','x-content-type-options':'nosniff'};
 // Do not call generic apiErrorResponse: its catch-all logs error objects/SQL parameters.
 export function nodeInstallError(error:unknown){
@@ -16,7 +17,8 @@ export async function installationsGet(){try{return NextResponse.json(await list
 export async function installationsPost(req:NextRequest){try{
   const user=await requireApiSession();assertSameOrigin(req);exactBody(await boundedAgentJson(req),[]);
   const origin=trustedNodeOrigin();const minted=await mintNodeInstallation(user);
-  return NextResponse.json({installCommand:linuxInstallCommand(origin,minted.token),expiresAt:minted.expiresAt,state:'pending_sync',syncEnabled:false},{headers});
+  const installCommand=linuxInstallCommand(origin,minted.token);
+  return NextResponse.json({installCommand,setupPrompt:agentSetupPrompt(installCommand),expiresAt:minted.expiresAt,state:'pending_sync',syncEnabled:false},{headers});
 }catch(e){return nodeInstallError(e);}}
 // Legacy URL credentials are deliberately never accepted, even when valid.
 export async function installerGet(){return NextResponse.json({ok:false,code:'installer_url_disabled'},{status:410,headers});}

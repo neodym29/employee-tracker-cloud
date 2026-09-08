@@ -57,7 +57,7 @@ test('real PostgreSQL Node enrollment routes, upstream transport, archive and re
   assert.equal((await call('/api/agents/installations',{}, {origin:'https://evil.test'})).status,403);
   assert.equal((await call('/api/agents/installations',{workspaceId:1})).status,400);
   const mint=await call('/api/agents/installations',{});assert.equal(mint.status,200);assert.match(mint.headers.get('cache-control'),/no-store/);
-  const installation=await mint.json();assert.equal(installation.state,'pending_sync');assert.match(installation.installCommand,/curl/);assert.doesNotMatch(installation.installCommand,/zip|files-agent\/package/);
+  const installation=await mint.json();assert.ok(installation.setupPrompt.includes(installation.installCommand));assert.equal(installation.state,'pending_sync');assert.match(installation.installCommand,/curl/);assert.doesNotMatch(installation.installCommand,/zip|files-agent\/package/);
   const token=commandToken(installation.installCommand);
   const stored=(await pool.query('select * from tracemini_node_installations')).rows[0];assert.notEqual(stored.token_hash,token);assert.equal(stored.token_hash.length,64);
   assert.equal((await fetch(origin+'/api/installers/linux/'+token)).status,410);
@@ -92,6 +92,8 @@ test('real PostgreSQL Node enrollment routes, upstream transport, archive and re
   assert.equal(fs.readFileSync(configPath,'utf8'),saved,'missing Git API must not replace the current binding');
   const list=await (await fetch(origin+'/api/agents/installations')).json();assert.equal(list.agents.length,1);assert.equal(list.agents[0].status,'pending_sync');assert.ok(!JSON.stringify(list).includes(device.agentToken));assert.ok(!JSON.stringify(list).includes('installationId'));
   globalThis.__traceSession={id:'2',company_id:'2',email:'two@example.test'};assert.equal((await (await fetch(origin+'/api/agents/installations')).json()).agents.length,0);
+  const other=await (await call('/api/agents/installations',{})).json();assert.ok(other.setupPrompt.includes(other.installCommand));assert.ok(!other.setupPrompt.includes(token));assert.ok(!installation.setupPrompt.includes(commandToken(other.installCommand)));
+  assert.equal((await call('/api/agents/installations',{userId:'1'})).status,400);
   globalThis.__traceSession={id:'1',company_id:'1',email:'one@example.test'};
   await pool.query("update app_users set approval_status='pending' where id=1");await assert.rejects(api({...config,agentToken:device.agentToken},'/api/agents/status'));await pool.query("update app_users set approval_status='approved' where id=1");
   await api({...config,agentToken:device.agentToken},'/api/agents/install/abort',{method:'POST'});await assert.rejects(api({...config,agentToken:device.agentToken},'/api/agents/status'));

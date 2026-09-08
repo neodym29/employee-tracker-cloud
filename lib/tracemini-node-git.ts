@@ -10,7 +10,7 @@ import {claimDeviceWork, publishRepositoryCandidates, completeDeviceWork, create
 
 let schema:Promise<void>|undefined;
 async function ensure(){
-  if(!schema) schema=(async()=>{await ensureNodeInstallSchema();await getPool().query(fs.readFileSync(path.join(process.cwd(),'migrations/022_tracemini_node_git.sql'),'utf8'));})().catch(e=>{schema=undefined;throw e;});
+  if(!schema) schema=(async()=>{await ensureNodeInstallSchema();for(const migration of ['022_tracemini_node_git.sql','023_tracemini_candidate_project_binding.sql'])await getPool().query(fs.readFileSync(path.join(process.cwd(),'migrations',migration),'utf8'));})().catch(e=>{schema=undefined;throw e;});
   await schema;
 }
 const fail=(status=409,code='node_git_identity_or_lease_unavailable'):never=>{throw new NodeInstallError(status,code);};
@@ -40,11 +40,11 @@ export async function nodeBrowserDiscovery(session:SessionUser){
   const agents=(await getPool().query(`select n.id,n.user_id,d.id as device_id,d.last_seen_at,
     (d.last_seen_at>now()-interval '2 minutes') as online
     from tracemini_node_devices n join app_users u on u.id=n.user_id and u.company_id=n.company_id and u.approval_status='approved'
-    left join files_agent_devices d on d.node_device_id=n.id and d.revoked_at is null
+    left join files_agent_devices d on d.node_device_id=n.id and d.user_id=n.user_id and d.company_id=n.company_id and d.revoked_at is null
     where n.company_id=$1 and n.user_id=$2 and n.capability='node-git-v1' and n.revoked_at is null and n.expires_at>now()`,[session.company_id,session.id])).rows;
   const selections=(await getPool().query(`select c.id,c.device_id,s.desired_tracking,s.completed_at,c.tracking_state
     from tracemini_repository_candidates c join files_agent_devices d on d.id=c.device_id
-    join tracemini_node_devices n on n.id=d.node_device_id
+    join tracemini_node_devices n on n.id=d.node_device_id and n.user_id=d.user_id and n.company_id=d.company_id and n.capability='node-git-v1'
     left join tracemini_repository_selections s on s.candidate_id=c.id and s.revision=c.revision
     where c.company_id=$1 and d.user_id=$2 and n.revoked_at is null and n.expires_at>now()`,[session.company_id,session.id])).rows;
   const selected=new Map(selections.map(s=>[String(s.id),s]));
@@ -57,11 +57,25 @@ export async function nodeBrowserDiscovery(session:SessionUser){
       selectable:c.match_status==='matched',traced:pending?!desired:c.tracking_state==='tracking',desired_traced:desired,last_seen:c.created_at,
       error:c.tracking_state==='error'||(!pending&&s.desired_tracking!=null&&desired!==(c.tracking_state==='tracking'))?'Device could not apply selection. Retry or reconnect.':undefined};
   });
-  return {userId:Number(session.id),agents:agents.map(a=>({id:Number(a.id),user_id:Number(a.user_id),status:a.online?'online':'offline',last_seen:a.last_seen_at})),candidates};
+  const projects=(await getPool().query(`select p.id,p.title,p.status from projects p join app_users owner on owner.id=p.client_id and owner.company_id=$1 where p.approval_status='approved' and exists(select 1 from app_users u where u.id=$2 and u.company_id=$1 and u.approval_status='approved') and (p.client_id=$2 or exists(select 1 from project_memberships m where m.project_id=p.id and m.user_id=$2 and m.membership_status='active')) order by p.title,p.id`,[session.company_id,session.id])).rows;
+  return {userId:Number(session.id),agents:agents.map(a=>({id:Number(a.id),user_id:Number(a.user_id),status:a.online?'online':'offline',last_seen:a.last_seen_at})),candidates,projects};
 }
 export async function nodeBrowserMutation(session:SessionUser,body:Record<string,unknown>){
-  exactBody(body,['action','nodeId','scanId','candidateId','traced','revision']);
+  exactBody(body,['action','nodeId','scanId','candidateId','traced','revision','projectId']);
   const state=await nodeBrowserDiscovery(session);
+  if(body.action==='link')return transaction(async db=>{
+    const c=(await db.query(`select c.* from tracemini_repository_candidates c join files_agent_devices d on d.id=c.device_id and d.company_id=c.company_id join tracemini_node_devices n on n.id=d.node_device_id and n.user_id=d.user_id and n.company_id=d.company_id join app_users u on u.id=d.user_id and u.company_id=d.company_id and u.approval_status='approved' where c.id=$1 and c.company_id=$2 and d.user_id=$3 and d.revoked_at is null and n.revoked_at is null and n.expires_at>now() and n.capability='node-git-v1' for update of c,d,n`,[id(body.candidateId),session.company_id,session.id])).rows[0];
+    if(!c)fail(404,'candidate_unavailable');
+    const p=(await db.query(`select p.id from projects p join app_users owner on owner.id=p.client_id and owner.company_id=$2 where p.id=$1 and p.approval_status='approved' and (p.client_id=$3 or exists(select 1 from project_memberships m where m.project_id=p.id and m.user_id=$3 and m.membership_status='active')) for update of p`,[id(body.projectId),session.company_id,session.id])).rows[0];
+    if(!p)fail(403,'project_not_authorized');
+    if(String(c.revision)!==id(body.revision))fail(409,'revision_conflict');
+    const selection=(await db.query('select * from tracemini_repository_selections where candidate_id=$1 for update',[c.id])).rows[0];
+    if(c.tracking_state==='tracking'||selection&&(selection.desired_tracking||!selection.completed_at)|| (await db.query('select 1 from tracemini_tracked_repositories where candidate_id=$1',[c.id])).rowCount)fail(409,'stop_acknowledgement_required');
+    if(c.repository_key.startsWith('local:'))fail(409,'local_repository_requires_hosted_remote');
+    await db.query(`update project_tracemini_roots set status='revoked',revoked_at=now() where device_id=$1 and root_hash=encode(sha256(convert_to('tracemini-discovery-candidate:'||$2::text,'UTF8')),'hex')`,[c.device_id,c.id]);
+    await db.query(`update tracemini_repository_candidates set explicit_project_id=$2,matched_project_id=$2,match_status='matched',revision=revision+1,tracking_state='unselected',updated_at=now() where id=$1 and revision=$3`,[c.id,p.id,c.revision]);
+    return {linked:true};
+  });
   if(body.action==='scan'){
     if(!state.agents.some(a=>String(a.id)===String(body.nodeId)&&a.status==='online'))fail(409,'node_offline');
     const scan=await createNodeRepositoryScan(session,body.nodeId);return {id:Number(scan.requestId),status:scan.state};
@@ -73,7 +87,7 @@ export async function nodeBrowserMutation(session:SessionUser,body:Record<string
   }
   if(body.action==='select'){
     if(typeof body.traced!=='boolean'||!state.candidates.some(c=>String(c.id)===String(body.candidateId)))fail(400,'invalid_selection');
-    return selectRepositoryCandidate(session,body.candidateId,body.traced as boolean,body.revision);
+    return selectRepositoryCandidate(session,body.candidateId,body.traced as boolean,body.revision,true);
   }
   fail(400,'invalid_action');
 }
@@ -82,7 +96,7 @@ async function authorized(db:PoolClient,token:string,body:Record<string,unknown>
   const row=(await db.query(`select c.*,s.desired_tracking,s.claim_token,s.completed_at,r.id as root_id,p.tracemini_telemetry_paused,
     g.revision as registered_revision,g.claim_token as registered_claim
     from tracemini_repository_candidates c join tracemini_repository_selections s on s.candidate_id=c.id and s.revision=c.revision
-    join projects p on p.id=c.matched_project_id and p.approval_status='approved' and p.git_repository_key=c.repository_key
+    join projects p on p.id=c.matched_project_id and p.approval_status='approved' and (case when c.explicit_project_id is not null then p.id=c.explicit_project_id else p.git_repository_key=c.repository_key end)
     join app_users owner on owner.id=p.client_id and owner.company_id=c.company_id
     join project_tracemini_roots r on r.project_id=p.id and r.device_id=c.device_id and r.repository_key=c.repository_key
       and r.root_hash=encode(sha256(convert_to('tracemini-discovery-candidate:'||c.id::text,'UTF8')),'hex') and r.status='approved' and r.revoked_at is null
@@ -90,7 +104,7 @@ async function authorized(db:PoolClient,token:string,body:Record<string,unknown>
     where c.id=$1 and c.device_id=$2 and c.company_id=$3 and s.owner_user_id=$4 and s.desired_tracking=true
     and c.fingerprint=$5::jsonb and c.repository_key=$6
     and (p.client_id=$4 or exists(select 1 from project_memberships m where m.project_id=p.id and m.user_id=$4 and m.membership_status='active'))
-    and (select count(*) from projects q join app_users qo on qo.id=q.client_id and qo.company_id=$3 where q.approval_status='approved' and q.git_repository_key=c.repository_key and (q.client_id=$4 or exists(select 1 from project_memberships qm where qm.project_id=q.id and qm.user_id=$4 and qm.membership_status='active')))=1
+    and (c.explicit_project_id=p.id or (select count(*) from projects q join app_users qo on qo.id=q.client_id and qo.company_id=$3 where q.approval_status='approved' and q.git_repository_key=c.repository_key and (q.client_id=$4 or exists(select 1 from project_memberships qm where qm.project_id=q.id and qm.user_id=$4 and qm.membership_status='active')))=1)
     for update of c,s,r,p`,[id(body.candidate_id),device.id,device.company_id,device.user_id,JSON.stringify({digest:digest(body.digest)}),body.repository_key])).rows[0];
   if(!row)fail();
   if(register){if(row.completed_at || String(row.revision)!==id(body.revision) || row.claim_token!==body.claim_token || String(row.matched_project_id)!==id(body.project_id))fail();}
@@ -113,7 +127,7 @@ export async function nodeGitRequest(token:string,operation:string,body:Record<s
     const projects=await getPool().query(`select c.id,c.matched_project_id from tracemini_repository_candidates c where c.device_id=$1`,[device.id]);
     const projectByCandidate=new Map(projects.rows.map(r=>[String(r.id),r.matched_project_id]));
     const access=await getPool().query(`select distinct p.id from projects p join app_users owner on owner.id=p.client_id and owner.company_id=$2
-      join tracemini_repository_candidates c on c.matched_project_id=p.id and c.repository_key=p.git_repository_key and c.device_id=$1
+      join tracemini_repository_candidates c on c.matched_project_id=p.id and (case when c.explicit_project_id is not null then c.explicit_project_id=p.id else c.repository_key=p.git_repository_key end) and c.device_id=$1
       join project_tracemini_roots r on r.project_id=p.id and r.device_id=c.device_id and r.status='approved' and r.revoked_at is null
       where p.approval_status='approved' and (p.client_id=$3 or exists(select 1 from project_memberships m where m.project_id=p.id and m.user_id=$3 and m.membership_status='active'))`,[device.id,device.company_id,device.user_id]);
     return {workspaceIds:access.rows.map(r=>Number(r.id)),contextId:Number(device.context_id),work:claimed.work.map(w=>{const {binding,...safe}=w;return {...safe,project_id:projectByCandidate.get(String(w.kind==='push'?w.candidate_id:w.work_id))};})};
