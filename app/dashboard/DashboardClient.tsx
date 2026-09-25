@@ -3,6 +3,10 @@
 import { useMemo, useState } from 'react';
 import type { FilesAgentDashboardData } from '@/lib/files-agent-dashboard';
 import type { ProjectDashboardData } from '@/lib/project-dashboard';
+import StatusLakePanel from './StatusLakePanel';
+import AppLauncherPanel from './AppLauncherPanel';
+import PlatformTelemetryPanel from './PlatformTelemetryPanel';
+import ChatInbox from '@/app/components/ChatInbox';
 
 type Props =
   | { mode: 'admin'; data: FilesAgentDashboardData | null; error: string }
@@ -38,10 +42,14 @@ function AdminDashboard({ data, error }: Extract<Props, { mode: 'admin' }>) {
 
   return <>
     <section className="dashboardHeading">
-      <div><div className="eyebrow"><span className="liveDot" /> Platform overview</div><h1>Dashboard</h1><p>Review privacy-safe approved agent file metadata and manage platform access.</p></div>
+      <div><div className="eyebrow"><span className="liveDot" /> Platform overview</div><h1>Compute &amp; APIs</h1><p>See Neodym apps, live services, compute access, and recent platform activity.</p></div>
       <div className="dashboardCtas"><a className="primaryButton" href="/admin/approve">Review approvals</a><a className="secondaryButton" href="/employee">Connect an agent</a></div>
     </section>
     {error && <div className="errorBanner" role="alert">Could not load file changes. Please try again.</div>}
+    <ChatInbox mode="dashboard" />
+    <AppLauncherPanel />
+    <PlatformTelemetryPanel />
+    <StatusLakePanel />
     <section className="statRow" aria-label="Summary">
       <div><span>Changes</span><strong>{totals?.events ?? events.length}</strong></div>
       <div><span>Projects</span><strong>{totals?.changedPaths ?? new Set(events.map((event) => event.project)).size}</strong></div>
@@ -82,10 +90,14 @@ function ProjectDashboard({ accountType, data, error }: Extract<Props, { mode: '
   const client = accountType === 'client';
   return <>
     <section className="dashboardHeading">
-      <div><div className="eyebrow"><span className="liveDot" /> {client ? 'Client workspace' : 'Engineer workspace'}</div><h1>Dashboard</h1><p>See your approved projects and confirmed agent file changes. File contents and private activity stay out.</p></div>
+      <div><div className="eyebrow"><span className="liveDot" /> {client ? 'Client workspace' : 'Engineer workspace'}</div><h1>Compute &amp; APIs</h1><p>Open Neodym apps, check live services, and review the project activity available to your account.</p></div>
       <div className="dashboardCtas"><a className="primaryButton" href="/projects">{client ? 'Manage projects' : 'Find projects'}</a></div>
     </section>
     {error && <div className="errorBanner" role="alert">Could not load your dashboard. Please try again.</div>}
+    <ChatInbox mode="dashboard" />
+    <AppLauncherPanel />
+    <PlatformTelemetryPanel />
+    <StatusLakePanel />
     <section className="statRow" aria-label="Summary">
       <div><span>Approved projects</span><strong>{data?.stats.projects ?? 0}</strong></div>
       <div><span>Active projects</span><strong>{data?.stats.activeProjects ?? 0}</strong></div>
@@ -117,5 +129,5 @@ function ProjectDashboard({ accountType, data, error }: Extract<Props, { mode: '
 }
 
 export default function DashboardClient(props: Props) {
-  return <div className="dashboardShell">{props.mode === 'admin' ? <AdminDashboard {...props} /> : <ProjectDashboard {...props} />}</div>;
+  return <div className="dashboardShell statusDashboardShell">{props.mode === 'admin' ? <AdminDashboard {...props} /> : <ProjectDashboard {...props} />}</div>;
 }

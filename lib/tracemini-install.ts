@@ -44,7 +44,9 @@ export async function mintNodeInstallation(user:SessionUser) {
     const owner=await db.query(`select id from app_users where id=$1 and company_id=$2 and email=$3 and approval_status='approved' for update`,[user.id,user.company_id,user.email]);
     if(!owner.rows[0])throw invalid();
     const recent=await db.query(`select count(*)::int as n from tracemini_node_installations where user_id=$1 and company_id=$2 and created_at>now()-interval '1 hour'`,[user.id,user.company_id]);
-    if(recent.rows[0].n>=5)throw new NodeInstallError(429,'installation_rate_exceeded');
+    // Keep abuse protection, but allow normal retries across setup and project
+    // pages without making a legitimate employee wait for the hourly window.
+    if(recent.rows[0].n>=20)throw new NodeInstallError(429,'installation_rate_exceeded');
     const context=await db.query(`insert into tracemini_node_contexts(company_id,user_id) values($1,$2) on conflict(company_id,user_id) do update set user_id=excluded.user_id returning id`,[user.company_id,user.id]);
     const token=secret('eti');
     const result=await db.query(`insert into tracemini_node_installations(context_id,company_id,user_id,token_hash,expires_at) values($1,$2,$3,$4,now()+interval '10 minutes') returning expires_at`,[context.rows[0].id,user.company_id,user.id,hash(token)]);

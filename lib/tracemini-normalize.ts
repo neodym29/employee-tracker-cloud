@@ -2,7 +2,7 @@ import { canonicalRepositoryKey } from './git-remote';
 
 export type TraceMiniProjectMember = { id: string; email: string; display_name?: string | null };
 export type SafeMember = { mapped: boolean; id?: string; label: string };
-const UNMAPPED = 'Unmapped TraceMini member';
+const UNMAPPED = 'Unmapped project member';
 const SAFE_CONFIRMATION_STATUSES = new Set(['confirmed', 'unconfirmed', 'pending', 'required', 'not_required', 'approved', 'rejected', 'successful', 'success', 'failed']);
 
 function text(value: unknown, limit = 240): string {

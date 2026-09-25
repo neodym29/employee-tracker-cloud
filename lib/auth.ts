@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getPool, health } from './db';
+import { isSessionRevoked, revokeSessionToken } from './session-revocations';
 
 export type SessionUser = {
   id: string;
@@ -27,16 +28,18 @@ function sign(payload: string): string {
 }
 
 export function createSessionToken(user: SessionUser): string {
-  const payload = Buffer.from(JSON.stringify({ ...user, exp: Date.now() + SESSION_TOKEN_TTL_MS })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ ...user, sid: crypto.randomUUID(), exp: Date.now() + SESSION_TOKEN_TTL_MS })).toString('base64url');
   return `${payload}.${sign(payload)}`;
 }
 
 export function parseSessionToken(token: string | undefined): SessionUser | null {
-  if (!token || !token.includes('.')) return null;
-  const [payload, signature] = token.split('.', 2);
-  if (!payload || !signature || signature !== sign(payload)) return null;
-  const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as SessionUser & { exp?: number };
-  if (!parsed.exp || parsed.exp < Date.now()) return null;
+  if (!token || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/.test(token)) return null;
+  const [payload, signature] = token.split('.');
+  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(sign(payload)))) return null;
+  let parsed: SessionUser & { exp?: number };
+  try { parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')); }
+  catch { return null; }
+  if (!parsed || typeof parsed.exp !== 'number' || !Number.isFinite(parsed.exp) || parsed.exp <= Date.now()) return null;
   if (parsed.role !== 'admin' && parsed.role !== 'employee') return null;
   if (!['admin', 'client', 'engineer'].includes(parsed.account_type)) return null;
   return {
@@ -61,6 +64,12 @@ export async function setSessionCookie(user: SessionUser) {
 
 export async function clearSessionCookie() {
   const jar = await cookies();
+  const token = jar.get(COOKIE_NAME)?.value;
+  if (token && parseSessionToken(token)) {
+    const { exp } = JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString('utf8'));
+    // Do not report successful logout or clear the browser before durable commit.
+    await revokeSessionToken(token, exp);
+  }
   jar.delete(COOKIE_NAME);
   jar.delete(LEGACY_COOKIE_NAME);
 }
@@ -96,8 +105,11 @@ async function getSessionUserFromDatabase(parsed: SessionUser): Promise<SessionU
 
 export async function currentSession(): Promise<SessionUser | null> {
   const jar = await cookies();
-  const parsed = parseSessionToken(jar.get(COOKIE_NAME)?.value);
-  if (!parsed) return null;
+  const token = jar.get(COOKIE_NAME)?.value;
+  const parsed = parseSessionToken(token);
+  if (!token || !parsed) return null;
+  try { if (await isSessionRevoked(token)) return null; }
+  catch { return null; } // Revocation storage unavailable: fail closed.
   const liveUser = await getSessionUserFromDatabase(parsed);
   return liveUser;
 }

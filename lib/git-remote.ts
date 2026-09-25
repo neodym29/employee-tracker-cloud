@@ -65,4 +65,15 @@ export function parseGitRemote(value: unknown): ParsedGitRemote {
   return invalid();
 }
 
+// Local sources are device-owned discovery bindings, never server filesystem URLs.
+// An explicit discriminator prevents a typo/empty hosted remote silently changing mode.
+export function parseProjectSource(input: {sourceType?: unknown; gitRemote?: unknown}): {remoteUrl: string | null; repositoryKey: string | null} {
+  if (input.sourceType === 'local') {
+    if (input.gitRemote !== undefined && input.gitRemote !== null && input.gitRemote !== '') throw new Error('Local source must omit Git remote; discover and link the repository on its owning device');
+    return {remoteUrl: null, repositoryKey: null};
+  }
+  if (input.sourceType !== undefined && input.sourceType !== 'remote') invalid();
+  return parseGitRemote(input.gitRemote);
+}
+
 export function canonicalRepositoryKey(value: unknown): string { return parseGitRemote(value).repositoryKey; }

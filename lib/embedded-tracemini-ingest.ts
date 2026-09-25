@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { saveAcceptedEngineerEvents } from './project-engineer-journal';
 import { ensureSchema, getPool } from './db';
 import { hashFilesAgentSecret, FilesAgentError } from './files-agent';
 import type { SessionUser } from './auth';
@@ -69,14 +70,15 @@ export function verifyEmbeddedBinding(rawBody: Buffer, signature: string, bindin
   if (!/^\d+$/.test(timestamp) || Math.abs(Date.now()/1000-Number(timestamp))>300 || !/^[a-f0-9]{32}$/.test(nonce)) throw new FilesAgentError('stale or malformed binding proof',401);
   const canonical=[request?.method || 'POST',request?.path || '/api/files-agent/tracemini',timestamp,nonce,crypto.createHash('sha256').update(rawBody).digest('hex')].join('\n');
   const expected=crypto.createHmac('sha256',deriveBindingSecret(bindingId,deviceId,projectId)).update(canonical).digest('hex');
-  if(!safeEqualHex(signature,expected)) throw new FilesAgentError('invalid TraceMini binding signature',401);
+  if(!safeEqualHex(signature,expected)) throw new FilesAgentError('invalid Neo-Nexus binding signature',401);
 }
 
 async function requireCurrentBindingAccess(client: import('pg').PoolClient, rootId: string) {
   const access = await client.query(`select 1 from project_tracemini_roots r
     join files_agent_devices d on d.id=r.device_id and d.revoked_at is null
     join app_users u on u.id=d.user_id and u.company_id=d.company_id and u.approval_status='approved'
-    join projects p on p.id=r.project_id and p.company_id=d.company_id and p.approval_status='approved'
+    join projects p on p.id=r.project_id and p.approval_status='approved'
+    join app_users owner on owner.id=p.client_id and owner.company_id=d.company_id and owner.approval_status='approved'
     where r.id=$1 and r.status='approved' and r.revoked_at is null
     and (r.repository_key is null or r.repository_key=p.git_repository_key)
     and (p.client_id=u.id or exists(select 1 from project_memberships m where m.project_id=p.id and m.user_id=u.id and m.membership_status='active'))`,[rootId]);
@@ -91,7 +93,7 @@ export async function ingestEmbeddedEvents(credential:string, rawBody:Buffer, bo
     const device=(await client.query(`select d.id,d.user_id from files_agent_devices d join app_users u on u.id=d.user_id where d.credential_hash=$1 and d.revoked_at is null and u.approval_status='approved' for update of d`,[hashFilesAgentSecret(credential)])).rows[0];
     if(!device) throw new FilesAgentError('invalid or revoked device credential',401);
     const binding=(await client.query(`select r.id,r.project_id,r.device_id,r.binding_id,r.binding_secret_hash from project_tracemini_roots r where r.binding_id=$1 and r.device_id=$2 and r.status='approved' and r.revoked_at is null and r.last_heartbeat_at > now()-interval '15 minutes' for update`,[auth.bindingId,device.id])).rows[0];
-    if(!binding) throw new FilesAgentError('invalid, revoked, or stale TraceMini binding',401);
+    if(!binding) throw new FilesAgentError('invalid, revoked, or stale Neo-Nexus binding',401);
     await requireCurrentBindingAccess(client,binding.id);
     const derived=deriveBindingSecret(binding.binding_id,String(device.id),String(binding.project_id));
     if(!safeEqualHex(binding.binding_secret_hash,hashFilesAgentSecret(derived))) throw new FilesAgentError('invalid binding secret',401);
@@ -99,10 +101,11 @@ export async function ingestEmbeddedEvents(credential:string, rawBody:Buffer, bo
     const replay=await client.query(`insert into tracemini_request_nonces(binding_id,nonce) values($1,$2) on conflict do nothing returning nonce`,[binding.binding_id,auth.nonce]);
     if(!replay.rows[0]) throw new FilesAgentError('replayed binding proof',401);
     const settings=(await client.query(`select tracemini_global_pause,tracemini_embedded_enabled from tracemini_runtime_settings where singleton=true`)).rows[0];
-    if(!settings?.tracemini_embedded_enabled || settings.tracemini_global_pause) throw new FilesAgentError('TraceMini telemetry is paused',503);
+    if(!settings?.tracemini_embedded_enabled || settings.tracemini_global_pause) throw new FilesAgentError('Neo-Nexus activity tracking is paused',503);
     const rate=await client.query(`insert into files_agent_rate_limits(scope_key,window_start,event_count) values($1,date_trunc('minute',now()),$2) on conflict(scope_key,window_start) do update set event_count=files_agent_rate_limits.event_count+excluded.event_count where files_agent_rate_limits.event_count+excluded.event_count<=5000 returning event_count`,[`tracemini:${device.id}`,events.length]);
     if(!rate.rows[0]) throw new FilesAgentError('ingest_rate exceeded; retry later',429);
     let accepted=0;
+    const acceptedEventIds: string[]=[];
     for(const event of events) {
       const rootKey = (await client.query(`select repository_key from project_tracemini_roots where id=$1`,[binding.id])).rows[0]?.repository_key;
       if (event.repositoryKey && rootKey !== event.repositoryKey) throw new FilesAgentError('repository does not match binding',403);
@@ -123,9 +126,11 @@ export async function ingestEmbeddedEvents(credential:string, rawBody:Buffer, bo
             limit 1`, [device.id, event.runId, event.agent, event.occurredAt])
         : { rowCount: 0 } as { rowCount: number };
       const evidenceEligible=(evidenceMatch.rowCount ?? 0) > 0;
-      const result=await client.query(`insert into project_tracemini_events(project_id,device_id,root_id,event_key,kind,action,agent,run_id,repository_key,occurred_at,provenance,evidence_eligible,resume_epoch) select r.project_id,r.device_id,r.id,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,p.tracemini_resume_epoch from project_tracemini_roots r join projects p on p.id=r.project_id where r.id=$1 and r.device_id=$2 and r.status='approved' and p.tracemini_telemetry_paused=false on conflict(root_id,event_key) do nothing`,[binding.id,device.id,event.eventKey,event.kind,event.action,event.agent,event.runId,event.repositoryKey,event.occurredAt,JSON.stringify(event.provenance),evidenceEligible]);
+      const result=await client.query(`insert into project_tracemini_events(project_id,device_id,root_id,event_key,kind,action,agent,run_id,repository_key,occurred_at,provenance,evidence_eligible,resume_epoch) select r.project_id,r.device_id,r.id,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,p.tracemini_resume_epoch from project_tracemini_roots r join projects p on p.id=r.project_id where r.id=$1 and r.device_id=$2 and r.status='approved' and p.tracemini_telemetry_paused=false on conflict(root_id,event_key) do nothing returning id`,[binding.id,device.id,event.eventKey,event.kind,event.action,event.agent,event.runId,event.repositoryKey,event.occurredAt,JSON.stringify(event.provenance),evidenceEligible]);
       accepted+=result.rowCount||0;
+      acceptedEventIds.push(...result.rows.map(e=>String(e.id)));
     }
+    await saveAcceptedEngineerEvents(client,String(binding.project_id),acceptedEventIds);
     await client.query(`update files_agent_devices set last_seen_at=now() where id=$1`,[device.id]);
     await client.query('commit'); return {accepted,duplicates:events.length-accepted,received:events.length};
   } catch(error){await client.query('rollback');throw error;} finally {client.release();}

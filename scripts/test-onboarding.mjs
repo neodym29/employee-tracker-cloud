@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import {linuxInstaller} from '../build/tracemini/installer.mjs';
+await build({entryPoints:['lib/git-remote.ts'],outfile:'build/qa-local-source.mjs',bundle:true,platform:'node',format:'esm'});
+const remote = await import('../build/qa-local-source.mjs?'+Date.now());
+assert.equal(typeof remote.parseProjectSource,'function','explicit local project source parser must exist');
+assert.deepEqual(remote.parseProjectSource({sourceType:'local'}),{remoteUrl:null,repositoryKey:null});
+for(const gitRemote of ['/tmp/bare.git','file:///tmp/bare.git','https://github.com/team/repo']) assert.throws(()=>remote.parseProjectSource({sourceType:'local',gitRemote}));
+assert.throws(()=>remote.parseProjectSource({}));
+assert.throws(()=>remote.parseProjectSource({sourceType:'other'}));
+assert.equal(remote.parseProjectSource({gitRemote:'https://github.com/team/repo'}).repositoryKey,'github.com/team/repo');
+const script=linuxInstaller('build/tracemini/cli','http://localhost:9876','fixture-only');
+assert.match(script,/--no-service/,'installer must provide an explicit no-service path');
+import fs from 'node:fs';
+assert.doesNotMatch(fs.readFileSync('lib/tracemini-add-project-prompt.ts','utf8'), /Missing remote: explain/);
+console.log('PASS local source contracts and installer mode seam');

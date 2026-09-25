@@ -115,8 +115,33 @@ export async function ensureSchema() {
 }
 
 async function ensureSchemaNow() {
-  const db = getPool();
-  await db.query(`
+  const client = await getPool().connect();
+  const db = client;
+  let schemaLockHeld = false;
+  try {
+    const currentSchema = await db.query(`select
+      to_regclass('public.projects') is not null
+      and to_regclass('public.tracemini_repository_candidates') is not null
+      and to_regclass('public.project_request_notifications') is not null
+      and exists(select 1 from pg_attribute where attrelid=to_regclass('public.projects') and attname='title_source' and not attisdropped)
+      and exists(select 1 from pg_attribute where attrelid=to_regclass('public.projects') and attname='deployment_url' and not attisdropped)
+      and exists(select 1 from pg_attribute where attrelid=to_regclass('public.projects') and attname='progress_source' and not attisdropped)
+      and to_regclass('public.codex_plugin_daily_runs') is not null
+      and to_regclass('public.codex_plugin_work_updates') is not null
+      and exists(select 1 from pg_attribute where attrelid=to_regclass('public.codex_plugin_work_updates') and attname='project_id' and not attisdropped and not attnotnull)
+      and exists(select 1 from pg_attribute where attrelid=to_regclass('public.codex_plugin_work_updates') and attname='repository_key' and not attisdropped)
+      and exists(select 1 from pg_attribute where attrelid=to_regclass('public.codex_plugin_daily_runs') and attname='summary_version' and not attisdropped)
+      and exists(select 1 from pg_attribute a join pg_attrdef d on d.adrelid=a.attrelid and d.adnum=a.attnum where a.attrelid=to_regclass('public.project_tracemini_reports') and a.attname='name' and not a.attisdropped and pg_get_expr(d.adbin,d.adrelid) like '%Neo-Nexus report%')
+      and exists(select 1 from pg_attribute where attrelid=to_regclass('public.project_client_request_summaries') and attname='request_kind' and not attisdropped)
+      and exists(select 1 from pg_attribute where attrelid=to_regclass('public.project_client_request_summaries') and attname='details' and not attisdropped)
+      and exists(select 1 from pg_attribute where attrelid=to_regclass('public.project_client_request_summaries') and attname='status' and not attisdropped)
+      and exists(select 1 from pg_attribute where attrelid=to_regclass('public.project_client_request_summaries') and attname='updated_at' and not attisdropped)
+      and exists(select 1 from pg_attribute where attrelid=to_regclass('public.project_client_request_summaries') and attname='resolved_by' and not attisdropped)
+      as ready`);
+    if (currentSchema.rows[0]?.ready === true) return;
+    await db.query(`select pg_advisory_lock(hashtextextended('employee-trace-schema-v1',0))`);
+    schemaLockHeld = true;
+    await db.query(`
     create table if not exists companies (
       id bigserial primary key,
       name text not null,
@@ -207,6 +232,17 @@ async function ensureSchemaNow() {
       created_at timestamptz not null default now(),
       last_seen_at timestamptz not null default now()
     );
+    create table if not exists codex_plugin_connections (
+      device_id bigint primary key references files_agent_devices(id) on delete cascade,
+      company_id bigint not null references companies(id) on delete cascade,
+      user_id bigint not null references app_users(id) on delete cascade,
+      plugin_version text constraint codex_plugin_connections_version_length check(plugin_version is null or length(plugin_version) between 1 and 80),
+      connected_at timestamptz not null default now(),
+      last_seen_at timestamptz not null default now(),
+      last_poll_at timestamptz,
+      updated_at timestamptz not null default now()
+    );
+    create index if not exists codex_plugin_connections_owner on codex_plugin_connections(company_id,user_id,last_poll_at desc);
     create table if not exists files_agent_events (
       id bigserial primary key,
       company_id bigint not null references companies(id),
@@ -278,7 +314,7 @@ async function ensureSchemaNow() {
       id bigserial primary key, client_id bigint not null references app_users(id),
       title text not null check(length(title) between 1 and 120), description text not null default '' check(length(description)<=4000),
       status text not null default 'draft' check(status in ('draft','open','active','completed','archived')),
-      progress_percent integer not null default 10 check(progress_percent between 0 and 100),
+      progress_percent integer check(progress_percent between 0 and 100),
       progress_summary text not null default 'Project is in draft.' check(length(progress_summary) between 1 and 240 and progress_summary !~ '[[:cntrl:]]'),
       progress_version integer not null default 1 check(progress_version > 0),
       progress_updated_at timestamptz not null default now(),
@@ -353,6 +389,21 @@ async function ensureSchemaNow() {
       primary key(project_id,file_id),
       foreign key(project_id,file_id,current_version) references project_files(project_id,file_id,version) deferrable initially deferred
     );
+    create table if not exists project_engineer_journal_files (
+      project_id bigint not null, file_id text not null,
+      primary key(project_id,file_id),
+      foreign key(project_id,file_id) references project_file_heads(project_id,file_id) on delete restrict
+    );
+    insert into project_engineer_journal_files(project_id,file_id)
+    select distinct v.project_id,v.file_id from project_files v
+    join project_file_heads h on h.project_id=v.project_id and h.file_id=v.file_id
+    where position('<!-- automatic-engineer-journal:start -->' in v.content)>0
+    on conflict do nothing;
+    create or replace function prevent_engineer_journal_unbinding() returns trigger language plpgsql as $$
+    begin raise exception 'Engineer journal binding is immutable'; end $$;
+    drop trigger if exists prevent_engineer_journal_unbinding on project_engineer_journal_files;
+    create trigger prevent_engineer_journal_unbinding before update or delete on project_engineer_journal_files
+    for each row execute function prevent_engineer_journal_unbinding();
     create table if not exists project_chat_messages (
       id bigserial primary key, project_id bigint not null references projects(id) on delete cascade, user_id bigint references app_users(id),
       role text not null check(role in ('user','assistant','system')), body text not null, created_at timestamptz not null default now()
@@ -362,8 +413,28 @@ async function ensureSchemaNow() {
       id bigserial primary key, project_id bigint not null references projects(id) on delete cascade,
       source_message_id bigint not null,
       summary text not null check(length(summary) between 1 and 160 and summary !~ '[[:cntrl:]]'),
+      details text not null default '' check(length(details)<=2000 and details !~ '[[:cntrl:]]'),
+      request_kind text not null default 'task' check(request_kind in ('task','issue')),
+      status text not null default 'open' check(status in ('open','in_progress','resolved')),
+      updated_at timestamptz not null default now(),
+      resolved_at timestamptz,
+      resolved_by bigint references app_users(id),
       created_at timestamptz not null default now(), unique(source_message_id),
       foreign key(project_id,source_message_id) references project_chat_messages(project_id,id) on delete cascade
+    );
+    alter table project_client_request_summaries add column if not exists details text not null default '';
+    alter table project_client_request_summaries add column if not exists request_kind text not null default 'task';
+    alter table project_client_request_summaries add column if not exists status text not null default 'open';
+    alter table project_client_request_summaries add column if not exists updated_at timestamptz not null default now();
+    alter table project_client_request_summaries add column if not exists resolved_at timestamptz;
+    alter table project_client_request_summaries add column if not exists resolved_by bigint references app_users(id);
+    create unique index if not exists idx_project_client_request_summaries_project_id_id_unique on project_client_request_summaries(project_id,id);
+    create table if not exists project_request_notifications (
+      request_id bigint not null references project_client_request_summaries(id) on delete cascade,
+      user_id bigint not null references app_users(id) on delete cascade,
+      created_at timestamptz not null default now(),
+      read_at timestamptz,
+      primary key(request_id,user_id)
     );
     create table if not exists project_agent_actions (
       id bigserial primary key, project_id bigint not null references projects(id) on delete cascade, actor_user_id bigint references app_users(id),
@@ -413,7 +484,7 @@ async function ensureSchemaNow() {
     end $$;
     create index if not exists idx_project_tracemini_evidence_action on project_tracemini_evidence(proposed_action_id);
     create index if not exists idx_project_tracemini_evidence_watermark on project_tracemini_evidence(project_id,config_generation,config_revision,repository_id,repository_key,newest_occurred_at desc);
-    create or replace function prevent_project_tracemini_evidence_mutation() returns trigger language plpgsql as $$ begin if tg_op='DELETE' and pg_trigger_depth()>1 then return old; end if; raise exception 'TraceMini evidence rows are immutable'; end $$;
+    create or replace function prevent_project_tracemini_evidence_mutation() returns trigger language plpgsql as $$ begin if tg_op='DELETE' and pg_trigger_depth()>1 then return old; end if; raise exception 'Neo-Nexus evidence rows are immutable'; end $$;
     drop trigger if exists prevent_project_tracemini_evidence_update on project_tracemini_evidence;
     create trigger prevent_project_tracemini_evidence_update before update on project_tracemini_evidence for each row execute function prevent_project_tracemini_evidence_mutation();
     create table if not exists project_tracemini_roots (
@@ -456,12 +527,22 @@ async function ensureSchemaNow() {
       created_at timestamptz not null default now(), unique(root_id,event_key)
     );
     create index if not exists idx_project_tracemini_events_timeline on project_tracemini_events(project_id,occurred_at desc);
+    create table if not exists project_engineer_journal (
+      event_id bigint primary key references project_tracemini_events(id) on delete cascade,
+      project_id bigint references projects(id) on delete cascade,
+      collector_user_id bigint not null references app_users(id), root_id bigint,
+      occurred_at timestamptz not null, ingested_at timestamptz not null,
+      summary text not null check(octet_length(summary) between 1 and 4096),
+      summary_version integer not null default 1, created_at timestamptz not null default now()
+    );
+    create index if not exists idx_engineer_journal_project_time on project_engineer_journal(project_id,occurred_at desc,event_id desc);
+    create index if not exists idx_engineer_journal_collector_time on project_engineer_journal(project_id,collector_user_id,occurred_at desc,event_id desc);
     create table if not exists project_tracemini_reports (
       id bigserial primary key, project_id bigint not null references projects(id) on delete cascade,
       requested_by bigint not null references app_users(id), scope text not null check(scope in ('personal','workspace')),
       reporter text not null check(reporter in ('codex','hermes')), start_date date not null, end_date date not null,
       status text not null default 'pending' check(status in ('pending','running','completed','failed')),
-      name text not null default 'TraceMini report', format text not null default 'summary' check(format in ('summary','detailed')),
+      name text not null default 'Neo-Nexus report', format text not null default 'summary' check(format in ('summary','detailed')),
       prompt text, include_diff boolean not null default false, document_consent jsonb not null default '[]'::jsonb,
       lineage jsonb not null default '{}'::jsonb, lease_id text, lease_expires_at timestamptz,
       retries integer not null default 0 check(retries between 0 and 10), error text,
@@ -470,9 +551,72 @@ async function ensureSchemaNow() {
       check(start_date <= end_date)
     );
     create index if not exists idx_project_tracemini_reports_history on project_tracemini_reports(project_id,created_at desc);
+    alter table project_tracemini_reports add column if not exists target_user_id bigint references app_users(id);
+    alter table project_tracemini_reports add column if not exists target_device_id bigint references files_agent_devices(id);
+    alter table project_tracemini_reports add column if not exists target_root_id bigint references project_tracemini_roots(id);
+    create unique index if not exists idx_project_tracemini_reports_dedupe on project_tracemini_reports(dedupe_key);
+    create table if not exists project_tracemini_original_summaries (
+      report_id bigint primary key references project_tracemini_reports(id),
+      project_id bigint not null references projects(id),
+      collector_user_id bigint not null references app_users(id),
+      root_id bigint, device_id bigint,
+      start_date date not null,end_date date not null,source_created_at timestamptz not null,
+      markdown text not null check(octet_length(markdown) between 1 and 64000),
+      saved_at timestamptz not null default now()
+    );
+    create index if not exists idx_tracemini_original_scope on project_tracemini_original_summaries(project_id,collector_user_id,end_date desc,report_id desc);
+    create table if not exists codex_plugin_daily_runs (
+      id bigserial primary key,
+      project_id bigint not null references projects(id) on delete cascade,
+      device_id bigint not null references files_agent_devices(id) on delete cascade,
+      company_id bigint not null references companies(id) on delete cascade,
+      user_id bigint not null references app_users(id) on delete cascade,
+      summary_date date not null,
+      status text not null default 'running' check(status in ('running','completed','failed')),
+      report_id bigint references project_tracemini_reports(id) on delete set null,
+      event_count integer not null default 0 check(event_count >= 0),
+      attempt_count integer not null default 1 check(attempt_count between 1 and 3),
+      summary_version integer not null default 2 check(summary_version between 1 and 1000),
+      started_at timestamptz not null default now(), completed_at timestamptz,
+      last_error text check(last_error is null or length(last_error)<=240),
+      created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+      unique(project_id,user_id,summary_date)
+    );
+    create index if not exists idx_codex_plugin_daily_owner on codex_plugin_daily_runs(company_id,user_id,summary_date desc,updated_at desc);
+    create index if not exists idx_codex_plugin_daily_device on codex_plugin_daily_runs(device_id,summary_date desc,updated_at desc);
+    create table if not exists codex_plugin_work_updates (
+      id bigserial primary key,
+      project_id bigint not null references projects(id) on delete cascade,
+      device_id bigint not null references files_agent_devices(id) on delete cascade,
+      company_id bigint not null references companies(id) on delete cascade,
+      user_id bigint not null references app_users(id) on delete cascade,
+      update_date date not null default ((now() at time zone 'Asia/Karachi')::date),
+      status text not null check(status in ('in_progress','completed','blocked')),
+      summary text not null check(length(summary) between 8 and 600 and summary !~ '[[:cntrl:]]'),
+      next_step text not null default '' check(length(next_step)<=500 and next_step !~ '[[:cntrl:]]'),
+      plugin_version text not null check(length(plugin_version) between 1 and 80 and plugin_version !~ '[[:cntrl:]]'),
+      idempotency_key uuid not null,
+      created_at timestamptz not null default now(),
+      unique(user_id,idempotency_key)
+    );
+    alter table codex_plugin_work_updates alter column project_id drop not null;
+    alter table codex_plugin_work_updates add column if not exists repository_key text;
+    create index if not exists idx_codex_plugin_work_updates_daily on codex_plugin_work_updates(project_id,user_id,update_date desc,created_at desc,id desc);
+    create index if not exists idx_codex_plugin_work_updates_owner on codex_plugin_work_updates(company_id,user_id,created_at desc,id desc);
+    create index if not exists idx_codex_plugin_work_updates_other_daily on codex_plugin_work_updates(company_id,user_id,update_date desc,created_at desc,id desc) where project_id is null;
+    create index if not exists idx_codex_plugin_work_updates_unlinked_repository on codex_plugin_work_updates(device_id,user_id,repository_key,created_at desc,id desc) where project_id is null and repository_key is not null;
+    alter table codex_plugin_daily_runs add column if not exists summary_version integer;
+    update codex_plugin_daily_runs set summary_version=1 where summary_version is null;
+    alter table codex_plugin_daily_runs alter column summary_version set default 2;
+    alter table codex_plugin_daily_runs alter column summary_version set not null;
+    do $$ begin
+      if not exists (select 1 from pg_constraint where conname='codex_plugin_daily_summary_version_check' and conrelid='codex_plugin_daily_runs'::regclass) then
+        alter table codex_plugin_daily_runs add constraint codex_plugin_daily_summary_version_check check(summary_version between 1 and 1000);
+      end if;
+    end $$;
     create table if not exists project_tracemini_schedules (
       id bigserial primary key, project_id bigint not null references projects(id) on delete cascade,
-      configured_by bigint not null references app_users(id), name text not null default 'TraceMini schedule',
+      configured_by bigint not null references app_users(id), name text not null default 'Neo-Nexus schedule',
       frequency text not null check(frequency in ('daily','weekdays','selected_days')), local_time time not null,
       timezone text not null, selected_days jsonb not null default '[]'::jsonb, reporter text not null default 'codex' check(reporter in ('codex','hermes')),
       format text not null default 'summary' check(format in ('summary','detailed')), prompt text,
@@ -500,7 +644,7 @@ async function ensureSchemaNow() {
     alter table project_tracemini_events drop constraint if exists project_tracemini_events_device_id_event_key_key;
     create unique index if not exists idx_project_tracemini_events_root_event on project_tracemini_events(root_id,event_key) where root_id is not null;
     alter table project_tracemini_events drop constraint if exists project_tracemini_events_kind_check;
-    alter table project_tracemini_events add constraint project_tracemini_events_kind_check check(kind in ('file_activity','non_git','dirty','commit','branch','merge','rewrite','pull','stage','push')) not valid;
+    alter table project_tracemini_events add constraint project_tracemini_events_kind_check check(kind in ('file_activity','non_git','dirty','commit','branch','merge','rewrite','pull','stage','push','file_change')) not valid;
     alter table project_tracemini_reports add column if not exists documents jsonb not null default '[]'::jsonb;
     alter table project_tracemini_reports add column if not exists parent_report_id bigint references project_tracemini_reports(id) on delete set null;
     alter table project_tracemini_reports add column if not exists attempt_count integer not null default 0;
@@ -529,7 +673,12 @@ async function ensureSchemaNow() {
     alter table project_tracemini_events add column if not exists evidence_eligible boolean not null default false;
     alter table project_tracemini_events add column if not exists confirmed_at timestamptz;
     create table if not exists project_tracemini_binding_codes (id bigserial primary key, project_id bigint not null references projects(id) on delete cascade, requested_for_user_id bigint references app_users(id) on delete cascade, code_hash text not null unique, root_label text not null, expires_at timestamptz not null, used_at timestamptz, issued_by bigint not null references app_users(id), created_at timestamptz not null default now());
-    alter table project_tracemini_reports add column if not exists name text not null default 'TraceMini report';
+    alter table project_tracemini_reports add column if not exists name text not null default 'Neo-Nexus report';
+    alter table project_tracemini_reports alter column name set default 'Neo-Nexus report';
+    alter table project_tracemini_schedules alter column name set default 'Neo-Nexus schedule';
+    update project_tracemini_reports set name='Neo-Nexus report' where name='TraceMini report';
+    update project_tracemini_reports set name='Automatic Neo-Nexus summary' where name='Automatic original TraceMini summary';
+    update project_tracemini_schedules set name='Neo-Nexus schedule' where name='TraceMini schedule';
     alter table project_tracemini_reports add column if not exists format text not null default 'markdown';
     alter table project_tracemini_reports add column if not exists prompt text;
     alter table project_tracemini_reports add column if not exists include_diff boolean not null default false;
@@ -554,18 +703,75 @@ async function ensureSchemaNow() {
     alter table projects add column if not exists progress_summary text;
     alter table projects add column if not exists progress_version integer;
     alter table projects add column if not exists progress_updated_at timestamptz;
+    alter table projects add column if not exists progress_source text;
     alter table projects add column if not exists git_remote_url text;
     alter table projects add column if not exists git_repository_key text;
+    alter table projects add column if not exists title_source text not null default 'legacy';
+    alter table projects add column if not exists agent_title_evidence_hash text;
+    alter table projects add column if not exists agent_title_updated_at timestamptz;
+    alter table projects add column if not exists deployment_url text;
+    update projects
+       set title=regexp_replace(title,'\\s+(Research|Dashboard|Review)$','','i'),updated_at=now()
+     where title_source='agent'
+       and title ~* '\\s+(Research|Dashboard|Review)$';
     update projects set
-      progress_percent=case status when 'draft' then 10 when 'open' then 30 when 'active' then 65 when 'completed' then 100 else 0 end,
-      progress_summary=case status when 'draft' then 'Project is in draft.' when 'open' then 'Project is open for delivery.' when 'active' then 'Project delivery is active.' when 'completed' then 'Project delivery is complete.' else 'Project is archived.' end,
-      progress_version=1,progress_updated_at=coalesce(updated_at,created_at,now())
-      where progress_percent is null or progress_summary is null or progress_version is null or progress_updated_at is null;
-    alter table projects alter column progress_percent set default 10;
-    alter table projects alter column progress_summary set default 'Project is in draft.';
+      progress_summary=coalesce(progress_summary,'Not assessed'),
+      progress_version=coalesce(progress_version,1),progress_updated_at=coalesce(progress_updated_at,updated_at,created_at,now())
+      where progress_summary is null or progress_version is null or progress_updated_at is null;
+    alter table projects alter column progress_percent drop default;
+    alter table projects alter column progress_summary set default 'Not assessed';
     alter table projects alter column progress_version set default 1;
     alter table projects alter column progress_updated_at set default now();
-    alter table projects alter column progress_percent set not null;
+    alter table projects alter column progress_percent drop not null;
+    create table if not exists project_progress_migration_audit (
+      project_id bigint primary key references projects(id) on delete cascade,
+      migration text not null,
+      previous_percent integer,
+      previous_summary text not null,
+      previous_version integer not null,
+      previous_progress_updated_at timestamptz not null,
+      migrated_at timestamptz not null default now(),
+      check(migration='029_unassessed_progress_legacy_open_default')
+    );
+    with legacy_unassessed_candidates as (
+      select p.id,p.progress_percent,p.progress_summary,p.progress_version,p.progress_updated_at
+      from projects p
+      where p.status='open'
+        and p.progress_percent=30
+        and p.progress_summary='Project is open for delivery.'
+        and p.progress_version=1
+        and p.progress_updated_at=p.created_at
+        and not exists (
+          select 1 from project_agent_actions a where a.project_id=p.id
+            and (a.action_type='update_project_progress'
+              or a.result ? 'fromPercent' or a.result ? 'toPercent')
+        )
+        and not exists (
+          select 1 from tracemini_audit_log a where a.project_id=p.id
+            and a.action ~* '(progress|assessment|override)'
+        )
+    ), recorded_unassessed_projects as (
+      insert into project_progress_migration_audit(
+        project_id,migration,previous_percent,previous_summary,previous_version,previous_progress_updated_at
+      )
+      select id,'029_unassessed_progress_legacy_open_default',progress_percent,
+        progress_summary,progress_version,progress_updated_at
+      from legacy_unassessed_candidates
+      on conflict(project_id) do nothing
+      returning project_id
+    )
+    update projects p
+    set progress_percent=null,progress_summary='Not assessed'
+    from recorded_unassessed_projects r
+    where p.id=r.project_id;
+    update projects set progress_source=case when progress_percent is null then 'unassessed' else 'manual' end where progress_source is null;
+    alter table projects alter column progress_source set default 'unassessed';
+    alter table projects alter column progress_source set not null;
+    do $$ begin
+      if not exists (select 1 from pg_constraint where conname='projects_progress_source_check' and conrelid='projects'::regclass) then
+        alter table projects add constraint projects_progress_source_check check(progress_source in ('unassessed','manual','plugin_daily'));
+      end if;
+    end $$;
     alter table projects alter column progress_summary set not null;
     alter table projects alter column progress_version set not null;
     alter table projects alter column progress_updated_at set not null;
@@ -629,6 +835,12 @@ async function ensureSchemaNow() {
       if not exists (select 1 from pg_constraint where conname='projects_progress_version_check' and conrelid='projects'::regclass) then
         alter table projects add constraint projects_progress_version_check check(progress_version > 0);
       end if;
+      if not exists (select 1 from pg_constraint where conname='projects_title_source_check' and conrelid='projects'::regclass) then
+        alter table projects add constraint projects_title_source_check check(title_source in ('legacy','manual','repository','agent')) not valid;
+      end if;
+      if not exists (select 1 from pg_constraint where conname='projects_agent_title_hash_check' and conrelid='projects'::regclass) then
+        alter table projects add constraint projects_agent_title_hash_check check(agent_title_evidence_hash is null or agent_title_evidence_hash ~ '^[a-f0-9]{64}$') not valid;
+      end if;
       if not exists (select 1 from pg_constraint where conname='project_agent_actions_display_description_check' and conrelid='project_agent_actions'::regclass) then
         alter table project_agent_actions add constraint project_agent_actions_display_description_check
           check(display_description is null or (length(display_description) between 1 and 320 and display_description !~ '[[:cntrl:]]'));
@@ -636,6 +848,18 @@ async function ensureSchemaNow() {
       if not exists (select 1 from pg_constraint where conname='project_agent_actions_source_message_project_fkey' and conrelid='project_agent_actions'::regclass) then
         alter table project_agent_actions add constraint project_agent_actions_source_message_project_fkey
           foreign key(project_id,source_message_id) references project_chat_messages(project_id,id);
+      end if;
+      if not exists (select 1 from pg_constraint where conname='project_client_request_summaries_details_check' and conrelid='project_client_request_summaries'::regclass) then
+        alter table project_client_request_summaries add constraint project_client_request_summaries_details_check
+          check(length(details)<=2000 and details !~ '[[:cntrl:]]') not valid;
+      end if;
+      if not exists (select 1 from pg_constraint where conname='project_client_request_summaries_kind_check' and conrelid='project_client_request_summaries'::regclass) then
+        alter table project_client_request_summaries add constraint project_client_request_summaries_kind_check
+          check(request_kind in ('task','issue')) not valid;
+      end if;
+      if not exists (select 1 from pg_constraint where conname='project_client_request_summaries_status_check' and conrelid='project_client_request_summaries'::regclass) then
+        alter table project_client_request_summaries add constraint project_client_request_summaries_status_check
+          check(status in ('open','in_progress','resolved')) not valid;
       end if;
       if not exists (select 1 from pg_constraint where conname='project_memberships_proposal_shape_check' and conrelid='project_memberships'::regclass) then
         alter table project_memberships add constraint project_memberships_proposal_shape_check
@@ -738,6 +962,8 @@ async function ensureSchemaNow() {
     create unique index if not exists project_file_heads_active_path_unique on project_file_heads(project_id,path) where deleted_at is null;
     create index if not exists idx_project_chat_project on project_chat_messages (project_id,created_at,id);
     create index if not exists idx_project_client_request_summaries_project on project_client_request_summaries(project_id,created_at desc,id desc);
+    create index if not exists idx_project_client_requests_open on project_client_request_summaries(project_id,updated_at desc,id desc) where status<>'resolved';
+    create index if not exists idx_project_request_notifications_user_unread on project_request_notifications(user_id,created_at desc,request_id) where read_at is null;
     create index if not exists idx_project_agent_actions_project on project_agent_actions (project_id,created_at,id);
   `);
   await db.query(`
@@ -818,7 +1044,7 @@ async function ensureSchemaNow() {
     alter table project_tracemini_schedules drop constraint if exists project_tracemini_schedules_format_check;
     alter table project_tracemini_schedules add constraint project_tracemini_schedules_format_check check(format in ('markdown','pdf','pptx')) not valid;
     create table if not exists tracemini_request_nonces(binding_id text not null, nonce text not null, seen_at timestamptz not null default now(), primary key(binding_id,nonce));
-    create or replace function prevent_project_tracemini_evidence_mutation() returns trigger language plpgsql as $$ begin if tg_op='DELETE' and pg_trigger_depth()>1 then return old; end if; raise exception 'TraceMini evidence rows are immutable'; end $$;
+    create or replace function prevent_project_tracemini_evidence_mutation() returns trigger language plpgsql as $$ begin if tg_op='DELETE' and pg_trigger_depth()>1 then return old; end if; raise exception 'Neo-Nexus evidence rows are immutable'; end $$;
     drop trigger if exists prevent_project_tracemini_evidence_update on project_tracemini_evidence;
     create trigger prevent_project_tracemini_evidence_update before update or delete on project_tracemini_evidence for each row execute function prevent_project_tracemini_evidence_mutation();
     create table if not exists tracemini_scan_requests (
@@ -866,7 +1092,11 @@ async function ensureSchemaNow() {
     create index if not exists idx_tracemini_pushes_due on tracemini_pending_pushes(status,next_check_at);
     create index if not exists idx_tracemini_candidates_device_key on tracemini_repository_candidates(device_id,repository_key);
     create index if not exists idx_tracemini_candidates_scan on tracemini_repository_candidates(scan_id,created_at);
-  `);
+    `);
+  } finally {
+    if (schemaLockHeld) await db.query(`select pg_advisory_unlock(hashtextextended('employee-trace-schema-v1',0))`).catch(() => undefined);
+    client.release();
+  }
 }
 
 export async function registerCompanyWithAdmin(companyName: string, adminEmail: string, adminPassword: string) {

@@ -182,7 +182,7 @@ config_path.chmod(0o600)
 service = home / '.config/systemd/user/files-agent.service'
 try:
     service.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    service.write_text('[Unit]\\nDescription=Files Agent TraceMini service\\n[Service]\\nExecStart=%h/.local/bin/files-agent service --interval 30\\nRestart=on-failure\\n[Install]\\nWantedBy=default.target\\n', encoding='utf-8')
+    service.write_text('[Unit]\\nDescription=Neo-Nexus project activity service\\n[Service]\\nExecStart=%h/.local/bin/files-agent service --interval 30\\nRestart=on-failure\\n[Install]\\nWantedBy=default.target\\n', encoding='utf-8')
     if shutil.which('systemctl'):
         os.system('systemctl --user daemon-reload >/dev/null 2>&1 || true')
         os.system('systemctl --user enable --now files-agent.service >/dev/null 2>&1 || true')

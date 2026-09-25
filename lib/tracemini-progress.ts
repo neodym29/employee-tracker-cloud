@@ -73,7 +73,7 @@ export function proposeProgress(current: ProjectProgress, repositoryId: string, 
   const percent = Math.min(99, Math.max(current.percent, ...qualifying.map((event) => FLOORS[event.type])));
   const countLabel = `${qualifying.length} new Git event${qualifying.length === 1 ? '' : 's'}`;
   const tail = `; latest was ${latest.type} at ${latest.occurredAt}.`;
-  const prefix = `TraceMini observed ${countLabel} for `;
+  const prefix = `Neo-Nexus observed ${countLabel} for `;
   const available = Math.max(1, 240 - prefix.length - tail.length);
   const summary = `${prefix}${safeRepositoryName(repositoryName).slice(0, available)}${tail}`;
   if (percent === current.percent && summary === current.summary) return null;

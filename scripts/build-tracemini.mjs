@@ -12,8 +12,10 @@ for(const [name, hash] of Object.entries(manifest.files)) {
 const stage = 'build/tracemini/stage'; fs.mkdirSync(stage, {recursive:true});
 const names = ['agent.ts','config.ts','git.ts','index.ts','install.ts','pairing.ts','setup.ts'];
 for(const name of names) fs.writeFileSync(`${stage}/${name}`, patchSource(name, fs.readFileSync(`${snapshot}/packages/cli/src/${name}`, 'utf8')));
-fs.copyFileSync('packages/tracemini-cloud-adapter/src/transport.ts', `${stage}/api.ts`);
+fs.writeFileSync(`${stage}/api.ts`, fs.readFileSync('packages/tracemini-cloud-adapter/src/transport.ts','utf8').replace("'../../../lib/tracemini-work-evidence'", "'./work-evidence.js'"));
+fs.copyFileSync('lib/tracemini-work-evidence.ts', `${stage}/work-evidence.ts`);
 fs.copyFileSync('packages/tracemini-cloud-adapter/src/auth-transport.ts', `${stage}/auth-transport.ts`);
+fs.copyFileSync('packages/tracemini-cloud-adapter/src/local-worktree.ts', `${stage}/local-worktree.ts`);
 fs.writeFileSync(`${stage}/linux-installer.ts`, patchSource('linux-installer.ts',fs.readFileSync(`${snapshot}/apps/server/src/linux-installer.ts`,'utf8')));
 const options = {bundle:true, platform:'node', format:'esm', target:'node22', metafile:true};
 const result = await build({...options, entryPoints:[`${stage}/index.ts`], outfile:'build/tracemini/cli/index.js'});
@@ -22,5 +24,5 @@ fs.writeFileSync('build/tracemini/metafile.json', JSON.stringify(result.metafile
 await build({...options,entryPoints:[`${stage}/linux-installer.ts`],outfile:'build/tracemini/installer.mjs'});
 await build({...options,entryPoints:[`${stage}/api.ts`],outfile:'build/tracemini/transport.mjs'});
 await build({...options,entryPoints:[`${stage}/git.ts`],outfile:'build/tracemini/git.mjs'});
-await build({...options,stdin:{contents:"export {tick,flush} from './agent.ts'; export {loadConfig,saveConfig} from './config.ts'; export {api} from './api.ts';",resolveDir:path.resolve(stage)},outfile:'build/tracemini/engine.mjs'});
+await build({...options,stdin:{contents:"export {tick,flush} from './agent.ts'; export {loadConfig,saveConfig} from './config.ts'; export {api} from './api.ts'; export {importObserverReceipts,reconcileLocalWorktrees,localWorktreeCapabilities} from './local-worktree.ts';",resolveDir:path.resolve(stage)},outfile:'build/tracemini/engine.mjs'});
 console.log('Built original TypeScript Git CLI: watch/once/start/event and explicit service-install enabled; sync/login/workspace and report/document capabilities remain gated.');

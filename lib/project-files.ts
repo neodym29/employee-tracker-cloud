@@ -1,4 +1,5 @@
 import type { SessionUser } from './auth';
+import { scopeEngineerJournalFiles } from './project-engineer-journal';
 import { ensureSchema, getPool } from './db';
 import { ProjectServiceError, projectAccessSql } from './projects';
 
@@ -81,7 +82,7 @@ export async function getProjectFile(session: SessionUser, projectId: unknown, f
   const db = await ready();
   await assertAccess(db, session, project);
   const result = await db.query(`select * from (${liveFilesSql}) live where file_id=$2`, [project, file]);
-  const latest = result.rows[0];
+  const latest = (await scopeEngineerJournalFiles(db, project, String(session.id), result.rows))[0];
   if (!latest) throw new ProjectServiceError('File not found', 404, 'not_found');
   return latest;
 }

@@ -1,5 +1,6 @@
 // Extracted from pristine TraceMini repository-selection.ts; cloud DTO extensions only.
 export type RepositoryCandidate = {
+  delivery_health?: {state:string;label:string;detail?:string;lastReceivedAt?:string|null};
   revision: number;
   project_id?: string;
   selectable?: boolean;
@@ -32,13 +33,13 @@ export function repositorySelectionState(candidate: RepositoryCandidate) {
       label: candidate.desired_traced ? 'Starting trace on device…' : 'Stopping trace on device…',
       detail: candidate.desired_traced
         ? 'Validating the repository and installing Git hooks. This can take up to a minute.'
-        : 'Removing TraceMini hooks and updating the local device.',
+        : 'Removing repository hooks and updating the local device.',
       pending: true,
       checked: candidate.desired_traced,
       tone: 'progress',
     } as const;
   }
   return candidate.traced
-    ? {label: 'Traced', detail: undefined, pending: false, checked: true, tone: 'success'} as const
+    ? {label: candidate.delivery_health?.label || 'Awaiting first activity', detail: candidate.delivery_health?.detail, pending: false, checked: true, tone: candidate.delivery_health?.state==='received' ? 'success' : 'muted'} as const
     : {label: 'Available', detail: undefined, pending: false, checked: false, tone: 'muted'} as const;
 }

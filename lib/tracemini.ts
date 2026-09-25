@@ -40,7 +40,7 @@ export async function getTraceMiniConfig(session: SessionUser, value: unknown) {
 export async function saveTraceMiniConfig(session: SessionUser, value: unknown, input: Record<string, unknown>) {
   const project = projectId(value); const { pool, row } = await authorized(session, project);
   if (!isTraceMiniManager(session, String(row.client_id))) throw new ProjectServiceError('Forbidden', 403, 'forbidden');
-  if ('baseUrl' in input || 'workspaceId' in input || 'credential' in input) throw new ProjectServiceError('Embedded TraceMini does not accept external configuration', 400, 'invalid_request');
+  if ('baseUrl' in input || 'workspaceId' in input || 'credential' in input) throw new ProjectServiceError('Neo-Nexus does not accept external configuration', 400, 'invalid_request');
   const paused = typeof input.enabled === 'boolean' ? !input.enabled : row.tracemini_telemetry_paused;
   const retention = typeof input.retentionDays === 'number' && Number.isInteger(input.retentionDays) ? Math.max(1, Math.min(input.retentionDays, 3650)) : Number(row.tracemini_retention_days || 90);
   await pool.query(`update projects set tracemini_telemetry_paused=$2,tracemini_retention_days=$3,updated_at=now() where id=$1`, [project, paused, retention]);
@@ -75,7 +75,7 @@ export async function wipeTraceMiniTelemetry(session: SessionUser, value: unknow
 }
 
 export function validateTraceMiniDashboardEnvelope(value: unknown) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid embedded TraceMini dashboard response');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid Neo-Nexus activity response');
   return value as { events: unknown[]; repositories: unknown[]; stats: Record<string, unknown>; timeline: unknown[] };
 }
 
@@ -86,23 +86,31 @@ export async function getTraceMiniData(session: SessionUser, value: unknown, fil
   if (filters.from && /^\d{4}-\d{2}-\d{2}$/.test(filters.from)) { params.push(filters.from); where.push(`e.occurred_at >= $${params.length}::date`); }
   if (filters.to && /^\d{4}-\d{2}-\d{2}$/.test(filters.to)) { params.push(filters.to); where.push(`e.occurred_at < ($${params.length}::date + interval '1 day')`); }
   const events = await pool.query(
-    `select e.id,e.event_key,e.kind,e.repository_key,e.occurred_at,e.provenance,e.evidence_eligible,u.display_name
+    `select e.id,e.event_key,e.kind,e.repository_key,e.occurred_at,e.provenance,e.evidence_eligible,u.id as user_id,u.display_name
        from project_tracemini_events e join files_agent_devices d on d.id=e.device_id
        join app_users u on u.id=d.user_id where ${where.join(' and ')} order by e.occurred_at desc,e.id desc limit 250`, params);
   const recentActivity = events.rows.map((event) => { const provenance = event.provenance && typeof event.provenance === 'object' ? event.provenance as Record<string, unknown> : {};
+    const data = Object.fromEntries(Object.entries(provenance).filter(([key]) => !['agent','attribution','observer_source','observer_receipt','local_source','git_author_name'].includes(key)));
     const evidenceEligible = event.evidence_eligible === true;
     return { id: String(event.id), upstreamId: String(event.event_key), evidenceEligible,
     type: String(event.kind), occurredAt: new Date(event.occurred_at).toISOString(), repositoryName: String(event.repository_key || ''),
-    member: { mapped: true, label: typeof event.display_name === 'string' ? event.display_name : 'Project member' },
-    data: provenance }; });
+    member: { mapped: true, id: String(event.user_id), label: typeof event.display_name === 'string' ? event.display_name : 'Project member' },
+    data }; });
   const counts = recentActivity.reduce((result, event) => { result[event.type] = (result[event.type] || 0) + 1; return result; }, {} as Record<string, number>);
+  // Clone metadata comes from approved bindings, not the number of Git events.
+  const roots = await pool.query(`select repository_key,count(*) as clone_count,min(created_at) as created_at from project_tracemini_roots where project_id=$1 and status='approved' group by repository_key`, [project]);
+  const repositories = [...new Set(recentActivity.map((event) => event.repositoryName).filter(Boolean))].map((name) => {
+    const root = roots.rows.find((root) => root.repository_key === name);
+    return { id: name, name, archived: false, cloneCount: Number(root?.clone_count || 0), createdAt: root?.created_at ? new Date(root.created_at).toISOString() : null,
+      events: recentActivity.filter((event) => event.repositoryName === name).length };
+  });
   return { state: 'fresh', stale: false, lastSuccessfulSync: new Date().toISOString(), lastError: null,
     data: { matchStatus: 'embedded', matchedRepository: null, hasLocalClone: recentActivity.some((event) => event.type === 'git'),
       localCloneCount: recentActivity.filter((event) => event.type === 'git').length, activityTotal: recentActivity.length, recentActivity,
-      repositories: [...new Set(recentActivity.map((event) => event.repositoryName).filter(Boolean))].map((name) => ({ name, events: recentActivity.filter((event) => event.repositoryName === name).length })),
-      devices: (await pool.query(`select device_label,last_seen_at,revoked_at from files_agent_devices where id in (select distinct device_id from project_tracemini_events where project_id=$1) order by last_seen_at desc`, [project])).rows.map((device, index) => ({ label: `Approved device ${index + 1}`, status: device.revoked_at ? 'revoked' : 'active', lastSeen: device.last_seen_at ? new Date(device.last_seen_at).toISOString() : null })),
-      memberActivity: Object.values(recentActivity.reduce((all, event) => { const key = event.member.label; (all[key] ||= { member: key, events: 0 }).events++; return all; }, {} as Record<string, { member: string; events: number }>)),
-      reports: (await pool.query(`select id,name,scope,reporter,format,status,start_date,end_date,created_at,completed_at from project_tracemini_reports where project_id=$1 order by created_at desc limit 50`, [project])).rows.map((report) => ({ id: String(report.id), title: String(report.name), scope: report.scope, reporter: report.reporter, format: report.format, status: report.status, createdAt: new Date(report.created_at).toISOString(), completedAt: report.completed_at ? new Date(report.completed_at).toISOString() : null })),
+      repositories,
+      devices: (await pool.query(`select d.user_id,u.display_name,d.last_seen_at,d.revoked_at from files_agent_devices d join app_users u on u.id=d.user_id where d.id in (select distinct device_id from project_tracemini_events where project_id=$1) order by d.last_seen_at desc`, [project])).rows.map((device, index) => ({ label: `Approved device ${index + 1}`, member: { mapped: true, id: String(device.user_id), label: typeof device.display_name === 'string' ? device.display_name : 'Project member' }, status: device.revoked_at ? 'revoked' : 'active', lastSeen: device.last_seen_at ? new Date(device.last_seen_at).toISOString() : null })),
+      memberActivity: Object.values(recentActivity.reduce((all, event) => { const key = event.member.id; (all[key] ||= { member: event.member, count: 0 }).count++; return all; }, {} as Record<string, { member: typeof recentActivity[number]['member']; count: number }>)),
+      reports: (await pool.query(`select id,name,scope,reporter,format,status,start_date,end_date,created_at,completed_at from project_tracemini_reports where project_id=$1 and ($2 or scope='workspace' or requested_by=$3) order by created_at desc limit 50`, [project, isTraceMiniManager(session, String(row.client_id)), session.id])).rows.map((report) => ({ id: String(report.id), title: String(report.name), scope: report.scope, reporter: report.reporter, format: report.format, status: report.status, createdAt: new Date(report.created_at).toISOString(), updatedAt: new Date(report.completed_at || report.created_at).toISOString(), completedAt: report.completed_at ? new Date(report.completed_at).toISOString() : null })),
       stats: counts } };
 }
 
@@ -141,7 +149,7 @@ export async function createTraceMiniReport(session: SessionUser, value: unknown
   const scope = input.scope === 'workspace' ? 'workspace' : 'personal'; if (scope === 'workspace' && !manager) throw new ProjectServiceError('Workspace reports require manager access', 403, 'forbidden');
   const reporter = input.reporter === 'hermes' ? 'hermes' : input.reporter === 'codex' ? 'codex' : (() => { throw new ProjectServiceError('Invalid reporter', 400, 'invalid_request'); })();
   const format = ['markdown','pdf','pptx'].includes(String(input.format)) ? String(input.format) : (() => { throw new ProjectServiceError('Invalid report format', 400, 'invalid_request'); })();
-  const name = typeof input.name === 'string' && input.name.trim() ? input.name.trim().slice(0, 160) : 'TraceMini report';
+  const name = typeof input.name === 'string' && input.name.trim() ? input.name.trim().slice(0, 160) : 'Neo-Nexus report';
   const prompt = input.prompt === undefined ? null : typeof input.prompt === 'string' && Buffer.byteLength(input.prompt,'utf8') <= 20000 ? input.prompt : (() => { throw new ProjectServiceError('Prompt exceeds bound',400,'invalid_request'); })();
   const includeDiff = input.includeDiff === true; if (includeDiff && input.diffConsent !== true) throw new ProjectServiceError('bounded diff requires explicit consent', 400, 'invalid_request');
   const documents = Array.isArray(input.documents) ? input.documents : [];
@@ -155,8 +163,30 @@ export async function createTraceMiniReport(session: SessionUser, value: unknown
 export async function regenerateTraceMiniReport(session:SessionUser,value:unknown,reportValue:unknown){
   const project=projectId(value); const {pool,row}=await authorized(session,project); if(!isTraceMiniManager(session,String(row.client_id))) throw new ProjectServiceError('Forbidden',403,'forbidden');
   const report=String(reportValue??''); if(!/^\d+$/.test(report)) throw new ProjectServiceError('Invalid report id',400,'invalid_request');
-  const result=await pool.query(`insert into project_tracemini_reports(project_id,requested_by,scope,reporter,name,format,prompt,start_date,end_date,include_diff,documents,parent_report_id,status,dedupe_key,slack_status) select project_id,$3,scope,reporter,name,format,prompt,start_date,end_date,include_diff,documents,id,'pending',$4,'not_requested' from project_tracemini_reports where id=$1 and project_id=$2 returning *`,[report,project,session.id,crypto.randomUUID()]);
-  if(!result.rows[0]) throw new ProjectServiceError('Report not found',404,'not_found'); return result.rows[0];
+  // Keep target identity immutable across regeneration. Authorize and insert in one
+  // statement so an unsupported target can never become a generic workspace job.
+  // Node claim/context/completion independently recheck authority after enqueue.
+  const result=await pool.query(`insert into project_tracemini_reports(project_id,requested_by,scope,reporter,name,format,prompt,start_date,end_date,include_diff,documents,parent_report_id,status,dedupe_key,slack_status,target_user_id,target_device_id,target_root_id)
+    select source.project_id,$3,source.scope,source.reporter,source.name,source.format,source.prompt,source.start_date,source.end_date,source.include_diff,source.documents,source.id,'pending',$4,'not_requested',source.target_user_id,source.target_device_id,source.target_root_id
+    from project_tracemini_reports source
+    where source.id=$1 and source.project_id=$2
+    and exists(select 1 from projects p join app_users requester on requester.id=$3
+      where p.id=source.project_id and p.approval_status='approved' and requester.approval_status='approved'
+      and ((requester.role='admin' and requester.account_type='admin') or (requester.account_type='client' and p.client_id=requester.id)))
+    and ((source.target_user_id is null and source.target_device_id is null and source.target_root_id is null)
+      or (source.scope='workspace' and source.format='markdown' and source.include_diff=false and source.documents='[]'::jsonb
+        and exists(select 1 from app_users target join project_memberships m on m.user_id=target.id and m.project_id=source.project_id
+          where target.id=source.target_user_id and target.approval_status='approved' and target.account_type='engineer' and m.membership_status='active')
+        and exists(select 1 from project_tracemini_roots r
+          join files_agent_devices d on d.id=r.device_id
+          join tracemini_node_devices n on n.id=d.node_device_id and n.user_id=d.user_id and n.company_id=d.company_id
+          where r.id=source.target_root_id and r.project_id=source.project_id and r.device_id=source.target_device_id and d.user_id=source.target_user_id
+          and r.status='approved' and r.revoked_at is null and d.revoked_at is null
+          and n.revoked_at is null and n.expires_at>now() and n.capability='node-git-v1')
+        and (select count(*) from project_tracemini_roots r join files_agent_devices d on d.id=r.device_id
+          where r.project_id=source.project_id and d.user_id=source.target_user_id and r.status='approved' and r.revoked_at is null)=1))
+    returning *`,[report,project,session.id,crypto.randomUUID()]);
+  if(!result.rows[0]) throw new ProjectServiceError('Report not found or regeneration scope no longer supported',404,'not_found'); return result.rows[0];
 }
 
 export async function getTraceMiniSchedule(session: SessionUser, value: unknown) {
@@ -169,7 +199,7 @@ export async function saveTraceMiniSchedule(session: SessionUser, value: unknown
   if (!isTraceMiniManager(session, String(row.client_id))) throw new ProjectServiceError('Forbidden', 403, 'forbidden');
   const unknown = Object.keys(input).find((key) => !['name','frequency','selectedDays','localTime','timezone','reporter','format','prompt','includeDiff','diffConsent','documents','notifySlack','enabled'].includes(key));
   if (unknown) throw new ProjectServiceError(`Unknown schedule field: ${unknown}`,400,'invalid_request');
-  const name = typeof input.name === 'string' && input.name.trim() ? input.name.trim().slice(0, 160) : 'TraceMini schedule';
+  const name = typeof input.name === 'string' && input.name.trim() ? input.name.trim().slice(0, 160) : 'Neo-Nexus schedule';
   const frequency = ['daily','weekdays','selected_days'].includes(String(input.frequency)) ? String(input.frequency) : (() => { throw new ProjectServiceError('Invalid schedule frequency',400,'invalid_request'); })();
   const reporter = input.reporter === 'hermes' ? 'hermes' : input.reporter === 'codex' ? 'codex' : (() => { throw new ProjectServiceError('Invalid reporter',400,'invalid_request'); })();
   const format = ['markdown','pdf','pptx'].includes(String(input.format)) ? String(input.format) : (() => { throw new ProjectServiceError('Invalid schedule format',400,'invalid_request'); })();

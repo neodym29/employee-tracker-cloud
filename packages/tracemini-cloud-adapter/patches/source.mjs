@@ -1,4 +1,5 @@
 import {activationPatch} from './activation.mjs';
+import {onboardingPatch} from './onboarding.mjs';
 // Explicit integration patch recipe. Applied only to disposable build staging.
 export function patchSource(name, original) {
  let source = original;
@@ -8,10 +9,36 @@ export function patchSource(name, original) {
   source = source.replace("import {CodexRunner, HermesRunner} from './runner.js';\n", '').replace("import {startDocumentLoopbackServer} from './document-loopback.js';\n", '');
   const start = source.indexOf('export async function processJob('), end = source.indexOf('export async function tick(', start);
   if(start < 0 || end < 0) throw new Error('Upstream report seam changed');
-  source = source.slice(0,start) + source.slice(end);
+  source = source.replace("['show', '--stat', '--format=fuller', '--no-ext-diff', data.commitSha]", "['show', '--stat', '--format=commit %H%nSubject: %s', '--no-ext-diff', '--no-textconv', data.commitSha]");
+  source = source.replace("    const runner = job.reporter === 'hermes' ? new HermesRunner() : new CodexRunner();", '');
+  source = source.replace('await runner.generate(contextPrompt(context, workspaceClones), cwd)', "await api<string>(config, `/api/agents/jobs/${job.id}/generate`, {method:'POST', body:JSON.stringify({prompt:contextPrompt(context, workspaceClones)})})");
+  // The cloud worker supports one explicitly selected collector/device/root only.
+  source = source.replace("${workspaceReport ? 'whole-workspace' : 'individual'}", 'selected repository');
+  source = source.replace(/  if \(workspaceReport\) text \+= `This report covers the whole workspace\.[\s\S]*?`;\n/, "  text += `Scope: only the selected repository root on this reporting device, collected for contributor user ${context.job.user_id}, during ${context.job.start_date} through ${context.job.end_date}. This is not workspace-wide coverage. Collector identity is not verified commit authorship; Git metadata does not prove delivery, ownership, or individual authorship. Attribute observations as collected evidence, not verified employee outcomes. State the single-root/device/date and evidence limitations.\\n\\n`;\n");
+  source = source.replace('most important delivered outcomes', 'most important observed changes')
+    .replace('testing, reliability, and ownership without', 'testing and reliability evidence without')
+    .replace('delivered capabilities and outcomes,', 'observed changes,')
+    .replace('and demonstrated ownership.', 'and explicitly evidenced results.');
+  source = source.replace('export async function tick(', `const reportFlights = new Map<string, Promise<void>>();
+const reportFlightKey = (config: Config) => config.serverUrl + '\\0' + config.agentToken;
+export async function waitForReports(config: Config) { await reportFlights.get(reportFlightKey(config)); }
+function startReports(config: Config) {
+  const key = reportFlightKey(config);
+  if (reportFlights.has(key)) return;
+  const flight = Promise.resolve().then(async () => {
+    const work: any = await api(config, '/api/agents/report-poll');
+    if (work.jobs?.[0]) await processJob(config, work.jobs[0]);
+  }).catch(() => { /* Reporting failure must never abort control reconciliation. */ })
+    .finally(() => { reportFlights.delete(key); });
+  reportFlights.set(key, flight);
+}
+export async function tick(`);
+  source = source.replace('  if (jobs[0]) await processJob(config, jobs[0]);', '');
+  source = source.replace('  await processPushes(config, work.pushes || []);', '  await processPushes(config, work.pushes || []);\n  startReports(config);');
+  source = source.replace('      if (once) return;', '      if (once) { await waitForReports(config); return; }');
   source = source.replace('const unauthorizedPreferred = current.workspaceId != null && !authorized.has(current.workspaceId);', 'const unauthorizedPreferred = false; // workspaceId is an account discovery context, not a project');
   source = source.replace('if (current.workspaceId && !authorized.has(current.workspaceId)) current.workspaceId = workspaceIds[0];', '// Preserve the account discovery context.');
-  source = source.replace('  if (jobs[0]) await processJob(config, jobs[0]);', "  if (jobs.length) throw new Error('Report capability disabled');");
+
   source = source.replace('  const documentServer = once ? undefined : startDocumentLoopbackServer(config);','').replace('} finally { documentServer?.close(); }','} finally { /* Git-only runtime: no document listener. */ }');
  }
  if (name === 'index.ts') {
@@ -82,5 +109,8 @@ const config = loadConfig();`);
 )`);
   source = source.replace('set -eu\n', 'set -eu\numask 077\n');
  }
- return activationPatch(name, source);
+ source = onboardingPatch(name, activationPatch(name, source));
+ // Product copy is Neo-Nexus; filesystem, service, binary, and API namespaces
+ // intentionally remain employee-trace for installed-client compatibility.
+ return source.replaceAll('Employee Trace', 'Neo-Nexus').replaceAll('Cloud Trace', 'Neo-Nexus');
 }

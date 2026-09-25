@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation';
 
 function LoginForm() {
   const params = useSearchParams();
-  const requestedNext = params.get('next');
+  const requestedNext = params?.get('next');
   const next = requestedNext?.startsWith('/') && !requestedNext.startsWith('//') ? requestedNext : null;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

@@ -21,6 +21,7 @@ export type ProjectAgentStatistics = {
   generatedDocuments: number;
   records: number;
   artifacts: number;
+  openClientRequests?: Array<{ id: string; summary: string; details: string; kind: 'task' | 'issue'; status: 'open' | 'in_progress' }>;
 };
 
 type Queryable = { query: (sql: string, values?: unknown[]) => Promise<{ rows: Array<Record<string, any>> }> };
@@ -74,8 +75,7 @@ export function buildCanonicalProjectDocuments(
 
 /** Loads only the approved active roster and bounded aggregate counts used by agent outputs/context. */
 export async function loadProjectAgentStructuredData(db: Queryable, projectId: string) {
-  const [memberResult, statisticsResult] = await Promise.all([
-    db.query(
+  const memberResult = await db.query(
       `select roster.user_id,roster.display_name,roster.account_type,roster.membership_type from (
          select u.id as user_id,u.display_name,u.account_type,'owner'::text as membership_type,0 as sort_order
            from projects p join app_users u on u.id=p.client_id and u.account_type='client' and u.approval_status='approved'
@@ -86,8 +86,15 @@ export async function loadProjectAgentStructuredData(db: Queryable, projectId: s
           where pm.project_id=$1 and pm.membership_status='active'
        ) roster order by roster.sort_order,roster.display_name,roster.user_id limit 50`,
       [projectId],
-    ),
-    db.query(
+    );
+  const requestResult = await db.query(
+      `select id,summary,details,request_kind as kind,status
+         from project_client_request_summaries
+        where project_id=$1 and status<>'resolved'
+        order by updated_at desc,id desc limit 20`,
+      [projectId],
+    );
+  const statisticsResult = await db.query(
       `select
          (select count(*) from project_memberships pm where pm.project_id=$1 and pm.membership_status='active') + 1 as active_members,
          (select count(*) from project_memberships pm join app_users u on u.id=pm.user_id and u.account_type='engineer' and u.approval_status='approved' where pm.project_id=$1 and pm.membership_status='active') as active_engineers,
@@ -96,8 +103,7 @@ export async function loadProjectAgentStructuredData(db: Queryable, projectId: s
          (select count(*) from project_records r where r.project_id=$1) as records,
          (select count(*) from project_artifacts a where a.project_id=$1) as artifacts`,
       [projectId],
-    ),
-  ]);
+    );
   const row = statisticsResult.rows[0] || {};
   return {
     memberRoster: memberResult.rows as ProjectAgentMember[],
@@ -108,6 +114,13 @@ export async function loadProjectAgentStructuredData(db: Queryable, projectId: s
       generatedDocuments: count(row.generated_documents),
       records: count(row.records),
       artifacts: count(row.artifacts),
+      openClientRequests: requestResult.rows.map((request) => ({
+        id: String(request.id),
+        summary: String(request.summary ?? '').slice(0, 160),
+        details: String(request.details ?? '').slice(0, 2000),
+        kind: request.kind === 'issue' ? 'issue' : 'task',
+        status: request.status === 'in_progress' ? 'in_progress' : 'open',
+      })),
     } as ProjectAgentStatistics,
   };
 }

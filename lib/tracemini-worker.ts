@@ -14,7 +14,7 @@ export async function claimTraceMiniReport(workerId: string, leaseSeconds = 300)
   await ensureSchema(); const db = getPool(); const client = await db.connect();
   try {
     await client.query('begin');
-    const result = await client.query(`update project_tracemini_reports set status='running',lease_id=$1,lease_expires_at=now()+($2::text||' seconds')::interval,attempt_count=attempt_count+1 where id=(select id from project_tracemini_reports where (status='pending' or (status='running' and lease_expires_at<now())) and (next_run_at is null or next_run_at<=now()) order by created_at for update skip locked limit 1) returning id,project_id,lease_id,reporter,format,prompt`, [workerId, Math.max(30, Math.min(3600, leaseSeconds))]);
+    const result = await client.query(`update project_tracemini_reports set status='running',lease_id=$1,lease_expires_at=now()+($2::text||' seconds')::interval,attempt_count=attempt_count+1 where id=(select id from project_tracemini_reports where target_user_id is null and target_device_id is null and target_root_id is null and (status='pending' or (status='running' and lease_expires_at<now())) and (next_run_at is null or next_run_at<=now()) order by created_at for update skip locked limit 1) returning id,project_id,lease_id,reporter,format,prompt`, [workerId, Math.max(30, Math.min(3600, leaseSeconds))]);
     await client.query('commit');
     return result.rows[0] ? { id: String(result.rows[0].id), leaseId: result.rows[0].lease_id, projectId: String(result.rows[0].project_id), reporter: result.rows[0].reporter, format: result.rows[0].format, prompt: result.rows[0].prompt } : null;
   } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }

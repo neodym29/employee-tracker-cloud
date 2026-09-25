@@ -12,5 +12,8 @@ export default async function ProjectWorkspacePage({ params }: Props) {
   const project = await getProject(session, projectId, { platformAudit: platformAdmin });
   const canManageTraceMini = platformAdmin
     || (session.account_type === 'client' && String(project.client_id) === String(session.id));
-  return <WorkspaceClient projectId={projectId} accountType={session.account_type} canManageTraceMini={canManageTraceMini} />;
+  const canDeleteProject = platformAdmin
+    || (session.account_type === 'client' && String(project.client_id) === String(session.id))
+    || (session.account_type === 'engineer' && String(project.creation_requested_by) === String(session.id));
+  return <WorkspaceClient projectId={projectId} accountType={session.account_type} canManageTraceMini={canManageTraceMini} canDeleteProject={canDeleteProject} />;
 }

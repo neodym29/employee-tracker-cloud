@@ -12,7 +12,7 @@ type ActiveNavLinkProps = {
 
 export default function ActiveNavLink({ href, children, className = '', exact = false }: ActiveNavLinkProps) {
   const pathname = usePathname();
-  const active = exact ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
+  const active = pathname !== null && (exact ? pathname === href : pathname === href || pathname.startsWith(`${href}/`));
   const classes = ['navLink', className, active ? 'active' : ''].filter(Boolean).join(' ');
 
   return (

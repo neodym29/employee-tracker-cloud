@@ -1,9 +1,10 @@
 import crypto from 'node:crypto';
 import type { PoolClient } from 'pg';
 import type { SessionUser } from './auth';
-import { ensureSchema, getPool } from './db';
+import { ensureSchema, getPool, hashPassword } from './db';
 import { ensureCanonicalProjectDocuments, loadProjectAgentStructuredData } from './project-agent-documents';
-import { parseGitRemote } from './git-remote';
+import { parseGitRemote, parseProjectSource } from './git-remote';
+import { normalizeDeploymentUrl } from './deployment-url';
 
 export const TITLE_MAX = 120;
 export const DESCRIPTION_MAX = 4000;
@@ -121,13 +122,14 @@ function creationFingerprint(payload: Record<string, unknown>) {
   return crypto.createHash('sha256').update(JSON.stringify(payload), 'utf8').digest('hex');
 }
 
-export async function createProject(session: SessionUser, input: { clientId?: unknown; title?: unknown; description?: unknown; status?: unknown; engineerIds?: unknown; requestKey?: unknown; gitRemote?: unknown }) {
+export async function createProject(session: SessionUser, input: { clientId?: unknown; title?: unknown; titleSource?: unknown; description?: unknown; status?: unknown; engineerIds?: unknown; requestKey?: unknown; gitRemote?: unknown; sourceType?: unknown }, transactionClient?: PoolClient) {
   const creationRequestKey = requestUuid(input.requestKey);
   const title = text(input.title, 'Title', TITLE_MAX);
   const description = text(input.description ?? '', 'Description', DESCRIPTION_MAX, true);
-  let gitLink: ReturnType<typeof parseGitRemote>;
-  try { gitLink = parseGitRemote(input.gitRemote); }
-  catch { throw new ProjectServiceError('A valid credential-free Git remote is required'); }
+  const titleSource = input.titleSource === 'repository' ? 'repository' : 'manual';
+  let gitLink: ReturnType<typeof parseProjectSource>;
+  try { gitLink = parseProjectSource(input); }
+  catch { throw new ProjectServiceError('Choose a local source without a remote, or provide a valid credential-free hosted Git remote'); }
   if (session.account_type !== 'client' && session.account_type !== 'engineer') {
     throw new ProjectServiceError('Forbidden', 403, 'forbidden');
   }
@@ -150,29 +152,31 @@ export async function createProject(session: SessionUser, input: { clientId?: un
     gitRepositoryKey: gitLink.repositoryKey,
   });
 
-  const pool = await ready();
-  const client: PoolClient = await pool.connect();
+  // A trusted caller may own the transaction to compose creation with repository
+  // binding. Validation, membership formation and idempotency remain canonical.
+  const client: PoolClient = transactionClient ?? await (await ready()).connect();
   let transactionStarted = false;
   try {
-    await client.query('begin');
-    transactionStarted = true;
+    if (!transactionClient) {
+      await client.query('begin');
+      transactionStarted = true;
+    }
     const inserted = engineerCreating
       ? await client.query(
-          `insert into projects(client_id,title,description,status,approval_status,proposal_kind,creation_requested_by,creation_request_key,creation_payload_fingerprint,git_remote_url,git_repository_key,progress_percent,progress_summary)
-           select id,$2,$3,'open','approved',null,$4,$5::uuid,$6,$7,$8,30,'Project is open for delivery.' from app_users
+          `insert into projects(client_id,title,description,status,approval_status,proposal_kind,creation_requested_by,creation_request_key,creation_payload_fingerprint,git_remote_url,git_repository_key,title_source,progress_percent,progress_summary)
+           select id,$2,$3,'open','approved',null,$4,$5::uuid,$6,$7,$8,$9,null,'Not assessed' from app_users
            where id=$1 and account_type='client' and approval_status='approved'
            on conflict(creation_requested_by,creation_request_key) do nothing
            returning id,client_id,title,description,status,approval_status,git_remote_url,git_repository_key,created_at,updated_at,creation_payload_fingerprint`,
-          [ownerId, title, description, session.id, creationRequestKey, payloadFingerprint, gitLink.remoteUrl, gitLink.repositoryKey],
+          [ownerId, title, description, session.id, creationRequestKey, payloadFingerprint, gitLink.remoteUrl, gitLink.repositoryKey, titleSource],
         )
       : await client.query(
-          `insert into projects(client_id,title,description,status,approval_status,proposal_kind,creation_requested_by,creation_request_key,creation_payload_fingerprint,git_remote_url,git_repository_key,progress_percent,progress_summary)
-           values($1,$2,$3,$4,'approved',null,$5,$6::uuid,$7,$8,$9,
-             case $4 when 'draft' then 10 when 'open' then 30 when 'active' then 65 when 'completed' then 100 when 'archived' then 0 end,
-             case $4 when 'draft' then 'Project is in draft.' when 'open' then 'Project is open for delivery.' when 'active' then 'Project delivery is active.' when 'completed' then 'Project delivery is complete.' when 'archived' then 'Project is archived.' end)
+          `insert into projects(client_id,title,description,status,approval_status,proposal_kind,creation_requested_by,creation_request_key,creation_payload_fingerprint,git_remote_url,git_repository_key,title_source,progress_percent,progress_summary)
+           values($1,$2,$3,$4,'approved',null,$5,$6::uuid,$7,$8,$9,$10,
+             null,'Not assessed')
            on conflict(creation_requested_by,creation_request_key) do nothing
            returning id,client_id,title,description,status,approval_status,git_remote_url,git_repository_key,created_at,updated_at,creation_payload_fingerprint`,
-          [ownerId, title, description, status, session.id, creationRequestKey, payloadFingerprint, gitLink.remoteUrl, gitLink.repositoryKey],
+          [ownerId, title, description, status, session.id, creationRequestKey, payloadFingerprint, gitLink.remoteUrl, gitLink.repositoryKey, titleSource],
         );
 
     if (inserted.rows[0] && engineerCreating) {
@@ -245,7 +249,7 @@ export async function createProject(session: SessionUser, input: { clientId?: un
         session.id,
       );
     }
-    await client.query('commit');
+    if (!transactionClient) await client.query('commit');
     const { creation_payload_fingerprint: _fingerprint, ...publicProject } = project;
     const canonicalProject = { ...publicProject, memberships };
     return engineerCreating ? { ...canonicalProject, membership: memberships[0] } : canonicalProject;
@@ -255,7 +259,7 @@ export async function createProject(session: SessionUser, input: { clientId?: un
     }
     throw error;
   } finally {
-    client.release();
+    if (!transactionClient) client.release();
   }
 }
 
@@ -275,6 +279,80 @@ export async function updateProject(session: SessionUser, projectId: unknown, in
   );
   if (!result.rows[0]) throw new ProjectServiceError('Project not found', 404, 'not_found');
   return result.rows[0];
+}
+
+export async function renameProject(session: SessionUser, projectId: unknown, value: unknown) {
+  const project = id(projectId, 'project id');
+  const title = text(value, 'Title', TITLE_MAX);
+  const db = await ready();
+  const result = await db.query(
+    `update projects p set title=$3,title_source='manual',agent_title_evidence_hash=null,agent_title_updated_at=null,updated_at=now()
+     where p.id=$1 and p.approval_status='approved' and (
+       (p.client_id=$2 and $4='client') or
+       ($4='engineer' and (p.creation_requested_by=$2 or exists(
+         select 1 from project_memberships pm where pm.project_id=p.id and pm.user_id=$2
+         and pm.membership_type='creator' and pm.membership_status='active'
+       )))
+     )
+     returning id,client_id,title,description,status,approval_status,created_at,updated_at`,
+    [project, session.id, title, session.account_type],
+  );
+  if (!result.rows[0]) throw new ProjectServiceError('Project not found', 404, 'not_found');
+  return result.rows[0];
+}
+
+export async function updateProjectDeploymentUrl(session: SessionUser, projectId: unknown, value: unknown) {
+  const project = id(projectId, 'project id');
+  let deploymentUrl: string | null;
+  try { deploymentUrl = normalizeDeploymentUrl(value); }
+  catch (error) { throw new ProjectServiceError(error instanceof Error ? error.message : 'Deployment URL is invalid'); }
+  const platformAdmin = session.role === 'admin' && session.account_type === 'admin';
+  const db = await ready();
+  const result = await db.query(
+    `update projects p set deployment_url=$3,updated_at=now()
+      where p.id=$1 and p.approval_status='approved' and (
+        $4::boolean or
+        ($5='client' and p.client_id=$2) or
+        ($5='engineer' and (p.creation_requested_by=$2 or exists(
+          select 1 from project_memberships pm where pm.project_id=p.id and pm.user_id=$2
+          and pm.membership_type='creator' and pm.membership_status='active'
+        )))
+      )
+      returning id,title,deployment_url,updated_at`,
+    [project, session.id, deploymentUrl, platformAdmin, session.account_type],
+  );
+  if (!result.rows[0]) throw new ProjectServiceError('Project not found', 404, 'not_found');
+  return result.rows[0];
+}
+
+export async function deleteProject(session: SessionUser, projectId: unknown) {
+  const project = id(projectId, 'project id');
+  const platformAdmin = session.role === 'admin' && session.account_type === 'admin';
+  const creatorCanDelete = session.account_type === 'engineer';
+  const db = await ready();
+  const owner = await db.query(
+    `select id from projects where id=$1 and approval_status='approved'
+       and ($2::boolean or client_id=$3 or ($4::boolean and (creation_requested_by=$3 or exists(
+         select 1 from project_memberships pm where pm.project_id=projects.id and pm.user_id=$3
+         and pm.membership_type='creator' and pm.membership_status='active')))) for update`,
+    [project, platformAdmin, session.id, creatorCanDelete],
+  );
+  if (!owner.rows[0]) throw new ProjectServiceError('Project not found', 404, 'not_found');
+  const retained = await db.query(
+    `select
+       (select count(*) from project_files where project_id=$1) as files,
+       (select count(*) from project_file_heads where project_id=$1) as heads,
+       (select count(*) from project_agent_actions where project_id=$1) as actions,
+       (select count(*) from project_tracemini_original_summaries where project_id=$1) as summaries`,
+    [project],
+  );
+  const row = retained.rows[0];
+  if ([row.files, row.heads, row.actions, row.summaries].some((value) => Number(value) > 0)) {
+    await db.query(`update projects set status='archived',updated_at=now() where id=$1`, [project]);
+    return { deleted: true, archived: true, projectId: project };
+  }
+  await db.query('delete from projects where id=$1', [project]);
+  return { deleted: true, projectId: project };
 }
 
 /** Atomically fills the nullable legacy Git link. An established identity is immutable. */
@@ -318,22 +396,63 @@ export async function listProjects(session: SessionUser, options: ProjectReadOpt
     // included so the UI can offer the correct action without granting workspace access.
     return (await db.query(
       `select p.id,p.client_id,p.title,p.description,p.status,p.approval_status,
+              (p.creation_requested_by=$1 or exists(select 1 from project_memberships creator_pm where creator_pm.project_id=p.id and creator_pm.user_id=$1 and creator_pm.membership_type='creator' and creator_pm.membership_status='active')) as can_delete,p.title_source,
               case when pm.membership_status='active' then p.git_remote_url else null end as git_remote_url,
               case when pm.membership_status='active' then p.git_repository_key else null end as git_repository_key,
+              case when pm.membership_status='active' then p.progress_percent else null end as progress_percent,
+              case when pm.membership_status='active' then p.progress_summary else null end as progress_summary,
+              case when pm.membership_status='active' then p.progress_source else null end as progress_source,
+              case when pm.membership_status='active' then p.progress_updated_at else null end as progress_updated_at,
+              case when pm.membership_status='active' then (
+                select count(*)::int from project_client_request_summaries client_request
+                where client_request.project_id=p.id and client_request.status<>'resolved'
+              ) else 0 end as open_request_count,
+              case when pm.membership_status='active' then (
+                select count(*)::int from project_request_notifications notification
+                join project_client_request_summaries client_request on client_request.id=notification.request_id
+                where notification.user_id=$1 and notification.read_at is null
+                  and client_request.project_id=p.id and client_request.status<>'resolved'
+              ) else 0 end as unread_request_count,
+              case when pm.membership_status='active' then (
+                select client_request.summary from project_client_request_summaries client_request
+                where client_request.project_id=p.id and client_request.status<>'resolved'
+                order by client_request.updated_at desc,client_request.id desc limit 1
+              ) else null end as latest_request_summary,
+              case when pm.membership_status='active' then (
+                select client_request.request_kind from project_client_request_summaries client_request
+                where client_request.project_id=p.id and client_request.status<>'resolved'
+                order by client_request.updated_at desc,client_request.id desc limit 1
+              ) else null end as latest_request_kind,
               p.created_at,p.updated_at,
               pm.id as membership_id,pm.membership_type,pm.membership_status
        from projects p
        left join project_memberships pm on pm.project_id=p.id and pm.user_id=$1
-       where (p.approval_status='approved' and p.status='open') or pm.user_id=$1
+       where p.status<>'archived' and ((p.approval_status='approved' and p.status='open') or pm.user_id=$1)
        order by p.updated_at desc,p.id desc`,
       [session.id],
     )).rows;
   }
   if (session.account_type === 'client') {
+    const access = projectAccessSql('$1');
     return (await db.query(
-      `select p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.git_remote_url,p.git_repository_key,p.created_at,p.updated_at,
-              null::bigint as membership_id,null::text as membership_type,null::text as membership_status
-       from projects p where p.client_id=$1 order by p.updated_at desc,p.id desc`,
+      `select distinct p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.git_remote_url,p.git_repository_key,p.title_source,
+              p.progress_percent,p.progress_summary,p.progress_source,p.progress_updated_at,p.created_at,p.updated_at,
+              (p.client_id=$1) as can_delete,
+              (select count(*)::int from project_client_request_summaries client_request
+                where client_request.project_id=p.id and client_request.status<>'resolved') as open_request_count,
+              0::int as unread_request_count,
+              (select client_request.summary from project_client_request_summaries client_request
+                where client_request.project_id=p.id and client_request.status<>'resolved'
+                order by client_request.updated_at desc,client_request.id desc limit 1) as latest_request_summary,
+              (select client_request.request_kind from project_client_request_summaries client_request
+                where client_request.project_id=p.id and client_request.status<>'resolved'
+                order by client_request.updated_at desc,client_request.id desc limit 1) as latest_request_kind,
+              access_membership.id as membership_id,
+              access_membership.membership_type,
+              access_membership.membership_status
+       from projects p ${access.join}
+       where ${access.predicate} and p.status<>'archived'
+       order by p.updated_at desc,p.id desc`,
       [session.id],
     )).rows;
   }
@@ -353,7 +472,7 @@ export async function getProject(session: SessionUser, projectId: unknown, optio
   }
   const access = projectAccessSql('$2');
   const result = await db.query(
-    `select distinct p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.git_remote_url,p.git_repository_key,p.created_at,p.updated_at
+    `select distinct p.id,p.client_id,p.creation_requested_by,p.title,p.description,p.status,p.approval_status,p.git_remote_url,p.git_repository_key,p.created_at,p.updated_at
      from projects p ${access.join}
      where p.id=$1 and ${access.predicate}`,
     [id(projectId, 'project id'), session.id],
@@ -480,6 +599,16 @@ export async function respondToMembership(session: SessionUser, projectId: unkno
       [project, membership, targetStatus, session.id],
     );
     if (!updated.rows[0]) throw new ProjectServiceError('Membership has already been decided', 409, 'conflict');
+    if (targetStatus === 'active') {
+      await client.query(
+        `insert into project_request_notifications(request_id,user_id)
+         select request.id,$2 from project_client_request_summaries request
+         join app_users engineer on engineer.id=$2 and engineer.account_type='engineer' and engineer.approval_status='approved'
+         where request.project_id=$1 and request.status<>'resolved'
+         on conflict(request_id,user_id) do nothing`,
+        [project, row.user_id],
+      );
+    }
     await client.query('commit');
     return { ...updated.rows[0], approval_status: projectApproval, project_status: projectStatus };
   } catch (error) {
@@ -593,6 +722,27 @@ export async function listPendingApprovals(session: SessionUser) {
     `select id,display_name,email,account_type,approval_status,created_at
      from app_users where approval_status='pending' and account_type in ('client','engineer') order by created_at,id`,
   )).rows;
+}
+
+export async function createApprovedAccount(session: SessionUser, input: { displayName?: unknown; email?: unknown; password?: unknown; accountType?: unknown }) {
+  requirePlatformAdmin(session);
+  const accountType = String(input.accountType ?? '');
+  if (accountType !== 'client' && accountType !== 'engineer') throw new ProjectServiceError('Choose client or engineer');
+  const displayName = text(input.displayName, 'Display name', 120);
+  const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
+  if (email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ProjectServiceError('Enter a valid work email');
+  if (typeof input.password !== 'string' || input.password.length < 8 || input.password.length > 1024) throw new ProjectServiceError('Password must be between 8 and 1024 characters');
+  const passwordHash = hashPassword(input.password);
+  const db = await ready();
+  const result = await db.query(
+    `insert into app_users(company_id,email,password_hash,role,approval_status,employee_username,approved_at,display_name,account_type,reviewed_at,reviewed_by)
+     values($1,$2,$3,'employee','approved',$4,now(),$5,$6,now(),$7)
+     on conflict(email) do nothing
+     returning id,display_name,email,account_type,approval_status,created_at`,
+    [session.company_id, email, passwordHash, email.split('@')[0].slice(0, 160), displayName, accountType, session.id],
+  );
+  if (!result.rows[0]) throw new ProjectServiceError('An account with this email already exists', 409, 'account_exists');
+  return result.rows[0];
 }
 
 export async function reviewAccount(session: SessionUser, userId: unknown, action: unknown) {

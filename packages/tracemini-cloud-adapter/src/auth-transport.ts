@@ -6,7 +6,7 @@ export async function api<T = unknown>(config: unknown, url: string, init: Reque
   const exchange=url==='/api/agents/install/exchange' && method==='POST';
   const abort=url==='/api/agents/install/abort' && method==='POST';
   const status=url==='/api/agents/status' && method==='GET';
-  if(!agent || (!exchange && !abort && !status))throw new Error('Cloud Trace integration not enabled; repository synchronization pending');
+  if(!agent || (!exchange && !abort && !status))throw new Error('Neo-Nexus integration not enabled; repository synchronization pending');
   try {
     const origin=new URL(c.serverUrl || '');
     if(origin.username || origin.password || origin.pathname!=='/' || origin.search || origin.hash || (origin.protocol!=='https:' && !(origin.protocol==='http:' && ['127.0.0.1','localhost','[::1]'].includes(origin.hostname))))throw new Error();
@@ -25,5 +25,5 @@ export async function api<T = unknown>(config: unknown, url: string, init: Reque
     if(exchange && (!Number.isSafeInteger(result.agentId)||result.agentId<1||!Number.isSafeInteger(result.workspaceId)||result.workspaceId<1||!/^etn_[A-Za-z0-9_-]{43}$/.test(result.agentToken)))throw new Error();
     if(result.syncEnabled!==false || !['pending_sync','revoked'].includes(result.state) || result.capability!=='node-git-v1')throw new Error();
     return result as T;
-  } catch {throw new Error('Cloud Trace authentication request failed; regenerate an expired command or check device approval.');}
+  } catch {throw new Error('Neo-Nexus authentication request failed; regenerate an expired command or check device approval.');}
 }

@@ -21,7 +21,7 @@ function aad(projectId: string) {
 }
 
 export function encryptTraceMiniCredential(projectId: string, credential: string): TraceMiniCredentialEnvelope {
-  if (!credential || credential.length > 16_384) throw new Error('A TraceMini credential is required');
+  if (!credential || credential.length > 16_384) throw new Error('A Neo-Nexus credential is required');
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', encryptionKey(), iv, { authTagLength: 16 });
   cipher.setAAD(aad(projectId));
@@ -31,7 +31,7 @@ export function encryptTraceMiniCredential(projectId: string, credential: string
 
 export function decryptTraceMiniCredential(projectId: string, envelope: TraceMiniCredentialEnvelope): string {
   if (Number(envelope.version) !== 1 || Buffer.from(envelope.iv).length !== 12 || Buffer.from(envelope.tag).length !== 16) {
-    throw new Error('Unsupported TraceMini credential envelope');
+    throw new Error('Unsupported Neo-Nexus credential envelope');
   }
   const decipher = crypto.createDecipheriv('aes-256-gcm', encryptionKey(), Buffer.from(envelope.iv), { authTagLength: 16 });
   decipher.setAAD(aad(projectId));

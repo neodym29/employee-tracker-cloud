@@ -1,0 +1,20 @@
+// Explicit one-shot recovery. Build the adapter first; no credential in argv/logs.
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import crypto from 'node:crypto';
+import {loadConfig} from '../build/tracemini/engine.mjs';
+import {repositoryFingerprint,inspectRepo,normalizeRemote,preflightHooks} from '../build/tracemini/git.mjs';
+const [localPath,candidate,project,revision]=process.argv.slice(2);
+if(!localPath||![candidate,project,revision].every(x=>/^[1-9][0-9]*$/.test(x||'')))throw Error('Usage: trace-retry PATH CANDIDATE PROJECT EXPECTED_REVISION');
+const c=loadConfig(),root=fs.realpathSync(localPath),digest=repositoryFingerprint(root);
+if(!c.watchedPaths.some(p=>{const rel=path.relative(fs.realpathSync(p),root);return rel===''||(!rel.startsWith('..')&&!path.isAbsolute(rel));}))throw Error('Repository outside watched roots');
+const scope=crypto.createHash('sha256').update(c.serverUrl+'\0'+c.agentToken).digest('hex');
+const m=JSON.parse(fs.readFileSync(path.join(process.env.EMPLOYEE_TRACE_HOME||path.join(os.homedir(),'.employee-trace'),'cloud-git',scope,digest+'.json'),'utf8'));
+if(m.localPath!==root||m.digest!==digest||String(m.candidate)!==candidate||String(m.project)!==project||String(m.revision)!==revision||normalizeRemote(inspectRepo(root).remoteUrl)!==m.normalized)throw Error('Stale local identity or selection');
+preflightHooks(root);
+const url=new URL(c.serverUrl);
+if(url.protocol!=='https:'||url.username||url.password||url.pathname!=='/'||url.search||url.hash)throw Error('HTTPS origin required');
+const response=await fetch(url.origin+'/api/agents/git/retry',{method:'POST',headers:{authorization:'Bearer '+c.agentToken,'content-type':'application/json'},body:JSON.stringify({candidate_id:candidate,project_id:project,revision,digest,repository_key:m.key}),redirect:'error',signal:AbortSignal.timeout(30000)});
+console.log(JSON.stringify({status:response.status,result:await response.json()}));
+if(!response.ok)process.exitCode=1;

@@ -1,12 +1,28 @@
 /* Extracted pristine TraceMini repository selection rules, cloud-scoped. */
 .trace-node-install .repository-selection-card{grid-column:1/-1}
-.trace-node-install .repository-choice{display:grid;grid-template-columns:minmax(0,1fr) minmax(145px,220px) auto;align-items:center;gap:1rem;padding:.85rem 0;border-top:1px solid var(--line)}
+.trace-node-install .repository-actions{display:flex;flex-wrap:wrap;gap:.65rem;align-items:center}
+.trace-node-install .repository-actions .button{min-height:44px}
+.trace-node-install .repository-choice{display:grid;grid-template-columns:minmax(220px,1.15fr) minmax(0,1fr) auto auto;align-items:center;gap:1rem;padding:.85rem 0;border-top:1px solid var(--line)}
+.trace-node-install .repository-choice.dismissed-repository{padding-left:.85rem;padding-right:.85rem;border:1px dashed var(--line-strong);background:var(--canvas);opacity:.82}
+.trace-node-install .repository-restore{white-space:nowrap}
+.trace-node-install .repository-choice.linked-repository{margin:.55rem 0;padding:.9rem 1rem;border:1px solid #cfd4cf;border-radius:.65rem;background:#f0f2ef;box-shadow:inset 4px 0 0 var(--signal)}
+.trace-node-install .repository-choice.linked-repository>span:first-child small,.trace-node-install .repository-choice.linked-repository .selection-state small{color:#6b746d}
 .trace-node-install .repository-choice>span:first-child{min-width:0;display:grid;gap:.2rem}
 .trace-node-install .repository-choice code{overflow:hidden;color:var(--muted);font-size:.68rem;text-overflow:ellipsis;white-space:nowrap}
-.trace-node-install .repository-choice input{width:20px;height:20px;accent-color:#e95420}
+.trace-node-install .repository-choice input[type="checkbox"]{width:20px;height:20px;accent-color:#e95420}
+.trace-node-install .repository-create-form{grid-column:1/-1;flex-basis:100%;min-width:0;display:grid;gap:.65rem;padding:1rem;border:1px solid var(--line);background:var(--surface);font-size:.9rem;color:var(--ink)}
+.trace-node-install .repository-create-form input,.trace-node-install .repository-create-form select{box-sizing:border-box;min-width:0;width:100%;height:auto;min-height:44px;font:inherit;padding:.65rem}
+.trace-node-install .repository-create-form p{margin:0;font-size:.85rem;line-height:1.5}
+.trace-node-install .repository-create-actions{display:flex;flex-wrap:wrap;gap:.65rem}
+.trace-node-install .repository-create-actions button{min-height:44px}
+.trace-node-install .repository-create-form :focus-visible{outline:2px solid var(--signal);outline-offset:2px}
 .trace-node-install .repository-choice input:disabled{opacity:1}
-.trace-node-install .selection-state{display:grid;gap:.4rem;font-size:.7rem;font-weight:800}
+.trace-node-install .repository-dismiss{width:2rem;height:2rem;display:grid;place-items:center;padding:.35rem;border:1px solid var(--line);border-radius:999px;color:var(--muted);background:var(--surface);line-height:1}
+.trace-node-install .repository-dismiss:hover,.trace-node-install .repository-dismiss:focus-visible{border-color:var(--danger);color:var(--danger);background:#fff5f2;outline:2px solid var(--danger);outline-offset:2px}
+.trace-node-install .repository-dismiss svg{width:1.1rem;height:1.1rem;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.trace-node-install .selection-state{display:grid;gap:.4rem;font-size:.7rem;font-weight:800}.trace-node-install .repository-choice>small{grid-column:1/-1;min-width:0;line-height:1.45}
 .trace-node-install .selection-state.success{color:var(--signal)}
+.trace-node-install .repository-linked-state{color:var(--signal);font-weight:800}
 .trace-node-install .selection-state.error,.error-text{color:var(--danger)!important}
 .trace-node-install .selection-state.progress{color:#365c7d}
 .trace-node-install .progress-track{position:relative;width:100%;height:4px;display:block;overflow:hidden;background:#9ab0c455}
@@ -25,10 +41,15 @@
 .trace-node-install .workspace-select .info-tip-content{position:absolute;left:0;right:auto;bottom:calc(100% + .55rem);width:max-content;max-width:min(18rem,calc(100vw - 6rem));transform:translateY(.25rem)}
 .trace-node-install .workspace-select .info-tip:hover .info-tip-content,.workspace-select .info-tip:focus-within .info-tip-content{transform:none}
 .trace-node-install .repository-choice-list{max-height:min(34rem,calc(100vh - 12rem));overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding-right:.45rem}
+.trace-node-install .repository-filter{display:grid;gap:.45rem;margin:.9rem 0 0;padding:.8rem;border:1px solid var(--line);background:var(--canvas)}
+.trace-node-install .repository-filter label{font-weight:800;font-size:.82rem}
+.trace-node-install .repository-filter input{box-sizing:border-box;width:100%;min-height:44px;padding:.65rem;font:inherit;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink)}
+.trace-node-install .repository-filter small{line-height:1.45;color:var(--muted)}
+.trace-node-install .repository-filter .button{justify-self:start;min-height:40px}
 .trace-node-install .repository-choice-list:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
 .trace-node-install .repository-choice-list .repository-choice:last-child{border-bottom:1px solid var(--line)}
 .trace-node-install .document-context-card .info-tip-trigger{width:1.45rem;border-radius:999px}
 .trace-node-install .document-context-card .info-tip-content{width:min(29rem,80vw);max-width:min(29rem,80vw)}
 .trace-node-install .info-tip-content .ocr-command{color:var(--ink);background:var(--canvas)}
 .trace-node-install .info-tip:hover .info-tip-content,.info-tip:focus-within .info-tip-content{pointer-events:auto}
-.trace-node-install{--line:#d4d9d4;--ink:#17221a;--signal:#258454;min-width:0}.trace-node-install .repository-choice{overflow-wrap:anywhere}.trace-node-install .repository-choice a{display:block}@media(max-width:600px){.trace-node-install .repository-choice{display:flex;flex-wrap:wrap}}
+.trace-node-install{--line:#d4d9d4;--ink:#17221a;--signal:#258454;min-width:0}.trace-node-install .repository-choice{overflow-wrap:anywhere}.trace-node-install .repository-choice>span{min-width:0}.trace-node-install .repository-choice a{display:block}@media(max-width:900px){.trace-node-install .repository-choice{display:flex;flex-wrap:wrap}.trace-node-install .repository-choice>span:first-child{flex:1 1 240px}.trace-node-install .repository-choice>.selection-state{flex:1 1 240px}.trace-node-install .repository-choice>.repository-dismiss{margin-left:auto}.trace-node-install .repository-choice>input{margin-left:auto}}
