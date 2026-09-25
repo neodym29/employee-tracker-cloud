@@ -14,6 +14,13 @@ type Profile = AvatarProfile & {
   hasPhoto: boolean;
 };
 
+function PortraitChoice({ label, image, chosen, onClick }: { label: string; image: string; chosen: boolean; onClick: () => void }) {
+  return <button type="button" className={`socialAvatarChoice socialAvatarPortraitChoice ${chosen ? 'chosen' : ''}`} aria-label={label} aria-pressed={chosen} onClick={onClick}>
+    <img className="socialAvatarPortraitImage" src={image} alt="" />
+    <span className="socialAvatarPortraitName" aria-hidden="true">{label}</span>
+  </button>;
+}
+
 export default function ProfileClient({ userId }: { userId: string }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [name, setName] = useState('');
@@ -106,9 +113,9 @@ export default function ProfileClient({ userId }: { userId: string }) {
         </section>
         <section className="socialProfileCard"><div className="socialProfileCardHeading"><h2>Profile picture</h2><p>Pick an avatar or upload a photo. Your choice appears throughout chats.</p></div>
           <div className="socialAvatarChoices socialAvatarUtilityChoices"><button type="button" className={`socialAvatarChoice ${avatarKind === 'initials' ? 'chosen' : ''}`} aria-pressed={avatarKind === 'initials'} onClick={() => { setAvatarKind('initials'); setAvatarPreset(null); }}><ProfileAvatar profile={{ id: userId, name: name || 'You' }} size="lg" /><span>Initials</span></button>
-            {profile?.hasPhoto && <button type="button" className={`socialAvatarChoice ${avatarKind === 'photo' ? 'chosen' : ''}`} aria-pressed={avatarKind === 'photo'} onClick={() => { setAvatarKind('photo'); setAvatarPreset(null); }}><ProfileAvatar profile={{ id: userId, name, avatarKind: 'photo', avatarUpdatedAt: profile.avatarUpdatedAt }} size="lg" /><span>Your photo</span></button>}
+            {profile?.hasPhoto && <PortraitChoice label="Your photo" image={`/api/profiles/${encodeURIComponent(userId)}/photo?v=${encodeURIComponent(profile.avatarUpdatedAt || '')}`} chosen={avatarKind === 'photo'} onClick={() => { setAvatarKind('photo'); setAvatarPreset(null); }} />}
           </div>
-          {(['Games', 'Anime'] as const).map(category => <div className="socialAvatarGroup" key={category}><h3>{category === 'Games' ? 'Game characters' : 'Anime characters'}</h3><div className="socialAvatarChoices">{PROFILE_PRESETS.filter(preset => preset.category === category).map(preset => <button key={preset.id} type="button" className={`socialAvatarChoice ${avatarKind === 'preset' && avatarPreset === preset.id ? 'chosen' : ''}`} aria-pressed={avatarKind === 'preset' && avatarPreset === preset.id} onClick={() => { setAvatarKind('preset'); setAvatarPreset(preset.id); }}><ProfileAvatar profile={{ id: userId, name, avatarKind: 'preset', avatarPreset: preset.id }} size="lg" /><span>{preset.label}</span></button>)}</div></div>)}
+          {(['Games', 'Anime'] as const).map(category => <div className="socialAvatarGroup" key={category}><h3>{category === 'Games' ? 'Game characters' : 'Anime characters'}</h3><div className="socialAvatarChoices">{PROFILE_PRESETS.filter(preset => preset.category === category).map(preset => <PortraitChoice key={preset.id} label={preset.label} image={preset.image} chosen={avatarKind === 'preset' && avatarPreset === preset.id} onClick={() => { setAvatarKind('preset'); setAvatarPreset(preset.id); }} />)}</div></div>)}
           <input ref={fileRef} className="srOnly" type="file" accept="image/png,image/jpeg,image/webp" aria-label="Choose a profile photo" onChange={event => void uploadPhoto(event.target.files?.[0])} />
           <div className="socialPhotoActions"><button type="button" disabled={busy} onClick={() => fileRef.current?.click()}>{busy ? 'Please wait…' : 'Upload photo'}</button>{profile?.hasPhoto && <button type="button" className="socialRemovePhoto" disabled={busy} onClick={() => void removePhoto()}>Remove uploaded photo</button>}</div>
           <small className="socialPhotoNote">PNG, JPEG, or WebP · 2 MB maximum · automatically cropped to a square</small>

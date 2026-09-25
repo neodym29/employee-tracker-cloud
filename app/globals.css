@@ -1122,11 +1122,19 @@ body:has(.nexusChatsPage) main { display: flex; flex: 1; min-height: 0; width: 1
 .socialAvatarChoices { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 8px; }
 .socialAvatarGroup { margin-top: 18px; }
 .socialAvatarGroup h3 { margin: 0 0 8px; color: #514c56; font-size: 12px; font-weight: 800; }
-.socialAvatarUtilityChoices { grid-template-columns: repeat(5,minmax(0,1fr)); }
+.socialAvatarGroup .socialAvatarChoices { grid-template-columns: repeat(4,minmax(0,1fr)); }
+.socialAvatarUtilityChoices { grid-template-columns: repeat(4,minmax(0,1fr)); }
 .socialAvatarChoice { min-width: 0; min-height: 89px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--line); border-radius: 11px; padding: 8px 3px; color: #585852; background: #faf9f6; box-shadow: none; font-size: 10px; }
 .socialAvatarChoice > span:last-child { min-height: 21px; display: grid; place-items: center; line-height: 1.05; text-align: center; }
 .socialAvatarChoice:hover { background: #f3f0fc; box-shadow: none; transform: none; }
 .socialAvatarChoice.chosen { border-color: #7366cc; background: #f3f0ff; box-shadow: 0 0 0 2px rgba(115,102,204,.16); }
+.socialAvatarPortraitChoice { position: relative; display: block; aspect-ratio: 1; min-height: 0; overflow: hidden; border: 2px solid transparent; border-radius: 12px; padding: 0; background: #202126; isolation: isolate; }
+.socialAvatarPortraitChoice:hover { background: #202126; }
+.socialAvatarPortraitChoice.chosen { border-color: #7366cc; background: #202126; box-shadow: 0 0 0 2px rgba(115,102,204,.18); }
+.socialAvatarPortraitImage { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; transition: filter .18s ease, transform .18s ease; }
+.socialAvatarPortraitName { position: absolute; inset: 0; min-height: 0 !important; display: grid; place-items: center; padding: 8px; color: #fff; background: rgba(9,10,15,.1); font-size: 12px; font-weight: 800; line-height: 1.15; text-align: center; text-shadow: 0 1px 4px rgba(0,0,0,.8); opacity: 0; transition: opacity .18s ease, background .18s ease; }
+.socialAvatarPortraitChoice:hover .socialAvatarPortraitImage, .socialAvatarPortraitChoice:focus-visible .socialAvatarPortraitImage { filter: blur(3px) brightness(.65); transform: scale(1.06); }
+.socialAvatarPortraitChoice:hover .socialAvatarPortraitName, .socialAvatarPortraitChoice:focus-visible .socialAvatarPortraitName { background: rgba(9,10,15,.3); opacity: 1; }
 .socialPhotoActions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
 .socialPhotoActions button { min-height: 37px; padding: 7px 12px; font-size: 12px; }
 .socialPhotoActions .socialRemovePhoto { border-color: #ead4d1; color: #a83229; background: #fff; }
@@ -1180,8 +1188,14 @@ body:has(.nexusChatsPage) main { display: flex; flex: 1; min-height: 0; width: 1
   .socialProfileIdentity { flex: 1 1 calc(100% - 100px); }
   .socialProfileBack { margin-left: auto; }
   .socialProfileCard { padding: 18px; }
-  .socialAvatarChoices { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .socialAvatarChoices, .socialAvatarGroup .socialAvatarChoices, .socialAvatarUtilityChoices { grid-template-columns: repeat(3,minmax(0,1fr)); }
   .socialProfileFooter { align-items: flex-start; flex-direction: column; }
   .socialProfileFooter button { width: 100%; }
   .nexusDirectMessage { max-width: 93%; }
+}
+@media (hover: none) {
+  .socialAvatarPortraitName { place-items: end center; padding-bottom: 7px; background: linear-gradient(transparent 43%,rgba(9,10,15,.88)); font-size: 10px; opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .socialAvatarPortraitImage, .socialAvatarPortraitName { transition: none; }
 }
