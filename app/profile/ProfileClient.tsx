@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import ProfileAvatar, { type AvatarProfile } from '@/app/components/ProfileAvatar';
 import { PROFILE_PRESETS, profilePreset } from '@/lib/profile-presets';
+import { APPEARANCE_FONTS, APPEARANCE_THEMES, DEFAULT_APPEARANCE, isAppearanceFont, isAppearanceTheme, type Appearance, type AppearanceFont, type AppearanceTheme } from '@/lib/appearance';
 
 type Profile = AvatarProfile & {
   name: string;
@@ -12,6 +13,8 @@ type Profile = AvatarProfile & {
   statusText: string;
   avatarKind: 'initials' | 'preset' | 'photo';
   hasPhoto: boolean;
+  appearanceTheme: AppearanceTheme;
+  appearanceFont: AppearanceFont;
 };
 
 function PortraitChoice({ label, image, chosen, onClick }: { label: string; image: string; chosen: boolean; onClick: () => void }) {
@@ -28,6 +31,12 @@ export default function ProfileClient({ userId }: { userId: string }) {
   const [statusText, setStatusText] = useState('');
   const [avatarKind, setAvatarKind] = useState<Profile['avatarKind']>('initials');
   const [avatarPreset, setAvatarPreset] = useState<string | null>(null);
+  const [pictureOpen, setPictureOpen] = useState(false);
+  const [pictureCategory, setPictureCategory] = useState<(typeof PROFILE_PRESETS)[number]['category']>('Games');
+  const [appearanceTheme, setAppearanceTheme] = useState<AppearanceTheme>(DEFAULT_APPEARANCE.theme);
+  const [appearanceFont, setAppearanceFont] = useState<AppearanceFont>(DEFAULT_APPEARANCE.font);
+  const [appearanceBusy, setAppearanceBusy] = useState(false);
+  const appearanceRef = useRef<Appearance>(DEFAULT_APPEARANCE);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -38,7 +47,38 @@ export default function ProfileClient({ userId }: { userId: string }) {
     const availablePreset = profilePreset(next.avatarPreset);
     setAvatarKind(next.avatarKind === 'preset' && !availablePreset ? 'initials' : next.avatarKind);
     setAvatarPreset(availablePreset?.id || null);
+    const appearance: Appearance = {
+      theme: isAppearanceTheme(next.appearanceTheme) ? next.appearanceTheme : DEFAULT_APPEARANCE.theme,
+      font: isAppearanceFont(next.appearanceFont) ? next.appearanceFont : DEFAULT_APPEARANCE.font,
+    };
+    appearanceRef.current = appearance;
+    setAppearanceTheme(appearance.theme); setAppearanceFont(appearance.font);
+    document.documentElement.dataset.theme = appearance.theme;
+    document.documentElement.dataset.font = appearance.font;
     window.dispatchEvent(new Event('profile:updated'));
+  }
+
+  async function changeAppearance(next: Appearance) {
+    if (!profile || appearanceBusy) return;
+    const previous = appearanceRef.current;
+    appearanceRef.current = next;
+    setAppearanceTheme(next.theme); setAppearanceFont(next.font);
+    document.documentElement.dataset.theme = next.theme;
+    document.documentElement.dataset.font = next.font;
+    setAppearanceBusy(true); setError(''); setMessage('');
+    try {
+      const response = await fetch('/api/profile/appearance', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(next) });
+      const data = await response.json();
+      if (!data.ok) throw new Error(data.error || 'Could not save appearance');
+      setProfile(current => current ? { ...current, appearanceTheme: next.theme, appearanceFont: next.font } : current);
+      setMessage('Appearance saved for your account.');
+    } catch (cause) {
+      appearanceRef.current = previous;
+      setAppearanceTheme(previous.theme); setAppearanceFont(previous.font);
+      document.documentElement.dataset.theme = previous.theme;
+      document.documentElement.dataset.font = previous.font;
+      setError((cause as Error).message);
+    } finally { setAppearanceBusy(false); }
   }
 
   useEffect(() => {
@@ -49,7 +89,7 @@ export default function ProfileClient({ userId }: { userId: string }) {
   }, []);
 
   async function save() {
-    if (busy) return;
+    if (busy || appearanceBusy) return;
     setBusy(true); setError(''); setMessage('');
     try {
       const response = await fetch('/api/profile', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, bio, statusText, avatarKind, avatarPreset }) });
@@ -75,6 +115,7 @@ export default function ProfileClient({ userId }: { userId: string }) {
         window.dispatchEvent(new Event('profile:updated'));
       } else acceptProfile(data.profile);
       setMessage('Photo uploaded and added to your profile.');
+      setPictureOpen(false);
     } catch (cause) { setError((cause as Error).message); }
     finally { setBusy(false); if (fileRef.current) fileRef.current.value = ''; }
   }
@@ -95,6 +136,7 @@ export default function ProfileClient({ userId }: { userId: string }) {
   }
 
   const preview: AvatarProfile = { id: userId, name: name || profile?.name || 'You', avatarKind, avatarPreset, avatarUpdatedAt: profile?.avatarUpdatedAt };
+  const pictureLabel = avatarKind === 'photo' ? 'Your uploaded photo' : avatarKind === 'preset' ? profilePreset(avatarPreset)?.label || 'Character avatar' : 'Your initials';
 
   return <div className="socialProfilePage">
     <div className="socialProfileBanner" aria-hidden="true"><span>✦</span><span>✶</span><span>✦</span></div>
@@ -111,17 +153,24 @@ export default function ProfileClient({ userId }: { userId: string }) {
           <label>Status<input value={statusText} onChange={event => setStatusText(event.target.value)} maxLength={80} placeholder="What are you working on?" /></label>
           <label>Bio<textarea value={bio} onChange={event => setBio(event.target.value)} maxLength={280} rows={4} placeholder="A few words about you..." /><small>{bio.length}/280</small></label>
         </section>
-        <section className="socialProfileCard"><div className="socialProfileCardHeading"><h2>Profile picture</h2><p>Pick an avatar or upload a photo. Your choice appears throughout chats.</p></div>
-          <div className="socialAvatarChoices socialAvatarUtilityChoices"><button type="button" className={`socialAvatarChoice ${avatarKind === 'initials' ? 'chosen' : ''}`} aria-pressed={avatarKind === 'initials'} onClick={() => { setAvatarKind('initials'); setAvatarPreset(null); }}><ProfileAvatar profile={{ id: userId, name: name || 'You' }} size="lg" /><span>Initials</span></button>
-            {profile?.hasPhoto && <PortraitChoice label="Your photo" image={`/api/profiles/${encodeURIComponent(userId)}/photo?v=${encodeURIComponent(profile.avatarUpdatedAt || '')}`} chosen={avatarKind === 'photo'} onClick={() => { setAvatarKind('photo'); setAvatarPreset(null); }} />}
-          </div>
-          {(['Games', 'Anime', 'Kakegurui'] as const).map(category => <div className="socialAvatarGroup" key={category}><h3>{category === 'Games' ? 'Game characters' : category === 'Anime' ? 'Anime characters' : 'Kakegurui characters'}</h3><div className="socialAvatarChoices">{PROFILE_PRESETS.filter(preset => preset.category === category).map(preset => <PortraitChoice key={preset.id} label={preset.label} image={preset.image} chosen={avatarKind === 'preset' && avatarPreset === preset.id} onClick={() => { setAvatarKind('preset'); setAvatarPreset(preset.id); }} />)}</div></div>)}
-          <input ref={fileRef} className="srOnly" type="file" accept="image/png,image/jpeg,image/webp" aria-label="Choose a profile photo" onChange={event => void uploadPhoto(event.target.files?.[0])} />
-          <div className="socialPhotoActions"><button type="button" disabled={busy} onClick={() => fileRef.current?.click()}>{busy ? 'Please wait…' : 'Upload photo'}</button>{profile?.hasPhoto && <button type="button" className="socialRemovePhoto" disabled={busy} onClick={() => void removePhoto()}>Remove uploaded photo</button>}</div>
-          <small className="socialPhotoNote">PNG, JPEG, or WebP · 2 MB maximum · automatically cropped to a square</small>
-        </section>
+        <div className="socialProfileSide">
+          <section className="socialProfileCard"><div className="socialProfileCardHeading"><h2>Profile picture</h2><p>Shown beside your messages and on your profile.</p></div>
+            <div className="socialPictureSummary"><ProfileAvatar profile={preview} size="lg" /><div><strong>{pictureLabel}</strong><span>{pictureOpen ? 'Choose a new picture below' : 'Your current selection'}</span></div><button type="button" className="socialPictureToggle" aria-expanded={pictureOpen} aria-controls="profile-picture-options" onClick={() => setPictureOpen(open => !open)}>{pictureOpen ? 'Close' : 'Change picture'}</button></div>
+            {pictureOpen && <div id="profile-picture-options" className="socialPictureOptions">
+              <div className="socialPictureCategory" aria-label="Avatar category">{(['Games', 'Anime', 'Kakegurui'] as const).map(category => <button key={category} type="button" aria-pressed={pictureCategory === category} onClick={() => setPictureCategory(category)}>{category === 'Games' ? 'Games' : category}</button>)}</div>
+              <div className="socialAvatarChoices">{PROFILE_PRESETS.filter(preset => preset.category === pictureCategory).map(preset => <PortraitChoice key={preset.id} label={preset.label} image={preset.image} chosen={avatarKind === 'preset' && avatarPreset === preset.id} onClick={() => { setAvatarKind('preset'); setAvatarPreset(preset.id); setPictureOpen(false); setMessage('Picture selected. Save your profile to use it in chats.'); }} />)}</div>
+              <div className="socialPhotoActions"><button type="button" className="socialPictureSecondary" onClick={() => { setAvatarKind('initials'); setAvatarPreset(null); setPictureOpen(false); setMessage('Initials selected. Save your profile to use them in chats.'); }}>Use initials</button>{profile?.hasPhoto && <button type="button" className="socialPictureSecondary" onClick={() => { setAvatarKind('photo'); setAvatarPreset(null); setPictureOpen(false); setMessage('Your photo is selected. Save your profile to use it in chats.'); }}>Use uploaded photo</button>}<button type="button" disabled={busy} onClick={() => fileRef.current?.click()}>{busy ? 'Please wait…' : 'Upload photo'}</button>{profile?.hasPhoto && <button type="button" className="socialRemovePhoto" disabled={busy} onClick={() => void removePhoto()}>Remove uploaded photo</button>}</div>
+              <input ref={fileRef} className="srOnly" type="file" accept="image/png,image/jpeg,image/webp" aria-label="Choose a profile photo" onChange={event => void uploadPhoto(event.target.files?.[0])} />
+              <small className="socialPhotoNote">PNG, JPEG, or WebP · 2 MB maximum</small>
+            </div>}
+          </section>
+          <section className="socialProfileCard"><div className="socialProfileCardHeading"><h2>Appearance</h2><p>Saved to your account and used throughout Neo-Nexus.</p></div>
+            <div className="socialAppearanceSection"><h3>Color theme</h3><div className="socialThemeChoices">{APPEARANCE_THEMES.map(option => <button key={option.id} type="button" disabled={!profile || appearanceBusy} aria-pressed={appearanceTheme === option.id} onClick={() => void changeAppearance({ theme: option.id, font: appearanceFont })}><i style={{ backgroundColor: option.swatch }} aria-hidden="true" /><span>{option.label}</span></button>)}</div></div>
+            <div className="socialAppearanceSection"><h3>Font</h3><div className="socialFontChoices">{APPEARANCE_FONTS.map(option => <button key={option.id} type="button" disabled={!profile || appearanceBusy} aria-pressed={appearanceFont === option.id} onClick={() => void changeAppearance({ theme: appearanceTheme, font: option.id })}><strong>{option.label}</strong><span>{option.sample}</span></button>)}</div></div>
+          </section>
+        </div>
       </div>
-      <div className="socialProfileFooter"><p>Visible to approved Neo-Nexus members.</p><button type="button" disabled={busy || !profile} onClick={() => void save()}>{busy ? 'Saving…' : 'Save profile'}</button></div>
+      <div className="socialProfileFooter"><p>Visible to approved Neo-Nexus members.</p><button type="button" disabled={busy || appearanceBusy || !profile} onClick={() => void save()}>{busy ? 'Saving…' : 'Save profile'}</button></div>
       {message && <p className="socialProfileNotice" role="status">{message}</p>}{error && <p className="socialProfileError" role="alert">{error}</p>}
     </div>
   </div>;

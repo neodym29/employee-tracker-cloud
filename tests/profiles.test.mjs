@@ -63,6 +63,15 @@ test('new Kakegurui and game portraits are valid profile choices', async () => {
   }
 });
 
+test('appearance is account-scoped and rejects unknown themes or fonts', async () => {
+  const queries = poolFor();
+  await assert.rejects(profiles.setOwnAppearance(session, { theme: 'unknown', font: 'system' }), error => error.status === 400);
+  await assert.rejects(profiles.setOwnAppearance(session, { theme: 'forest', font: 'unknown' }), error => error.status === 400);
+  await profiles.setOwnAppearance(session, { theme: 'ocean', font: 'editorial' });
+  const write = queries.find(item => item.sql.includes('appearance_theme,appearance_font'));
+  assert.deepEqual(write.params, ['12', 'ocean', 'editorial']);
+});
+
 test('photos require a supported format and are normalized before storage', async () => {
   const queries = poolFor();
   await assert.rejects(profiles.saveOwnPhoto(session, Buffer.from('not-an-image'), 'image/png'), error => error.status === 400);

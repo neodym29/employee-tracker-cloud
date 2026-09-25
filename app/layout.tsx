@@ -6,6 +6,8 @@ import DashboardMenu from '@/app/components/DashboardMenu';
 import ChatInbox from '@/app/components/ChatInbox';
 import ProfileNav from '@/app/components/ProfileNav';
 import { unreadClientRequestCount } from '@/lib/client-requests';
+import { DEFAULT_APPEARANCE } from '@/lib/appearance';
+import { getOwnAppearance } from '@/lib/profiles';
 
 export const metadata: Metadata = {
   title: 'Neo-Nexus | Project collaboration',
@@ -14,13 +16,14 @@ export const metadata: Metadata = {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const session = await currentSession();
+  const appearance = session ? await getOwnAppearance(session.id).catch(() => DEFAULT_APPEARANCE) : DEFAULT_APPEARANCE;
   let unreadRequests = 0;
   if (session?.account_type === 'engineer') {
     try { unreadRequests = await unreadClientRequestCount(session); }
     catch { unreadRequests = 0; }
   }
   return (
-    <html lang="en">
+    <html lang="en" data-theme={appearance.theme} data-font={appearance.font}>
       <body>
         <header className="siteHeader">
           <nav className="nav" aria-label="Primary navigation">
@@ -35,8 +38,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   {session.account_type === 'engineer' && unreadRequests > 0 && <a className="navRequestAlert" href="/projects#client-requests" aria-label={`${unreadRequests} unread client ${unreadRequests === 1 ? 'request' : 'requests'}`}><span aria-hidden="true">!</span>{unreadRequests}</a>}
                   {session.account_type !== 'admin' && <ActiveNavLink className="traceSetupNavLink" href="/trace-setup">Set up Neo-Nexus CLI</ActiveNavLink>}
                   {session.account_type === 'admin' && <ActiveNavLink href="/admin/approve">Approvals</ActiveNavLink>}
-                  <form className="inlineForm" action="/api/logout?next=/login" method="post"><button className="navButton" type="submit">Switch account</button></form>
-                  <form className="inlineForm" action="/api/logout" method="post"><button className="navButton" type="submit">Sign out</button></form>
+                  <form className="inlineForm" action="/api/logout?next=/login" method="post"><button className="navButton navSignOut" type="submit">Sign out</button></form>
                 </>
               ) : (
                 <><ActiveNavLink className="authNavLink" href="/signup" exact>Sign up</ActiveNavLink><ActiveNavLink className="authNavLink" href="/login" exact>Sign in</ActiveNavLink></>
