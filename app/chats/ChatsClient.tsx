@@ -38,6 +38,7 @@ export default function ChatsClient({ userId }: { userId: string }) {
   const [editingBody, setEditingBody] = useState('');
   const [optionsId, setOptionsId] = useState<string | null>(null);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const [sidebarMenu, setSidebarMenu] = useState<{ id: string; top: number; left: number } | null>(null);
   const [search, setSearch] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -76,6 +77,17 @@ export default function ChatsClient({ userId }: { userId: string }) {
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, [messages.length, selectedId]);
 
+  useEffect(() => {
+    if (!sidebarMenu) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!(event.target as Element).closest('.nexusConversationRow')) setSidebarMenu(null);
+    };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setSidebarMenu(null); };
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', escape); };
+  }, [sidebarMenu]);
+
   const selected = chats.find((chat) => chat.id === selectedId);
   const title = (chat: Chat) => chat.kind === 'group' ? chat.title || 'Group' : chat.members.find((member) => member.id !== userId)?.name || 'Direct message';
   const query = search.trim().toLocaleLowerCase();
@@ -89,7 +101,18 @@ export default function ChatsClient({ userId }: { userId: string }) {
     setEditingId(null);
     setOptionsId(null);
     setHeaderMenuOpen(false);
+    setSidebarMenu(null);
     setSelectedId(chatId);
+  }
+
+  function toggleSidebarMenu(chatId: string, element: HTMLButtonElement) {
+    if (sidebarMenu?.id === chatId) { setSidebarMenu(null); return; }
+    const rect = element.getBoundingClientRect();
+    setSidebarMenu({
+      id: chatId,
+      top: rect.bottom + 6 + 42 > window.innerHeight ? rect.top - 48 : rect.bottom + 6,
+      left: Math.max(8, Math.min(rect.right - 190, window.innerWidth - 198)),
+    });
   }
 
   async function openPerson(person: Person, existing?: Chat) {
@@ -156,17 +179,18 @@ export default function ChatsClient({ userId }: { userId: string }) {
     finally { setSaving(false); }
   }
 
-  async function removeChat() {
-    if (!selectedId || !selected || saving) return;
-    if (selected.kind === 'group') {
-      if (!selected.is_admin) return;
-      const typed = window.prompt(`Deleting “${title(selected)}” removes the group and all its messages for everyone. Type the group name to continue.`);
-      if (typed !== title(selected) || !window.confirm('Delete this group for everyone? This cannot be undone.')) return;
+  async function removeChat(chat: Chat) {
+    if (saving) return;
+    if (chat.kind === 'group') {
+      if (!chat.is_admin) return;
+      const typed = window.prompt(`Deleting “${title(chat)}” removes the group and all its messages for everyone. Type the group name to continue.`);
+      if (typed !== title(chat) || !window.confirm('Delete this group for everyone? This cannot be undone.')) return;
     } else if (!window.confirm('Remove this chat from your list and clear its history for you? The other person keeps their messages.')) return;
     setSaving(true); setError('');
     try {
-      await api(`/api/chats/${selectedId}`, { method: 'DELETE' });
-      setSelectedId(null); setMessages([]); setReplyTo(null); setHeaderMenuOpen(false);
+      await api(`/api/chats/${chat.id}`, { method: 'DELETE' });
+      if (selectedId === chat.id) { setSelectedId(null); setMessages([]); setReplyTo(null); setHeaderMenuOpen(false); }
+      setSidebarMenu(null);
       await loadChats();
     } catch (cause) { setError((cause as Error).message); }
     finally { setSaving(false); }
@@ -212,23 +236,36 @@ export default function ChatsClient({ userId }: { userId: string }) {
     </article>;
   }
 
+  function conversationRow(chat: Chat, label: string, icon: React.ReactNode, subtitle: string, ariaLabel?: string) {
+    const menuOpen = sidebarMenu?.id === chat.id;
+    return <div className={`nexusConversationRow ${menuOpen ? 'menuOpen' : ''}`} key={chat.id}>
+      <button type="button" className={`nexusConversation ${selectedId === chat.id ? 'selected' : ''}`} onClick={() => openChat(chat.id)} aria-label={ariaLabel} aria-current={selectedId === chat.id ? 'true' : undefined}>
+        {icon}<span className="nexusConversationText"><strong>{label}</strong><small>{subtitle}</small></span>{chat.unread_count > 0 && <span className="nexusUnread" aria-label={`${chat.unread_count} unread messages`}>{chat.unread_count}</span>}
+      </button>
+      <button type="button" className="nexusSidebarMenuButton" aria-label={`Options for ${label}`} aria-expanded={menuOpen} onClick={event => toggleSidebarMenu(chat.id, event.currentTarget)}>⌄</button>
+      {menuOpen && <div className="nexusSidebarMenu" style={{ top: sidebarMenu.top, left: sidebarMenu.left }}>
+        {chat.kind === 'dm' ? <button type="button" onClick={() => void removeChat(chat)}>Delete chat for me</button> : chat.is_admin ? <button type="button" onClick={() => void removeChat(chat)}>Delete group for everyone</button> : <p>Only a group admin can delete this group.</p>}
+      </div>}
+    </div>;
+  }
+
   return <div className={`nexusChatsPage ${selected ? 'hasChat' : ''}`}>
     <aside className="nexusChatSidebar" aria-label="Chats sidebar">
       <div className="nexusSidebarTop"><span>NEO-NEXUS</span><div><h1>Chats</h1><button type="button" onClick={() => { setMode('group'); setMemberIds([]); }} aria-label="New group" title="New group">+</button></div></div>
       <label className="nexusChatSearch"><span className="srOnly">Search chats and people</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search chats and people" /></label>
-      <div className="nexusSidebarScroll">
+      <div className="nexusSidebarScroll" onScroll={() => setSidebarMenu(null)}>
         <section className="nexusSidebarSection" aria-label="Groups"><div className="nexusSectionHeading"><h2>Groups</h2><button type="button" onClick={() => { setMode('group'); setMemberIds([]); }} aria-label="Create group" title="Create group">+</button></div>
-          {groups.map((chat) => <button key={chat.id} type="button" className={`nexusConversation ${selectedId === chat.id ? 'selected' : ''}`} onClick={() => openChat(chat.id)} aria-current={selectedId === chat.id ? 'true' : undefined}><span className="nexusHashIcon" aria-hidden="true">#</span><span className="nexusConversationText"><strong>{title(chat)}</strong><small>{chat.last_message || `${chat.members.length} members`}</small></span>{chat.unread_count > 0 && <span className="nexusUnread" aria-label={`${chat.unread_count} unread messages`}>{chat.unread_count}</span>}</button>)}
+          {groups.map((chat) => conversationRow(chat, title(chat), <span className="nexusHashIcon" aria-hidden="true">#</span>, chat.last_message || `${chat.members.length} members`))}
           {groups.length === 0 && <p className="nexusEmptySidebar">{query ? 'No matching groups' : 'No groups yet. Create one to talk together.'}</p>}
         </section>
         <section className="nexusSidebarSection" aria-label="People"><div className="nexusSectionHeading"><h2>People</h2><span>{peopleWithChats.length}</span></div>
-          {peopleWithChats.map(({ person, chat }) => <button key={person.id} type="button" disabled={saving} className={`nexusConversation ${chat && selectedId === chat.id ? 'selected' : ''}`} onClick={() => void openPerson(person, chat)} aria-label={`Message ${person.name}`} aria-current={chat && selectedId === chat.id ? 'true' : undefined}><span className="nexusChatIcon nexusPersonIcon" aria-hidden="true">{person.name.slice(0, 1).toUpperCase()}</span><span className="nexusConversationText"><strong>{person.name}</strong><small>{chat?.last_message || person.account_type || person.accountType || 'Direct message'}</small></span>{chat && chat.unread_count > 0 && <span className="nexusUnread" aria-label={`${chat.unread_count} unread messages`}>{chat.unread_count}</span>}</button>)}
+          {peopleWithChats.map(({ person, chat }) => chat ? conversationRow(chat, person.name, <span className="nexusChatIcon nexusPersonIcon" aria-hidden="true">{person.name.slice(0, 1).toUpperCase()}</span>, chat.last_message || 'Direct message', `Message ${person.name}`) : <button key={person.id} type="button" disabled={saving} className="nexusConversation" onClick={() => void openPerson(person)} aria-label={`Message ${person.name}`}><span className="nexusChatIcon nexusPersonIcon" aria-hidden="true">{person.name.slice(0, 1).toUpperCase()}</span><span className="nexusConversationText"><strong>{person.name}</strong><small>{person.account_type || person.accountType || 'Direct message'}</small></span></button>)}
           {peopleWithChats.length === 0 && <p className="nexusEmptySidebar">{query ? 'No matching people' : 'No teammates available yet.'}</p>}
         </section>
       </div>
     </aside>
     <section className="nexusChatMain" aria-label="Messages">{selected ? <>
-      <header className="nexusConversationHeader"><button type="button" className="nexusMobileBack" onClick={() => { setSelectedId(null); setHeaderMenuOpen(false); }} aria-label="Back to chats">←</button>{selected.kind === 'group' ? <span className="nexusHashIcon" aria-hidden="true">#</span> : <span className="nexusChatIcon nexusPersonIcon" aria-hidden="true">{title(selected).slice(0, 1).toUpperCase()}</span>}<div><h2>{title(selected)}</h2><p>{selected.kind === 'group' ? `${selected.members.length} members${selected.is_admin ? ' · You are a group admin' : ''}` : 'Direct message'}</p></div><div className="nexusHeaderActions"><button type="button" className="nexusHeaderMenuButton" aria-label={selected.kind === 'group' ? 'Group options' : 'Chat options'} aria-expanded={headerMenuOpen} onClick={() => setHeaderMenuOpen(value => !value)}>⌄</button>{headerMenuOpen && <div className="nexusHeaderMenu">{selected.kind === 'group' ? <><strong>Group members</strong>{selected.members.map(member => <div className="nexusGroupMember" key={member.id}><span>{member.id === userId ? 'You' : member.name}{member.isAdmin && <small> · admin</small>}</span>{selected.is_admin && !member.isAdmin && <button type="button" disabled={saving} onClick={() => void makeGroupAdmin(member)}>Make admin</button>}</div>)}{selected.is_admin && <button type="button" className="danger" onClick={() => void removeChat()}>Delete group for everyone</button>}</> : <button type="button" className="danger" onClick={() => void removeChat()}>Delete chat for me</button>}</div>}</div></header>
+      <header className="nexusConversationHeader"><button type="button" className="nexusMobileBack" onClick={() => { setSelectedId(null); setHeaderMenuOpen(false); }} aria-label="Back to chats">←</button>{selected.kind === 'group' ? <span className="nexusHashIcon" aria-hidden="true">#</span> : <span className="nexusChatIcon nexusPersonIcon" aria-hidden="true">{title(selected).slice(0, 1).toUpperCase()}</span>}<div><h2>{title(selected)}</h2><p>{selected.kind === 'group' ? `${selected.members.length} members${selected.is_admin ? ' · You are a group admin' : ''}` : 'Direct message'}</p></div><div className="nexusHeaderActions"><button type="button" className="nexusHeaderMenuButton" aria-label={selected.kind === 'group' ? 'Group options' : 'Chat options'} aria-expanded={headerMenuOpen} onClick={() => setHeaderMenuOpen(value => !value)}>⌄</button>{headerMenuOpen && <div className="nexusHeaderMenu">{selected.kind === 'group' ? <><strong>Group members</strong>{selected.members.map(member => <div className="nexusGroupMember" key={member.id}><span>{member.id === userId ? 'You' : member.name}{member.isAdmin && <small> · admin</small>}</span>{selected.is_admin && !member.isAdmin && <button type="button" disabled={saving} onClick={() => void makeGroupAdmin(member)}>Make admin</button>}</div>)}{selected.is_admin && <button type="button" className="danger" onClick={() => void removeChat(selected)}>Delete group for everyone</button>}</> : <button type="button" className="danger" onClick={() => void removeChat(selected)}>Delete chat for me</button>}</div>}</div></header>
       <div className="nexusMessageList nexusDmMessageList">
         {messages.length > 0 && <div className="nexusMessagesSpacer" aria-hidden="true" />}
         {messages.length ? messages.map((message, index) => <Fragment key={message.id}>

@@ -979,6 +979,15 @@ body:has(.nexusChatsPage) main { display: flex; flex: 1; min-height: 0; width: 1
 .nexusSectionHeading > span { color: #9ba199; font-size: 11px; }
 .nexusSectionHeading button { width: 24px; height: 24px; min-height: 24px; background: transparent; }
 .nexusChatSidebar .nexusConversation { align-items: center; margin: 2px 0; padding: 8px 10px; border: 0; border-radius: 8px; color: #e9ece5; background: transparent; box-shadow: none; }
+.nexusConversationRow { position: relative; }
+.nexusConversationRow .nexusConversation { padding-right: 37px; }
+.nexusSidebarMenuButton { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); width: 25px; height: 25px; min-height: 25px; border: 0; border-radius: 5px; padding: 0; color: #e9ece5; background: #4d524d; box-shadow: none; font-size: 18px; line-height: 1; opacity: 0; pointer-events: none; }
+.nexusConversationRow:hover .nexusSidebarMenuButton, .nexusConversationRow:focus-within .nexusSidebarMenuButton, .nexusConversationRow.menuOpen .nexusSidebarMenuButton { opacity: 1; pointer-events: auto; }
+.nexusSidebarMenuButton:hover { color: #fff; background: #61675f; box-shadow: none; transform: translateY(-50%); }
+.nexusSidebarMenu { position: fixed; z-index: 50; width: 190px; border: 1px solid var(--line); border-radius: 9px; padding: 4px; color: var(--ink); background: #fff; box-shadow: 0 12px 30px rgba(0,0,0,.22); }
+.nexusSidebarMenu button { display: block; width: 100%; min-height: 34px; border: 0; border-radius: 5px; padding: 7px 9px; color: #a12820; background: transparent; box-shadow: none; text-align: left; font-size: 12px; }
+.nexusSidebarMenu button:hover { background: #fff1f0; box-shadow: none; transform: none; }
+.nexusSidebarMenu p { margin: 0; padding: 8px 9px; color: var(--muted); font-size: 11px; line-height: 1.4; }
 .nexusChatSidebar .nexusConversation:hover { color: #fff; background: #3a403b; transform: none; }
 .nexusChatSidebar .nexusConversation.selected { color: #fff; background: #4b4a7e; }
 .nexusChatSidebar .nexusChatIcon { flex: 0 0 31px; width: 31px; height: 31px; border-radius: 8px; color: #ddd9ff; background: #393b46; font-size: 18px; }
@@ -1067,4 +1076,5 @@ body:has(.nexusChatsPage) main { display: flex; flex: 1; min-height: 0; width: 1
 }
 @media (hover: none) {
   .nexusMessageActions { opacity: 1; pointer-events: auto; }
+  .nexusSidebarMenuButton { opacity: 1; pointer-events: auto; }
 }
