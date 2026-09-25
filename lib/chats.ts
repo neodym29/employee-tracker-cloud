@@ -2,6 +2,7 @@ import type { PoolClient } from 'pg';
 import type { SessionUser } from './auth';
 import { ApiError } from './api';
 import { getPool } from './db';
+import { ensureProfilesSchema } from './profiles';
 
 let schemaReady: Promise<void> | null = null;
 
@@ -79,18 +80,26 @@ async function memberConversation(db: PoolClient | ReturnType<typeof getPool>, s
 export async function listChatPeople(session: SessionUser) {
   chatUser(session);
   await ensureChatsSchema();
-  const result = await getPool().query(`select id,coalesce(nullif(display_name,''),split_part(email,'@',1)) as name,account_type
-    from app_users where id<>$1 and approval_status='approved'
-      and account_type in ('admin','client','engineer') order by lower(coalesce(nullif(display_name,''),email)),id`, [session.id]);
+  await ensureProfilesSchema();
+  const result = await getPool().query(`select u.id::text as id,coalesce(nullif(u.display_name,''),split_part(u.email,'@',1)) as name,u.account_type,
+    coalesce(p.bio,'') as bio,coalesce(p.status_text,'') as "statusText",
+    coalesce(p.avatar_kind,'initials') as "avatarKind",p.avatar_preset as "avatarPreset",p.avatar_updated_at as "avatarUpdatedAt"
+    from app_users u left join user_social_profiles p on p.user_id=u.id
+    where u.id<>$1 and u.approval_status='approved'
+      and u.account_type in ('admin','client','engineer') order by lower(coalesce(nullif(u.display_name,''),u.email)),u.id`, [session.id]);
   return result.rows;
 }
 
 export async function listChats(session: SessionUser) {
   chatUser(session);
   await ensureChatsSchema();
+  await ensureProfilesSchema();
   const result = await getPool().query(`select c.id,c.kind,c.title,c.created_by,c.created_at,c.updated_at,mine.is_admin,
-    coalesce((select json_agg(json_build_object('id',u.id::text,'name',coalesce(nullif(u.display_name,''),split_part(u.email,'@',1)),'accountType',u.account_type,'isAdmin',cm.is_admin) order by lower(coalesce(nullif(u.display_name,''),u.email)))
-      from chat_conversation_members cm join app_users u on u.id=cm.user_id where cm.conversation_id=c.id),'[]'::json) as members,
+    coalesce((select json_agg(json_build_object('id',u.id::text,'name',coalesce(nullif(u.display_name,''),split_part(u.email,'@',1)),'accountType',u.account_type,'isAdmin',cm.is_admin,
+      'bio',coalesce(p.bio,''),'statusText',coalesce(p.status_text,''),'avatarKind',coalesce(p.avatar_kind,'initials'),
+      'avatarPreset',p.avatar_preset,'avatarUpdatedAt',p.avatar_updated_at) order by lower(coalesce(nullif(u.display_name,''),u.email)))
+      from chat_conversation_members cm join app_users u on u.id=cm.user_id
+      left join user_social_profiles p on p.user_id=u.id where cm.conversation_id=c.id),'[]'::json) as members,
     (select case when msg.deleted_at is null then msg.body else 'Message deleted' end from chat_messages msg where msg.conversation_id=c.id and (mine.cleared_at is null or msg.created_at>mine.cleared_at) order by msg.id desc limit 1) as last_message,
     (select count(*)::int from chat_messages msg where msg.conversation_id=c.id and msg.created_at>greatest(mine.last_read_at,coalesce(mine.cleared_at,'-infinity'::timestamptz)) and msg.sender_id<>$1 and msg.deleted_at is null) as unread_count
     from chat_conversations c join chat_conversation_members mine on mine.conversation_id=c.id and mine.user_id=$1

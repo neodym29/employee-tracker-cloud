@@ -11,11 +11,13 @@ const bundle = await build({
   plugins: [{
     name: 'chat-test-dependencies',
     setup(plugin) {
-      plugin.onResolve({ filter: /^\.\/(api|db)$/ }, ({ path }) => ({ path, namespace: 'chat-test' }));
+      plugin.onResolve({ filter: /^\.\/(api|db|profiles)$/ }, ({ path }) => ({ path, namespace: 'chat-test' }));
       plugin.onLoad({ filter: /.*/, namespace: 'chat-test' }, ({ path }) => ({
         contents: path === './db'
           ? 'export function getPool() { return globalThis.__chatTestPool; }'
-          : 'export class ApiError extends Error { constructor(message,status,code) { super(message); this.status=status; this.code=code; } }',
+          : path === './profiles'
+            ? 'export async function ensureProfilesSchema() {}'
+            : 'export class ApiError extends Error { constructor(message,status,code) { super(message); this.status=status; this.code=code; } }',
         loader: 'js',
       }));
     },

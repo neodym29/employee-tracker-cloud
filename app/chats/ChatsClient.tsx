@@ -1,8 +1,9 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import ProfileAvatar, { type AvatarProfile } from '@/app/components/ProfileAvatar';
 
-type Person = { id: string; name: string; account_type?: string; accountType?: string; isAdmin?: boolean };
+type Person = AvatarProfile & { name: string; account_type?: string; accountType?: string; isAdmin?: boolean; bio?: string; statusText?: string };
 type Chat = { id: string; kind: 'group' | 'dm'; title: string | null; members: Person[]; is_admin: boolean; last_message: string | null; unread_count: number; updated_at: string };
 type Message = { id: string; parent_message_id: string | null; parent_body: string | null; sender_id: string; sender_name: string; body: string; created_at: string; edited_at: string | null; deleted_at: string | null };
 
@@ -39,6 +40,7 @@ export default function ChatsClient({ userId }: { userId: string }) {
   const [optionsId, setOptionsId] = useState<string | null>(null);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const [sidebarMenu, setSidebarMenu] = useState<{ id: string; top: number; left: number } | null>(null);
+  const [profileId, setProfileId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -60,12 +62,21 @@ export default function ChatsClient({ userId }: { userId: string }) {
     } catch (cause) { setError((cause as Error).message); }
   }, []);
 
+  const loadPeople = useCallback(async () => {
+    try {
+      const data = await api<{ people: Person[] }>('/api/chats/people');
+      setPeople(data.people);
+    } catch (cause) { setError((cause as Error).message); }
+  }, []);
+
   useEffect(() => {
     void loadChats();
-    void api<{ people: Person[] }>('/api/chats/people').then((data) => setPeople(data.people)).catch((cause) => setError(cause.message));
-    const timer = window.setInterval(() => void loadChats(), 8_000);
-    return () => window.clearInterval(timer);
-  }, [loadChats]);
+    void loadPeople();
+    const refresh = () => { void loadChats(); void loadPeople(); };
+    const timer = window.setInterval(refresh, 8_000);
+    window.addEventListener('profile:updated', refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener('profile:updated', refresh); };
+  }, [loadChats, loadPeople]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -89,6 +100,7 @@ export default function ChatsClient({ userId }: { userId: string }) {
   }, [sidebarMenu]);
 
   const selected = chats.find((chat) => chat.id === selectedId);
+  const profilePerson = profileId ? people.find(person => person.id === profileId) || chats.flatMap(chat => chat.members).find(person => person.id === profileId) : null;
   const title = (chat: Chat) => chat.kind === 'group' ? chat.title || 'Group' : chat.members.find((member) => member.id !== userId)?.name || 'Direct message';
   const query = search.trim().toLocaleLowerCase();
   const groups = chats.filter((chat) => chat.kind === 'group' && (!query || title(chat).toLocaleLowerCase().includes(query)));
@@ -105,12 +117,13 @@ export default function ChatsClient({ userId }: { userId: string }) {
     setSelectedId(chatId);
   }
 
-  function toggleSidebarMenu(chatId: string, element: HTMLButtonElement) {
-    if (sidebarMenu?.id === chatId) { setSidebarMenu(null); return; }
+  function toggleSidebarMenu(chat: Chat, element: HTMLButtonElement) {
+    if (sidebarMenu?.id === chat.id) { setSidebarMenu(null); return; }
     const rect = element.getBoundingClientRect();
+    const menuHeight = chat.kind === 'dm' ? 82 : 54;
     setSidebarMenu({
-      id: chatId,
-      top: rect.bottom + 6 + 42 > window.innerHeight ? rect.top - 48 : rect.bottom + 6,
+      id: chat.id,
+      top: rect.bottom + 6 + menuHeight > window.innerHeight ? rect.top - menuHeight - 6 : rect.bottom + 6,
       left: Math.max(8, Math.min(rect.right - 190, window.innerWidth - 198)),
     });
   }
@@ -225,7 +238,9 @@ export default function ChatsClient({ userId }: { userId: string }) {
   function messageCard(message: Message, previous?: Message) {
     const own = message.sender_id === userId;
     const continuous = previous?.sender_id === message.sender_id && new Date(message.created_at).getTime() - new Date(previous.created_at).getTime() < 5 * 60_000;
+    const sender = selected?.members.find(member => member.id === message.sender_id) || { id: message.sender_id, name: message.sender_name };
     return <article className={`nexusDirectMessage ${own ? 'own' : 'incoming'} ${continuous ? 'continuous' : ''}`} key={message.id}>
+      {!own && (continuous ? <span className="nexusMessageAvatarSpacer" aria-hidden="true" /> : <button type="button" className="nexusMessageAvatar" aria-label={`View ${sender.name}'s profile`} onClick={() => setProfileId(sender.id)}><ProfileAvatar profile={sender} size="xs" /></button>)}
       <div className="nexusDirectBubble">
         {selected?.kind === 'group' && !own && !continuous && <strong className="nexusMessageSender">{message.sender_name}</strong>}
         {message.parent_body && <blockquote>{message.parent_body}</blockquote>}
@@ -242,9 +257,9 @@ export default function ChatsClient({ userId }: { userId: string }) {
       <button type="button" className={`nexusConversation ${selectedId === chat.id ? 'selected' : ''}`} onClick={() => openChat(chat.id)} aria-label={ariaLabel} aria-current={selectedId === chat.id ? 'true' : undefined}>
         {icon}<span className="nexusConversationText"><strong>{label}</strong><small>{subtitle}</small></span>{chat.unread_count > 0 && <span className="nexusUnread" aria-label={`${chat.unread_count} unread messages`}>{chat.unread_count}</span>}
       </button>
-      <button type="button" className="nexusSidebarMenuButton" aria-label={`Options for ${label}`} aria-expanded={menuOpen} onClick={event => toggleSidebarMenu(chat.id, event.currentTarget)}>⌄</button>
+      <button type="button" className="nexusSidebarMenuButton" aria-label={`Options for ${label}`} aria-expanded={menuOpen} onClick={event => toggleSidebarMenu(chat, event.currentTarget)}>⌄</button>
       {menuOpen && <div className="nexusSidebarMenu" style={{ top: sidebarMenu.top, left: sidebarMenu.left }}>
-        {chat.kind === 'dm' ? <button type="button" onClick={() => void removeChat(chat)}>Delete chat for me</button> : chat.is_admin ? <button type="button" onClick={() => void removeChat(chat)}>Delete group for everyone</button> : <p>Only a group admin can delete this group.</p>}
+        {chat.kind === 'dm' ? <><button type="button" className="nexusSidebarViewProfile" onClick={() => { setSidebarMenu(null); setProfileId(chat.members.find(member => member.id !== userId)?.id || null); }}>View profile</button><button type="button" onClick={() => void removeChat(chat)}>Delete chat for me</button></> : chat.is_admin ? <button type="button" onClick={() => void removeChat(chat)}>Delete group for everyone</button> : <p>Only a group admin can delete this group.</p>}
       </div>}
     </div>;
   }
@@ -259,28 +274,36 @@ export default function ChatsClient({ userId }: { userId: string }) {
           {groups.length === 0 && <p className="nexusEmptySidebar">{query ? 'No matching groups' : 'No groups yet. Create one to talk together.'}</p>}
         </section>
         <section className="nexusSidebarSection" aria-label="People"><div className="nexusSectionHeading"><h2>People</h2><span>{peopleWithChats.length}</span></div>
-          {peopleWithChats.map(({ person, chat }) => chat ? conversationRow(chat, person.name, <span className="nexusChatIcon nexusPersonIcon" aria-hidden="true">{person.name.slice(0, 1).toUpperCase()}</span>, chat.last_message || 'Direct message', `Message ${person.name}`) : <button key={person.id} type="button" disabled={saving} className="nexusConversation" onClick={() => void openPerson(person)} aria-label={`Message ${person.name}`}><span className="nexusChatIcon nexusPersonIcon" aria-hidden="true">{person.name.slice(0, 1).toUpperCase()}</span><span className="nexusConversationText"><strong>{person.name}</strong><small>{person.account_type || person.accountType || 'Direct message'}</small></span></button>)}
+          {peopleWithChats.map(({ person, chat }) => chat ? conversationRow(chat, person.name, <ProfileAvatar profile={person} size="sm" />, chat.last_message || 'Direct message', `Message ${person.name}`) : <button key={person.id} type="button" disabled={saving} className="nexusConversation" onClick={() => void openPerson(person)} aria-label={`Message ${person.name}`}><ProfileAvatar profile={person} size="sm" /><span className="nexusConversationText"><strong>{person.name}</strong><small>{person.account_type || person.accountType || 'Direct message'}</small></span></button>)}
           {peopleWithChats.length === 0 && <p className="nexusEmptySidebar">{query ? 'No matching people' : 'No teammates available yet.'}</p>}
         </section>
       </div>
     </aside>
     <section className="nexusChatMain" aria-label="Messages">{selected ? <>
-      <header className="nexusConversationHeader"><button type="button" className="nexusMobileBack" onClick={() => { setSelectedId(null); setHeaderMenuOpen(false); }} aria-label="Back to chats">←</button>{selected.kind === 'group' ? <span className="nexusHashIcon" aria-hidden="true">#</span> : <span className="nexusChatIcon nexusPersonIcon" aria-hidden="true">{title(selected).slice(0, 1).toUpperCase()}</span>}<div><h2>{title(selected)}</h2><p>{selected.kind === 'group' ? `${selected.members.length} members${selected.is_admin ? ' · You are a group admin' : ''}` : 'Direct message'}</p></div><div className="nexusHeaderActions"><button type="button" className="nexusHeaderMenuButton" aria-label={selected.kind === 'group' ? 'Group options' : 'Chat options'} aria-expanded={headerMenuOpen} onClick={() => setHeaderMenuOpen(value => !value)}>⌄</button>{headerMenuOpen && <div className="nexusHeaderMenu">{selected.kind === 'group' ? <><strong>Group members</strong>{selected.members.map(member => <div className="nexusGroupMember" key={member.id}><span>{member.id === userId ? 'You' : member.name}{member.isAdmin && <small> · admin</small>}</span>{selected.is_admin && !member.isAdmin && <button type="button" disabled={saving} onClick={() => void makeGroupAdmin(member)}>Make admin</button>}</div>)}{selected.is_admin && <button type="button" className="danger" onClick={() => void removeChat(selected)}>Delete group for everyone</button>}</> : <button type="button" className="danger" onClick={() => void removeChat(selected)}>Delete chat for me</button>}</div>}</div></header>
+      <header className="nexusConversationHeader">
+        <button type="button" className="nexusMobileBack" onClick={() => { setSelectedId(null); setHeaderMenuOpen(false); }} aria-label="Back to chats">←</button>
+        {selected.kind === 'group' ? <span className="nexusHashIcon" aria-hidden="true">#</span> : <button type="button" className="nexusHeaderProfileButton" aria-label={`View ${title(selected)}'s profile`} onClick={() => setProfileId(selected.members.find(member => member.id !== userId)?.id || null)}><ProfileAvatar profile={selected.members.find(member => member.id !== userId) || { id: '0', name: title(selected) }} size="md" /></button>}
+        <div><h2>{title(selected)}</h2><p>{selected.kind === 'group' ? `${selected.members.length} members${selected.is_admin ? ' · You are a group admin' : ''}` : selected.members.find(member => member.id !== userId)?.statusText || 'Direct message'}</p></div>
+        <div className="nexusHeaderActions"><button type="button" className="nexusHeaderMenuButton" aria-label={selected.kind === 'group' ? 'Group options' : 'Chat options'} aria-expanded={headerMenuOpen} onClick={() => setHeaderMenuOpen(value => !value)}>⌄</button>
+          {headerMenuOpen && <div className="nexusHeaderMenu">{selected.kind === 'group' ? <><strong>Group members</strong>{selected.members.map(member => <div className="nexusGroupMember" key={member.id}><button type="button" className="nexusGroupMemberProfile" onClick={() => { setHeaderMenuOpen(false); setProfileId(member.id); }}><ProfileAvatar profile={member} size="xs" /><span>{member.id === userId ? 'You' : member.name}{member.isAdmin && <small> · admin</small>}</span></button>{selected.is_admin && !member.isAdmin && <button type="button" disabled={saving} onClick={() => void makeGroupAdmin(member)}>Make admin</button>}</div>)}{selected.is_admin && <button type="button" className="danger" onClick={() => void removeChat(selected)}>Delete group for everyone</button>}</> : <><button type="button" onClick={() => { setHeaderMenuOpen(false); setProfileId(selected.members.find(member => member.id !== userId)?.id || null); }}>View profile</button><button type="button" className="danger" onClick={() => void removeChat(selected)}>Delete chat for me</button></>}</div>}
+        </div>
+      </header>
       <div className="nexusMessageList nexusDmMessageList">
         {messages.length > 0 && <div className="nexusMessagesSpacer" aria-hidden="true" />}
         {messages.length ? messages.map((message, index) => <Fragment key={message.id}>
           {(!index || new Date(message.created_at).toDateString() !== new Date(messages[index - 1].created_at).toDateString()) && <div className="nexusDayDivider"><span>{messageDay(message.created_at)}</span></div>}
           {messageCard(message, messages[index - 1])}
-        </Fragment>) : <div className="nexusEmptyMessages">{selected.kind === 'group' ? <span className="nexusHashIcon" aria-hidden="true">#</span> : <span className="nexusChatIcon nexusPersonIcon" aria-hidden="true">{title(selected).slice(0, 1).toUpperCase()}</span>}<strong>{title(selected)}</strong><p>This is the start of your conversation. Messages are visible only to members.</p></div>}
+        </Fragment>) : <div className="nexusEmptyMessages">{selected.kind === 'group' ? <span className="nexusHashIcon" aria-hidden="true">#</span> : <ProfileAvatar profile={selected.members.find(member => member.id !== userId) || { id: '0', name: title(selected) }} size="md" />}<strong>{title(selected)}</strong><p>This is the start of your conversation. Messages are visible only to members.</p></div>}
         <div ref={bottomRef} />
       </div>
       <form className="nexusComposer nexusDirectComposer" onSubmit={(event) => { event.preventDefault(); void send(); }}>{replyTo && <div className="nexusReplyDraft"><span>Replying to {replyTo.sender_id === userId ? 'yourself' : replyTo.sender_name}: {replyTo.body}</span><button type="button" aria-label="Cancel reply" onClick={() => setReplyTo(null)}>×</button></div>}<label htmlFor="nexus-message" className="srOnly">Message {title(selected)}</label><textarea id="nexus-message" value={draft} maxLength={4000} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send(); } }} placeholder={`Message ${title(selected)}`} rows={1} /><div><small>Enter to send · Shift+Enter for a new line</small><button type="submit" disabled={!draft.trim() || saving}>Send</button></div></form>
     </> : <div className="nexusNoSelection"><span className="nexusWelcomeIcon" aria-hidden="true">✦</span><strong>Pick a conversation</strong><p>Choose a person or group from the sidebar to get started.</p></div>}</section>
     {error && <div className="nexusChatError" role="alert">{error}<button type="button" onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
+    {profilePerson && <div className="nexusProfileOverlay" onClick={() => setProfileId(null)}><section className="nexusProfileCard" role="dialog" aria-modal="true" aria-label={`${profilePerson.name}'s profile`} onClick={event => event.stopPropagation()}><div className="nexusProfileCover" aria-hidden="true" /><button type="button" className="nexusProfileClose" aria-label="Close profile" onClick={() => setProfileId(null)}>×</button><ProfileAvatar profile={profilePerson} size="xl" alt={`${profilePerson.name}'s profile picture`} /><h2>{profilePerson.name}</h2><span className="nexusProfileRole">{profilePerson.accountType || profilePerson.account_type || 'Member'}</span>{profilePerson.statusText && <p className="nexusProfileStatus"><i aria-hidden="true" />{profilePerson.statusText}</p>}{profilePerson.bio && <p className="nexusProfileBio">{profilePerson.bio}</p>}<div className="nexusProfileActions"><a href={`/profile/${profilePerson.id}`}>View full profile</a>{profilePerson.id === userId ? <a href="/profile">Edit my profile</a> : <button type="button" onClick={() => { const person = profilePerson; setProfileId(null); void openPerson(person, chats.find(chat => chat.kind === 'dm' && chat.members.some(member => member.id === person.id))); }}>Message {profilePerson.name}</button>}</div></section></div>}
     {mode && <div className="nexusCreateOverlay" onClick={() => setMode(null)}><section className="nexusCreatePanel" role="dialog" aria-modal="true" aria-label={mode === 'group' ? 'Create group' : 'Start direct message'} onClick={(event) => event.stopPropagation()}>
       <div className="nexusCreateTop"><h2>{mode === 'group' ? 'Create a group' : 'Start a direct message'}</h2><button type="button" onClick={() => setMode(null)} aria-label="Close new chat">×</button></div>
       {mode === 'group' && <><label>Group name<input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} placeholder="e.g. Product team" /></label><p className="nexusAdminHint">You’ll be the group admin and can appoint other admins.</p></>}
-      <fieldset><legend>{mode === 'group' ? 'Add people' : 'Choose a person'}</legend><div className="nexusPeopleList">{people.map((person) => <label key={person.id}><input type={mode === 'group' ? 'checkbox' : 'radio'} name="chat-people" checked={memberIds.includes(person.id)} onChange={() => setMemberIds(mode === 'dm' ? [person.id] : memberIds.includes(person.id) ? memberIds.filter((value) => value !== person.id) : [...memberIds, person.id])} /><span>{person.name}</span><small>{person.account_type}</small></label>)}{people.length === 0 && <p>No approved teammates are available yet.</p>}</div></fieldset>
+      <fieldset><legend>{mode === 'group' ? 'Add people' : 'Choose a person'}</legend><div className="nexusPeopleList">{people.map((person) => <label key={person.id}><input type={mode === 'group' ? 'checkbox' : 'radio'} name="chat-people" checked={memberIds.includes(person.id)} onChange={() => setMemberIds(mode === 'dm' ? [person.id] : memberIds.includes(person.id) ? memberIds.filter((value) => value !== person.id) : [...memberIds, person.id])} /><ProfileAvatar profile={person} size="xs" /><span>{person.name}</span><small>{person.account_type}</small></label>)}{people.length === 0 && <p>No approved teammates are available yet.</p>}</div></fieldset>
       <div className="nexusCreateFooter"><button type="button" className="secondaryButton" onClick={() => setMode(null)}>Cancel</button><button type="button" className="primaryButton" disabled={saving || (mode === 'dm' ? memberIds.length !== 1 : memberIds.length < 2 || name.trim().length < 2)} onClick={() => void createConversation()}>{saving ? 'Creating…' : mode === 'group' ? 'Create group' : 'Start chat'}</button></div>
     </section></div>}
   </div>;

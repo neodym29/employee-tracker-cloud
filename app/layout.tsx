@@ -4,6 +4,7 @@ import { currentSession } from '@/lib/auth';
 import ActiveNavLink from '@/app/components/ActiveNavLink';
 import DashboardMenu from '@/app/components/DashboardMenu';
 import ChatInbox from '@/app/components/ChatInbox';
+import ProfileNav from '@/app/components/ProfileNav';
 import { unreadClientRequestCount } from '@/lib/client-requests';
 
 export const metadata: Metadata = {
@@ -30,6 +31,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   <DashboardMenu />
                   {session.account_type !== 'admin' && <ActiveNavLink href="/projects">Projects</ActiveNavLink>}
                   <ChatInbox mode="nav" />
+                  <ProfileNav userId={session.id} fallbackName={session.email.split('@')[0]} />
                   {session.account_type === 'engineer' && unreadRequests > 0 && <a className="navRequestAlert" href="/projects#client-requests" aria-label={`${unreadRequests} unread client ${unreadRequests === 1 ? 'request' : 'requests'}`}><span aria-hidden="true">!</span>{unreadRequests}</a>}
                   {session.account_type !== 'admin' && <ActiveNavLink className="traceSetupNavLink" href="/trace-setup">Set up Neo-Nexus CLI</ActiveNavLink>}
                   {session.account_type === 'admin' && <ActiveNavLink href="/admin/approve">Approvals</ActiveNavLink>}

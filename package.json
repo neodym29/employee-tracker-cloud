@@ -17,10 +17,11 @@
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
-    "next": "latest",
+    "next": "^16.3.6",
     "pg": "latest",
     "react": "latest",
     "react-dom": "latest",
+    "sharp": "^0.35.4",
     "typescript": "latest"
   },
   "devDependencies": {

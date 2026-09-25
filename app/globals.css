@@ -1078,3 +1078,106 @@ body:has(.nexusChatsPage) main { display: flex; flex: 1; min-height: 0; width: 1
   .nexusMessageActions { opacity: 1; pointer-events: auto; }
   .nexusSidebarMenuButton { opacity: 1; pointer-events: auto; }
 }
+
+/* Shared teammate identity */
+.profileAvatar { flex: 0 0 auto; display: inline-grid; place-items: center; overflow: hidden; border-radius: 50%; color: #4d448c; background: #e9e4ff; font-weight: 800; line-height: 1; vertical-align: middle; }
+.profileAvatar img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.profileAvatar-xs { width: 27px; height: 27px; font-size: 11px; }
+.profileAvatar-sm { width: 33px; height: 33px; font-size: 12px; }
+.profileAvatar-md { width: 39px; height: 39px; font-size: 14px; }
+.profileAvatar-lg { width: 56px; height: 56px; font-size: 19px; }
+.profileAvatar-xl { width: 100px; height: 100px; font-size: 34px; }
+.profileAvatarEmoji { font-size: 1.35em; line-height: 1; }
+.profileNavLink { display: inline-flex; align-items: center; gap: 7px; border-radius: 9px; padding: 3px 7px; color: #56564f; font-size: 12px; font-weight: 700; }
+.profileNavLink:hover { background: #e9e5fa; }
+.profileNavLink .profileAvatar { border: 2px solid #fff; }
+
+/* Personal and teammate profiles */
+.socialProfilePage { position: relative; min-height: calc(100dvh - 160px); padding: 0 0 55px; }
+.socialProfileBanner { height: 185px; display: flex; align-items: center; justify-content: space-around; overflow: hidden; border-radius: 24px; color: rgba(255,255,255,.48); background: radial-gradient(circle at 18% 42%,#aa9af9 0,transparent 34%),radial-gradient(circle at 82% 18%,#adddc9 0,transparent 33%),linear-gradient(118deg,#594c9c,#6c66a3 50%,#5f988d); font-size: 72px; }
+.socialProfileBanner span:nth-child(2) { font-size: 115px; transform: rotate(-16deg); }
+.socialProfileShell { position: relative; z-index: 1; max-width: 1000px; margin: -53px auto 0; }
+.socialProfileHero { display: flex; align-items: flex-end; gap: 20px; min-height: 150px; border: 1px solid var(--line); border-radius: 19px; padding: 22px 26px; background: #fff; box-shadow: var(--shadow); }
+.socialProfileHero > .profileAvatar { border: 5px solid #fff; box-shadow: 0 5px 22px rgba(27,26,58,.16); }
+.socialProfileIdentity { flex: 1; min-width: 0; padding-bottom: 5px; }
+.socialProfileEyebrow { color: #7168a2; font-size: 10px; font-weight: 850; letter-spacing: .13em; }
+.socialProfileIdentity h1 { margin: 5px 0; font-size: clamp(28px,4vw,43px); line-height: 1.05; letter-spacing: -.05em; }
+.socialProfileIdentity p { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+.socialProfilePills { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.socialProfilePills > span { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 5px 9px; color: #51477c; background: #f1eefb; font-size: 11px; font-weight: 700; text-transform: capitalize; }
+.socialProfilePills .socialProfileStatus { color: #3c684f; background: #edf8f0; text-transform: none; }
+.socialProfileStatus i,.nexusProfileStatus i { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: #31a873; }
+.socialProfileBack { align-self: flex-start; border: 1px solid var(--line); border-radius: 9px; padding: 8px 11px; font-size: 12px; font-weight: 700; }
+.socialProfileBack:hover { background: #f6f4fb; }
+.socialProfileBioPreview { max-width: 680px; margin: 22px 2px 0; color: #55554f; font-size: 15px; line-height: 1.6; white-space: pre-wrap; }
+.socialProfileEditor { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.15fr); gap: 18px; margin-top: 24px; }
+.socialProfileCard,.socialPublicAbout { border: 1px solid var(--line); border-radius: 17px; padding: 25px; background: #fff; box-shadow: 0 12px 40px rgba(30,31,27,.045); }
+.socialProfileCardHeading { margin-bottom: 22px; }
+.socialProfileCard h2,.socialPublicAbout h2 { margin: 0 0 5px; font-size: 21px; }
+.socialProfileCardHeading p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.socialProfileCard > label { display: block; margin: 0 0 16px; color: #464640; font-size: 12px; font-weight: 750; }
+.socialProfileCard input:not([type='file']),.socialProfileCard textarea { width: 100%; display: block; margin: 6px 0 0; border: 1px solid var(--line-dark); border-radius: 9px; padding: 10px 12px; color: var(--ink); background: #fff; font-size: 14px; font-weight: 450; }
+.socialProfileCard textarea { resize: vertical; line-height: 1.45; }
+.socialProfileCard label small { display: block; margin-top: 4px; color: var(--faint); text-align: right; font-weight: 450; }
+.socialAvatarChoices { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 8px; }
+.socialAvatarChoice { min-width: 0; min-height: 89px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--line); border-radius: 11px; padding: 8px 3px; color: #585852; background: #faf9f6; box-shadow: none; font-size: 10px; }
+.socialAvatarChoice:hover { background: #f3f0fc; box-shadow: none; transform: none; }
+.socialAvatarChoice.chosen { border-color: #7366cc; background: #f3f0ff; box-shadow: 0 0 0 2px rgba(115,102,204,.16); }
+.socialPhotoActions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+.socialPhotoActions button { min-height: 37px; padding: 7px 12px; font-size: 12px; }
+.socialPhotoActions .socialRemovePhoto { border-color: #ead4d1; color: #a83229; background: #fff; }
+.socialPhotoNote { display: block; margin-top: 9px; color: var(--muted); font-size: 10px; }
+.socialProfileFooter { display: flex; align-items: center; justify-content: flex-end; gap: 18px; margin-top: 20px; }
+.socialProfileFooter p { margin: 0; color: var(--muted); font-size: 12px; }
+.socialProfileFooter button { min-height: 42px; }
+.socialProfileNotice,.socialProfileError { margin: 14px 0 0; border-radius: 9px; padding: 10px 13px; font-size: 12px; }
+.socialProfileNotice { color: #205b3f; background: #eaf7ee; }
+.socialProfileError { color: #8a2b25; background: #fff0ee; }
+.socialPublicAbout { max-width: 720px; margin-top: 24px; }
+.socialPublicAbout p { margin: 10px 0 0; color: #55554f; line-height: 1.6; white-space: pre-wrap; }
+
+/* Conversation wallpaper and profile presence */
+.nexusDmMessageList { background-color: #f6f5f1; background-image: radial-gradient(circle at 18px 18px,rgba(107,93,171,.065) 1.4px,transparent 1.5px),radial-gradient(circle at 53px 55px,rgba(91,145,121,.07) 1.2px,transparent 1.3px),linear-gradient(140deg,rgba(239,237,249,.64),rgba(248,247,242,.9) 55%,rgba(235,246,240,.6)); background-size: 74px 74px,74px 74px,auto; }
+.nexusChatSidebar .nexusConversation > .profileAvatar { border: 1px solid rgba(255,255,255,.12); }
+.nexusPeopleList label .profileAvatar { flex: 0 0 auto; }
+.nexusHeaderProfileButton { flex: 0 0 auto; width: 39px; height: 39px; min-height: 39px; border: 0; border-radius: 50%; padding: 0; background: transparent; box-shadow: none; }
+.nexusHeaderProfileButton:hover { transform: none; box-shadow: 0 0 0 3px #ede9ff; }
+.nexusGroupMemberProfile { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: flex-start; gap: 7px; }
+.nexusGroupMemberProfile span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nexusDirectMessage { flex-direction: row; align-items: flex-end; gap: 6px; max-width: min(76%,590px); }
+.nexusDirectMessage.own { justify-content: flex-end; }
+.nexusMessageAvatar,.nexusMessageAvatarSpacer { width: 27px; height: 27px; flex: 0 0 27px; }
+.nexusMessageAvatar { min-height: 27px; border: 0; border-radius: 50%; padding: 0; background: transparent; box-shadow: none; }
+.nexusMessageAvatar:hover { transform: none; box-shadow: 0 0 0 2px #b9addf; }
+.nexusDirectBubble { box-shadow: 0 1px 2px rgba(40,41,37,.075); }
+.nexusSidebarMenu .nexusSidebarViewProfile { color: #383b38; }
+.nexusSidebarMenu .nexusSidebarViewProfile:hover { background: #f1eff9; }
+.nexusProfileOverlay { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 20px; background: rgba(26,25,32,.44); }
+.nexusProfileCard { position: relative; width: min(390px,100%); overflow: hidden; border: 1px solid var(--line); border-radius: 19px; padding: 0 23px 23px; background: #fff; box-shadow: 0 26px 80px rgba(0,0,0,.25); text-align: center; }
+.nexusProfileCover { height: 100px; margin: 0 -23px 0; background: radial-gradient(circle at 15% 28%,#b1a5f0,transparent 42%),linear-gradient(110deg,#685c9e,#70a797); }
+.nexusProfileClose { position: absolute; top: 9px; right: 9px; width: 28px; height: 28px; min-height: 28px; border: 0; border-radius: 50%; padding: 0; background: rgba(255,255,255,.82); color: #232323; box-shadow: none; font-size: 20px; }
+.nexusProfileCard > .profileAvatar { position: relative; margin: -48px auto 11px; border: 4px solid #fff; box-shadow: 0 4px 15px rgba(0,0,0,.12); }
+.nexusProfileCard h2 { margin: 0 0 4px; font-size: 24px; }
+.nexusProfileRole { color: #64589c; font-size: 11px; font-weight: 750; text-transform: capitalize; }
+.nexusProfileStatus { display: flex; align-items: center; justify-content: center; gap: 7px; margin: 14px 0 0; color: #49745d; font-size: 12px; }
+.nexusProfileBio { margin: 16px 0 0; color: #55574f; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+.nexusProfileActions { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 20px; }
+.nexusProfileActions a,.nexusProfileActions button { min-height: 35px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line-dark); border-radius: 9px; padding: 7px 12px; color: #fff; background: #242421; font-size: 11px; font-weight: 700; }
+.nexusProfileActions a:first-child { color: #282723; background: #fff; }
+@media (max-width: 900px) {
+  .profileNavLink > span:last-child { display: none; }
+  .socialProfileEditor { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  .socialProfileBanner { height: 145px; border-radius: 14px; }
+  .socialProfileShell { margin-top: -35px; }
+  .socialProfileHero { align-items: flex-start; flex-wrap: wrap; gap: 10px; padding: 14px; }
+  .socialProfileHero > .profileAvatar { width: 75px; height: 75px; }
+  .socialProfileIdentity { flex: 1 1 calc(100% - 100px); }
+  .socialProfileBack { margin-left: auto; }
+  .socialProfileCard { padding: 18px; }
+  .socialAvatarChoices { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .socialProfileFooter { align-items: flex-start; flex-direction: column; }
+  .socialProfileFooter button { width: 100%; }
+  .nexusDirectMessage { max-width: 93%; }
+}
