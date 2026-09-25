@@ -4,11 +4,21 @@ export const PROFILE_PRESETS = [
   { id: 'arcane-fighter', label: 'Arcane Fighter', image: '/avatars/arcane-fighter.webp', category: 'Games' },
   { id: 'ada-wong', label: 'Ada Wong', image: '/avatars/ada-wong.webp', category: 'Games' },
   { id: 'neon-ronin', label: 'Neon Ronin', image: '/avatars/neon-ronin.webp', category: 'Games' },
+  { id: 'kratos', label: 'Kratos', image: '/avatars/kratos.webp', category: 'Games' },
+  { id: 'lara-croft', label: 'Lara Croft', image: '/avatars/lara-croft.webp', category: 'Games' },
+  { id: 'leon-kennedy', label: 'Leon S. Kennedy', image: '/avatars/leon-kennedy.webp', category: 'Games' },
+  { id: 'aloy', label: 'Aloy', image: '/avatars/aloy.webp', category: 'Games' },
+  { id: 'sephiroth', label: 'Sephiroth', image: '/avatars/sephiroth.webp', category: 'Games' },
   { id: 'gojo', label: 'Gojo', image: '/avatars/gojo.webp', category: 'Anime' },
   { id: 'itachi', label: 'Itachi', image: '/avatars/itachi.webp', category: 'Anime' },
   { id: 'levi', label: 'Levi', image: '/avatars/levi.webp', category: 'Anime' },
   { id: 'spike', label: 'Spike', image: '/avatars/spike.webp', category: 'Anime' },
   { id: 'guts', label: 'Guts', image: '/avatars/guts.webp', category: 'Anime' },
+  { id: 'yumeko-jabami', label: 'Yumeko Jabami', image: '/avatars/yumeko-jabami.webp', category: 'Kakegurui' },
+  { id: 'mary-saotome', label: 'Mary Saotome', image: '/avatars/mary-saotome.webp', category: 'Kakegurui' },
+  { id: 'kirari-momobami', label: 'Kirari Momobami', image: '/avatars/kirari-momobami.webp', category: 'Kakegurui' },
+  { id: 'ririka-momobami', label: 'Ririka Momobami', image: '/avatars/ririka-momobami.webp', category: 'Kakegurui' },
+  { id: 'midari-ikishima', label: 'Midari Ikishima', image: '/avatars/midari-ikishima.webp', category: 'Kakegurui' },
 ] as const;
 
 export type ProfilePresetId = (typeof PROFILE_PRESETS)[number]['id'];

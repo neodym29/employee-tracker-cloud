@@ -54,6 +54,15 @@ test('profile edits update only the authenticated account and allow a short mult
   assert.ok(queries.some(item => item.sql === 'commit'));
 });
 
+test('new Kakegurui and game portraits are valid profile choices', async () => {
+  for (const avatarPreset of ['yumeko-jabami', 'mary-saotome', 'kirari-momobami', 'ririka-momobami', 'midari-ikishima', 'kratos', 'lara-croft', 'leon-kennedy', 'aloy', 'sephiroth']) {
+    const queries = poolFor();
+    await profiles.updateOwnProfile(session, { name: 'Ibrahim', bio: '', statusText: '', avatarKind: 'preset', avatarPreset });
+    const saved = queries.find(item => item.sql.includes('insert into user_social_profiles'));
+    assert.equal(saved.params[4], avatarPreset);
+  }
+});
+
 test('photos require a supported format and are normalized before storage', async () => {
   const queries = poolFor();
   await assert.rejects(profiles.saveOwnPhoto(session, Buffer.from('not-an-image'), 'image/png'), error => error.status === 400);
