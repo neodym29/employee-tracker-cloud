@@ -1,12 +1,14 @@
 export const PROFILE_PRESETS = [
-  { id: 'sun', label: 'Sun', emoji: '☀️', color: '#f8d88b' },
-  { id: 'moon', label: 'Moon', emoji: '🌙', color: '#c9d8fa' },
-  { id: 'fox', label: 'Fox', emoji: '🦊', color: '#f6c7a4' },
-  { id: 'cat', label: 'Cat', emoji: '🐱', color: '#ebd2bd' },
-  { id: 'plant', label: 'Plant', emoji: '🌿', color: '#c6e6c9' },
-  { id: 'planet', label: 'Planet', emoji: '🪐', color: '#dcd1f6' },
-  { id: 'wave', label: 'Wave', emoji: '🌊', color: '#b8e4ee' },
-  { id: 'spark', label: 'Spark', emoji: '✨', color: '#f4d8ed' },
+  { id: 'masked-knight', label: 'Masked Knight', image: '/avatars/masked-knight.webp', category: 'Games' },
+  { id: 'ink-demon', label: 'Ink Demon', image: '/avatars/ink-demon.webp', category: 'Games' },
+  { id: 'arcane-fighter', label: 'Arcane Fighter', image: '/avatars/arcane-fighter.webp', category: 'Games' },
+  { id: 'ada-wong', label: 'Ada Wong', image: '/avatars/ada-wong.webp', category: 'Games' },
+  { id: 'neon-ronin', label: 'Neon Ronin', image: '/avatars/neon-ronin.webp', category: 'Games' },
+  { id: 'gojo', label: 'Gojo', image: '/avatars/gojo.webp', category: 'Anime' },
+  { id: 'itachi', label: 'Itachi', image: '/avatars/itachi.webp', category: 'Anime' },
+  { id: 'levi', label: 'Levi', image: '/avatars/levi.webp', category: 'Anime' },
+  { id: 'spike', label: 'Spike', image: '/avatars/spike.webp', category: 'Anime' },
+  { id: 'guts', label: 'Guts', image: '/avatars/guts.webp', category: 'Anime' },
 ] as const;
 
 export type ProfilePresetId = (typeof PROFILE_PRESETS)[number]['id'];

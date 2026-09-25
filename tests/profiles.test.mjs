@@ -40,16 +40,17 @@ function poolFor(profile = { id: '12', name: 'Ibrahim', avatarKind: 'initials' }
 test('profile choices reject unknown avatars and control characters', async () => {
   poolFor();
   await assert.rejects(profiles.updateOwnProfile(session, { name: 'Ibrahim', bio: '', statusText: '', avatarKind: 'preset', avatarPreset: 'unknown' }), error => error.status === 400);
+  await assert.rejects(profiles.updateOwnProfile(session, { name: 'Ibrahim', bio: '', statusText: '', avatarKind: 'preset', avatarPreset: 'sun' }), error => error.status === 400);
   await assert.rejects(profiles.updateOwnProfile(session, { name: 'Ibrahim\u0000', bio: '', statusText: '', avatarKind: 'initials' }), error => error.status === 400);
 });
 
 test('profile edits update only the authenticated account and allow a short multiline bio', async () => {
   const queries = poolFor();
-  await profiles.updateOwnProfile(session, { name: 'Ibrahim', bio: 'Engineer\nBuilding tools', statusText: 'At work', avatarKind: 'preset', avatarPreset: 'fox' });
+  await profiles.updateOwnProfile(session, { name: 'Ibrahim', bio: 'Engineer\nBuilding tools', statusText: 'At work', avatarKind: 'preset', avatarPreset: 'gojo' });
   const userUpdate = queries.find(item => item.sql.includes('update app_users set display_name'));
   const profileUpdate = queries.find(item => item.sql.includes('insert into user_social_profiles'));
   assert.deepEqual(userUpdate.params, ['12', 'Ibrahim', '1']);
-  assert.deepEqual(profileUpdate.params, ['12', 'Engineer\nBuilding tools', 'At work', 'preset', 'fox']);
+  assert.deepEqual(profileUpdate.params, ['12', 'Engineer\nBuilding tools', 'At work', 'preset', 'gojo']);
   assert.ok(queries.some(item => item.sql === 'commit'));
 });
 

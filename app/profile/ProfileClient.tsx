@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import ProfileAvatar, { type AvatarProfile } from '@/app/components/ProfileAvatar';
-import { PROFILE_PRESETS } from '@/lib/profile-presets';
+import { PROFILE_PRESETS, profilePreset } from '@/lib/profile-presets';
 
 type Profile = AvatarProfile & {
   name: string;
@@ -28,7 +28,9 @@ export default function ProfileClient({ userId }: { userId: string }) {
 
   function acceptProfile(next: Profile) {
     setProfile(next); setName(next.name); setBio(next.bio); setStatusText(next.statusText);
-    setAvatarKind(next.avatarKind); setAvatarPreset(next.avatarPreset || null);
+    const availablePreset = profilePreset(next.avatarPreset);
+    setAvatarKind(next.avatarKind === 'preset' && !availablePreset ? 'initials' : next.avatarKind);
+    setAvatarPreset(availablePreset?.id || null);
     window.dispatchEvent(new Event('profile:updated'));
   }
 
@@ -103,10 +105,10 @@ export default function ProfileClient({ userId }: { userId: string }) {
           <label>Bio<textarea value={bio} onChange={event => setBio(event.target.value)} maxLength={280} rows={4} placeholder="A few words about you..." /><small>{bio.length}/280</small></label>
         </section>
         <section className="socialProfileCard"><div className="socialProfileCardHeading"><h2>Profile picture</h2><p>Pick an avatar or upload a photo. Your choice appears throughout chats.</p></div>
-          <div className="socialAvatarChoices"><button type="button" className={`socialAvatarChoice ${avatarKind === 'initials' ? 'chosen' : ''}`} aria-pressed={avatarKind === 'initials'} onClick={() => { setAvatarKind('initials'); setAvatarPreset(null); }}><ProfileAvatar profile={{ id: userId, name: name || 'You' }} size="lg" /><span>Initials</span></button>
-            {PROFILE_PRESETS.map(preset => <button key={preset.id} type="button" className={`socialAvatarChoice ${avatarKind === 'preset' && avatarPreset === preset.id ? 'chosen' : ''}`} aria-pressed={avatarKind === 'preset' && avatarPreset === preset.id} onClick={() => { setAvatarKind('preset'); setAvatarPreset(preset.id); }}><ProfileAvatar profile={{ id: userId, name, avatarKind: 'preset', avatarPreset: preset.id }} size="lg" /><span>{preset.label}</span></button>)}
+          <div className="socialAvatarChoices socialAvatarUtilityChoices"><button type="button" className={`socialAvatarChoice ${avatarKind === 'initials' ? 'chosen' : ''}`} aria-pressed={avatarKind === 'initials'} onClick={() => { setAvatarKind('initials'); setAvatarPreset(null); }}><ProfileAvatar profile={{ id: userId, name: name || 'You' }} size="lg" /><span>Initials</span></button>
             {profile?.hasPhoto && <button type="button" className={`socialAvatarChoice ${avatarKind === 'photo' ? 'chosen' : ''}`} aria-pressed={avatarKind === 'photo'} onClick={() => { setAvatarKind('photo'); setAvatarPreset(null); }}><ProfileAvatar profile={{ id: userId, name, avatarKind: 'photo', avatarUpdatedAt: profile.avatarUpdatedAt }} size="lg" /><span>Your photo</span></button>}
           </div>
+          {(['Games', 'Anime'] as const).map(category => <div className="socialAvatarGroup" key={category}><h3>{category === 'Games' ? 'Game characters' : 'Anime characters'}</h3><div className="socialAvatarChoices">{PROFILE_PRESETS.filter(preset => preset.category === category).map(preset => <button key={preset.id} type="button" className={`socialAvatarChoice ${avatarKind === 'preset' && avatarPreset === preset.id ? 'chosen' : ''}`} aria-pressed={avatarKind === 'preset' && avatarPreset === preset.id} onClick={() => { setAvatarKind('preset'); setAvatarPreset(preset.id); }}><ProfileAvatar profile={{ id: userId, name, avatarKind: 'preset', avatarPreset: preset.id }} size="lg" /><span>{preset.label}</span></button>)}</div></div>)}
           <input ref={fileRef} className="srOnly" type="file" accept="image/png,image/jpeg,image/webp" aria-label="Choose a profile photo" onChange={event => void uploadPhoto(event.target.files?.[0])} />
           <div className="socialPhotoActions"><button type="button" disabled={busy} onClick={() => fileRef.current?.click()}>{busy ? 'Please wait…' : 'Upload photo'}</button>{profile?.hasPhoto && <button type="button" className="socialRemovePhoto" disabled={busy} onClick={() => void removePhoto()}>Remove uploaded photo</button>}</div>
           <small className="socialPhotoNote">PNG, JPEG, or WebP · 2 MB maximum · automatically cropped to a square</small>

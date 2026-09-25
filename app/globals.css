@@ -1120,7 +1120,11 @@ body:has(.nexusChatsPage) main { display: flex; flex: 1; min-height: 0; width: 1
 .socialProfileCard textarea { resize: vertical; line-height: 1.45; }
 .socialProfileCard label small { display: block; margin-top: 4px; color: var(--faint); text-align: right; font-weight: 450; }
 .socialAvatarChoices { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 8px; }
+.socialAvatarGroup { margin-top: 18px; }
+.socialAvatarGroup h3 { margin: 0 0 8px; color: #514c56; font-size: 12px; font-weight: 800; }
+.socialAvatarUtilityChoices { grid-template-columns: repeat(5,minmax(0,1fr)); }
 .socialAvatarChoice { min-width: 0; min-height: 89px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--line); border-radius: 11px; padding: 8px 3px; color: #585852; background: #faf9f6; box-shadow: none; font-size: 10px; }
+.socialAvatarChoice > span:last-child { min-height: 21px; display: grid; place-items: center; line-height: 1.05; text-align: center; }
 .socialAvatarChoice:hover { background: #f3f0fc; box-shadow: none; transform: none; }
 .socialAvatarChoice.chosen { border-color: #7366cc; background: #f3f0ff; box-shadow: 0 0 0 2px rgba(115,102,204,.16); }
 .socialPhotoActions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
