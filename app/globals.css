@@ -1367,7 +1367,6 @@ body:has(.nexusChatsPage) main { display: flex; flex: 1; min-height: 0; width: 1
 .nexusLanding { min-height:calc(100vh - 196px); display:flex; flex-direction:column; justify-content:center; gap:clamp(40px,6vw,78px); }
 .nexusLandingHero { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,.94fr); gap:clamp(35px,5vw,72px); align-items:center; }
 .nexusLandingCopy { max-width:610px; }
-.nexusLandingBrandMark { display:block; width:66px; height:66px; margin-bottom:25px; border-radius:17px; box-shadow:0 15px 32px rgba(33,29,53,.2); }
 .nexusLandingEyebrow { display:inline-flex; align-items:center; gap:10px; color:var(--accent); font-size:calc(11px * var(--type-scale)); font-weight:800; letter-spacing:.13em; }
 .nexusLandingEyebrow::before { content:""; width:25px; height:2px; border-radius:2px; background:currentColor; }
 .nexusLandingCopy h1 { margin:22px 0 23px; font-size:calc(clamp(48px,5.5vw,80px) * var(--type-scale)); line-height:1.02; letter-spacing:-.072em; }
@@ -1388,7 +1387,6 @@ body:has(.nexusChatsPage) main { display: flex; flex: 1; min-height: 0; width: 1
 .nexusLandingWindowTop > span:last-child { color:var(--accent); font-size:calc(20px * var(--type-scale)); }
 .nexusLandingWindowBody { padding:clamp(19px,2.5vw,32px); }
 .nexusLandingVisualTitle { display:flex; align-items:center; gap:12px; }
-.nexusLandingProjectIcon { width:42px; height:42px; flex:none; border-radius:11px; }
 .nexusLandingVisualTitle strong,.nexusLandingVisualTitle small { display:block; }
 .nexusLandingVisualTitle strong { font-size:calc(15px * var(--type-scale)); }
 .nexusLandingVisualTitle small { margin-top:3px; color:var(--muted); font-size:calc(11px * var(--type-scale)); }

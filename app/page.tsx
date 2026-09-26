@@ -1,5 +1,4 @@
 import { currentSession } from '@/lib/auth';
-import NexusMark from '@/app/components/NexusMark';
 
 export default async function Home() {
   const session = await currentSession();
@@ -12,21 +11,20 @@ export default async function Home() {
   return <div className="nexusLanding">
     <section className="nexusLandingHero">
       <div className="nexusLandingCopy">
-        <NexusMark className="nexusLandingBrandMark" />
         <span className="nexusLandingEyebrow">ONE HOME FOR PROJECT WORK</span>
         <h1>Know what’s happening.<br /><em>Keep work moving.</em></h1>
-        <p>Neo-Nexus connects clients and engineers. Ask about a project, turn requests into tasks, and see updates from the work happening in Codex.</p>
+        <p>Connect clients and engineers. Ask about a project, turn requests into tasks, and see updates from the work happening in Codex.</p>
         <div className="nexusLandingActions">
           <a className="nexusLandingPrimary" href={primaryAction.href}>{primaryAction.label}<span aria-hidden="true">↗</span></a>
           {!session && <a className="nexusLandingSecondary" href="/login">Sign in</a>}
         </div>
       </div>
-      <div className="nexusLandingVisual" aria-label="Illustration of a Neo-Nexus project conversation">
+      <div className="nexusLandingVisual" aria-label="Illustration of a project conversation">
         <div className="nexusLandingGlow" aria-hidden="true" />
         <div className="nexusLandingWindow">
           <div className="nexusLandingWindowTop"><span><i aria-hidden="true" /> Project workspace</span><span aria-hidden="true">✦</span></div>
           <div className="nexusLandingWindowBody">
-            <div className="nexusLandingVisualTitle"><NexusMark className="nexusLandingProjectIcon" /><div><strong>One shared picture</strong><small>Questions, tasks, and updates together</small></div></div>
+            <div className="nexusLandingVisualTitle"><div><strong>One shared picture</strong><small>Questions, tasks, and updates together</small></div></div>
             <div className="nexusLandingConversation">
               <div className="nexusLandingQuestion"><span>Client</span><p>What changed this week?</p></div>
               <div className="nexusLandingAnswer"><span>Project agent</span><p>See the latest work and what needs attention.</p></div>
