@@ -51,7 +51,9 @@ function requirePlatformAdmin(session: SessionUser) {
 export function projectAccessSql(userParameter: string, projectAlias = 'p', membershipAlias = 'access_membership') {
   return {
     join: `left join project_memberships ${membershipAlias} on ${membershipAlias}.project_id=${projectAlias}.id and ${membershipAlias}.user_id=${userParameter} and ${membershipAlias}.membership_status='active'`,
-    predicate: `(${projectAlias}.approval_status='approved' and (${projectAlias}.client_id=${userParameter} or ${membershipAlias}.user_id=${userParameter}))`,
+    predicate: `(${projectAlias}.approval_status='approved' and (${projectAlias}.client_id=${userParameter} or ${membershipAlias}.user_id=${userParameter}) and exists (
+      select 1 from app_users project_owner join app_users project_actor on project_actor.id=${userParameter}
+      where project_owner.id=${projectAlias}.client_id and project_owner.company_id=project_actor.company_id))`,
   };
 }
 
@@ -66,8 +68,8 @@ async function assertProjectAccess(
 ) {
   const result = options.ownerOnly
     ? await db.query(
-        `select 1 from projects p where p.id=$1 and p.client_id=$2`,
-        [projectId, session.id],
+        `select 1 from projects p join app_users owner on owner.id=p.client_id where p.id=$1 and p.client_id=$2 and owner.company_id=$3`,
+        [projectId, session.id, session.company_id],
       )
     : await db.query(
         `select 1 from projects p ${projectAccessSql('$2').join}
@@ -165,10 +167,10 @@ export async function createProject(session: SessionUser, input: { clientId?: un
       ? await client.query(
           `insert into projects(client_id,title,description,status,approval_status,proposal_kind,creation_requested_by,creation_request_key,creation_payload_fingerprint,git_remote_url,git_repository_key,title_source,progress_percent,progress_summary)
            select id,$2,$3,'open','approved',null,$4,$5::uuid,$6,$7,$8,$9,null,'Not assessed' from app_users
-           where id=$1 and account_type='client' and approval_status='approved'
+           where id=$1 and company_id=$10 and account_type='client' and approval_status='approved'
            on conflict(creation_requested_by,creation_request_key) do nothing
            returning id,client_id,title,description,status,approval_status,git_remote_url,git_repository_key,created_at,updated_at,creation_payload_fingerprint`,
-          [ownerId, title, description, session.id, creationRequestKey, payloadFingerprint, gitLink.remoteUrl, gitLink.repositoryKey, titleSource],
+          [ownerId, title, description, session.id, creationRequestKey, payloadFingerprint, gitLink.remoteUrl, gitLink.repositoryKey, titleSource, session.company_id],
         )
       : await client.query(
           `insert into projects(client_id,title,description,status,approval_status,proposal_kind,creation_requested_by,creation_request_key,creation_payload_fingerprint,git_remote_url,git_repository_key,title_source,progress_percent,progress_summary)
@@ -191,9 +193,9 @@ export async function createProject(session: SessionUser, input: { clientId?: un
       const membershipResult = await client.query(
         `insert into project_memberships(project_id,user_id,membership_type,membership_status,is_project_proposal,created_by)
          select $1,u.id,'creator','active',false,$3 from app_users u
-          where u.id=any($2::bigint[]) and u.account_type='engineer' and u.approval_status='approved'
+          where u.id=any($2::bigint[]) and u.company_id=$4 and u.account_type='engineer' and u.approval_status='approved'
          returning id,project_id,user_id,membership_type,membership_status,is_project_proposal,created_by,created_at`,
-        [inserted.rows[0].id, selectedEngineerIds, session.id],
+        [inserted.rows[0].id, selectedEngineerIds, session.id, session.company_id],
       );
       if (membershipResult.rows.length !== selectedEngineerIds.length) {
         throw new ProjectServiceError('Every selected engineer must be approved', 409, 'conflict');
@@ -287,7 +289,7 @@ export async function renameProject(session: SessionUser, projectId: unknown, va
   const db = await ready();
   const result = await db.query(
     `update projects p set title=$3,title_source='manual',agent_title_evidence_hash=null,agent_title_updated_at=null,updated_at=now()
-     where p.id=$1 and p.approval_status='approved' and (
+     where p.id=$1 and p.approval_status='approved' and exists(select 1 from app_users owner where owner.id=p.client_id and owner.company_id=$5) and (
        (p.client_id=$2 and $4='client') or
        ($4='engineer' and (p.creation_requested_by=$2 or exists(
          select 1 from project_memberships pm where pm.project_id=p.id and pm.user_id=$2
@@ -295,7 +297,7 @@ export async function renameProject(session: SessionUser, projectId: unknown, va
        )))
      )
      returning id,client_id,title,description,status,approval_status,created_at,updated_at`,
-    [project, session.id, title, session.account_type],
+    [project, session.id, title, session.account_type, session.company_id],
   );
   if (!result.rows[0]) throw new ProjectServiceError('Project not found', 404, 'not_found');
   return result.rows[0];
@@ -310,7 +312,7 @@ export async function updateProjectDeploymentUrl(session: SessionUser, projectId
   const db = await ready();
   const result = await db.query(
     `update projects p set deployment_url=$3,updated_at=now()
-      where p.id=$1 and p.approval_status='approved' and (
+      where p.id=$1 and p.approval_status='approved' and exists(select 1 from app_users owner where owner.id=p.client_id and owner.company_id=$6) and (
         $4::boolean or
         ($5='client' and p.client_id=$2) or
         ($5='engineer' and (p.creation_requested_by=$2 or exists(
@@ -319,7 +321,7 @@ export async function updateProjectDeploymentUrl(session: SessionUser, projectId
         )))
       )
       returning id,title,deployment_url,updated_at`,
-    [project, session.id, deploymentUrl, platformAdmin, session.account_type],
+    [project, session.id, deploymentUrl, platformAdmin, session.account_type, session.company_id],
   );
   if (!result.rows[0]) throw new ProjectServiceError('Project not found', 404, 'not_found');
   return result.rows[0];
@@ -331,11 +333,11 @@ export async function deleteProject(session: SessionUser, projectId: unknown) {
   const creatorCanDelete = session.account_type === 'engineer';
   const db = await ready();
   const owner = await db.query(
-    `select id from projects where id=$1 and approval_status='approved'
+    `select id from projects where id=$1 and approval_status='approved' and exists(select 1 from app_users owner where owner.id=projects.client_id and owner.company_id=$5)
        and ($2::boolean or client_id=$3 or ($4::boolean and (creation_requested_by=$3 or exists(
          select 1 from project_memberships pm where pm.project_id=projects.id and pm.user_id=$3
          and pm.membership_type='creator' and pm.membership_status='active')))) for update`,
-    [project, platformAdmin, session.id, creatorCanDelete],
+    [project, platformAdmin, session.id, creatorCanDelete, session.company_id],
   );
   if (!owner.rows[0]) throw new ProjectServiceError('Project not found', 404, 'not_found');
   const retained = await db.query(
@@ -363,8 +365,9 @@ export async function attachProjectGitRemote(session: SessionUser, projectId: un
   const db = await ready();
   const authorized = await db.query(
     `select id,client_id,git_remote_url,git_repository_key from projects
-      where id=$1 and approval_status='approved' and ($2::boolean or client_id=$3)`,
-    [project, platformAdmin, session.id],
+      where id=$1 and approval_status='approved' and ($2::boolean or client_id=$3)
+        and exists(select 1 from app_users owner where owner.id=projects.client_id and owner.company_id=$4)`,
+    [project, platformAdmin, session.id, session.company_id],
   );
   const existing = authorized.rows[0];
   if (!existing) throw new ProjectServiceError('Project not found', 404, 'not_found');
@@ -388,7 +391,8 @@ export async function listProjects(session: SessionUser, options: ProjectReadOpt
     requirePlatformAdmin(session);
     return (await db.query(
       `select p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.git_remote_url,p.git_repository_key,p.created_at,p.updated_at
-       from projects p order by p.updated_at desc,p.id desc`,
+       from projects p join app_users owner on owner.id=p.client_id where owner.company_id=$1 order by p.updated_at desc,p.id desc`,
+      [session.company_id],
     )).rows;
   }
   if (session.account_type === 'engineer') {
@@ -425,11 +429,11 @@ export async function listProjects(session: SessionUser, options: ProjectReadOpt
               ) else null end as latest_request_kind,
               p.created_at,p.updated_at,
               pm.id as membership_id,pm.membership_type,pm.membership_status
-       from projects p
+       from projects p join app_users owner on owner.id=p.client_id
        left join project_memberships pm on pm.project_id=p.id and pm.user_id=$1
-       where p.status<>'archived' and ((p.approval_status='approved' and p.status='open') or pm.user_id=$1)
+       where owner.company_id=$2 and p.status<>'archived' and ((p.approval_status='approved' and p.status='open') or pm.user_id=$1)
        order by p.updated_at desc,p.id desc`,
-      [session.id],
+      [session.id, session.company_id],
     )).rows;
   }
   if (session.account_type === 'client') {
@@ -464,8 +468,8 @@ export async function getProject(session: SessionUser, projectId: unknown, optio
   if (options.platformAudit) {
     requirePlatformAdmin(session);
     const auditResult = await db.query(
-      `select p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.git_remote_url,p.git_repository_key,p.created_at,p.updated_at from projects p where p.id=$1`,
-      [id(projectId, 'project id')],
+      `select p.id,p.client_id,p.title,p.description,p.status,p.approval_status,p.git_remote_url,p.git_repository_key,p.created_at,p.updated_at from projects p join app_users owner on owner.id=p.client_id where p.id=$1 and owner.company_id=$2`,
+      [id(projectId, 'project id'), session.company_id],
     );
     if (!auditResult.rows[0]) throw new ProjectServiceError('Project not found', 404, 'not_found');
     return auditResult.rows[0];
@@ -486,8 +490,9 @@ export async function listAvailableEngineers(session: SessionUser) {
   const db = await ready();
   return (await db.query(
     `select id,display_name from app_users
-     where account_type='engineer' and approval_status='approved'
+     where company_id=$1 and account_type='engineer' and approval_status='approved'
      order by display_name asc,id asc`,
+    [session.company_id],
   )).rows;
 }
 
@@ -496,8 +501,9 @@ export async function listAvailableClients(session: SessionUser) {
   const db = await ready();
   return (await db.query(
     `select id,display_name from app_users
-     where account_type='client' and approval_status='approved'
+     where company_id=$1 and account_type='client' and approval_status='approved'
      order by display_name asc,id asc`,
+    [session.company_id],
   )).rows;
 }
 
@@ -507,11 +513,11 @@ export async function inviteEngineer(session: SessionUser, projectId: unknown, e
   const result = await db.query(
     `insert into project_memberships(project_id,user_id,membership_type,membership_status,is_project_proposal,created_by)
      select p.id,u.id,'invitation','pending',false,$2
-     from projects p join app_users u on u.id=$3 and u.account_type='engineer' and u.approval_status='approved'
+     from projects p join app_users u on u.id=$3 and u.company_id=$4 and u.account_type='engineer' and u.approval_status='approved'
      where p.id=$1 and p.client_id=$2 and p.approval_status='approved'
      on conflict(project_id,user_id) do nothing
      returning id,project_id,user_id,membership_type,membership_status,created_at`,
-    [id(projectId, 'project id'), session.id, id(engineerId, 'engineer id')],
+    [id(projectId, 'project id'), session.id, id(engineerId, 'engineer id'), session.company_id],
   );
   if (!result.rows[0]) throw new ProjectServiceError('Invitation could not be created', 409, 'conflict');
   return result.rows[0];
@@ -523,10 +529,10 @@ export async function requestMembership(session: SessionUser, projectId: unknown
   const result = await db.query(
     `insert into project_memberships(project_id,user_id,membership_type,membership_status,is_project_proposal,created_by)
      select p.id,$2,'request','pending',false,$2 from projects p
-     where p.id=$1 and p.status='open' and p.approval_status='approved'
+     where p.id=$1 and p.status='open' and p.approval_status='approved' and exists(select 1 from app_users owner where owner.id=p.client_id and owner.company_id=$3)
      on conflict(project_id,user_id) do nothing
      returning id,project_id,user_id,membership_type,membership_status,created_at`,
-    [id(projectId, 'project id'), session.id],
+    [id(projectId, 'project id'), session.id, session.company_id],
   );
   if (!result.rows[0]) throw new ProjectServiceError('Request could not be created', 409, 'conflict');
   return result.rows[0];
@@ -541,8 +547,8 @@ export async function listProjectMemberships(session: SessionUser, projectId: un
     `select pm.id,pm.project_id,pm.user_id,u.display_name,pm.membership_type,pm.membership_status,pm.created_at,pm.responded_at,
             coalesce(pm.is_project_proposal,false) as is_project_proposal
      from project_memberships pm join projects p on p.id=pm.project_id and p.client_id=$2
-     join app_users u on u.id=pm.user_id where pm.project_id=$1 order by pm.created_at desc,pm.id desc`,
-    [project, session.id],
+     join app_users u on u.id=pm.user_id and u.company_id=$3 where pm.project_id=$1 order by pm.created_at desc,pm.id desc`,
+    [project, session.id, session.company_id],
   )).rows;
 }
 
@@ -562,11 +568,12 @@ export async function respondToMembership(session: SessionUser, projectId: unkno
       `select pm.id,pm.project_id,pm.user_id,pm.membership_type,pm.membership_status,pm.created_by,pm.responded_by,pm.responded_at,
               p.client_id,p.status as project_status,p.approval_status
          from project_memberships pm join projects p on p.id=pm.project_id
-        where pm.id=$2 and pm.project_id=$1
+        where pm.id=$2 and pm.project_id=$1 and exists(select 1 from app_users owner where owner.id=p.client_id and owner.company_id=$5)
+          and exists(select 1 from app_users member where member.id=pm.user_id and member.company_id=$5)
           and (($4='engineer' and pm.user_id=$3 and pm.membership_type='invitation')
             or ($4='client' and p.client_id=$3 and pm.membership_type='request'))
         for update of pm,p`,
-      [project, membership, session.id, session.account_type],
+      [project, membership, session.id, session.account_type, session.company_id],
     );
     const row = locked.rows[0];
     if (!row) throw new ProjectServiceError('Membership not found', 404, 'not_found');
@@ -720,7 +727,8 @@ export async function listPendingApprovals(session: SessionUser) {
   const db = await ready();
   return (await db.query(
     `select id,display_name,email,account_type,approval_status,created_at
-     from app_users where approval_status='pending' and account_type in ('client','engineer') order by created_at,id`,
+     from app_users where company_id=$1 and approval_status='pending' and account_type in ('client','engineer') order by created_at,id`,
+    [session.company_id],
   )).rows;
 }
 
@@ -752,9 +760,9 @@ export async function reviewAccount(session: SessionUser, userId: unknown, actio
   const db = await ready();
   const result = await db.query(
     `update app_users set approval_status=$3,approved_at=case when $3='approved' then now() else null end,reviewed_at=now(),reviewed_by=$2
-     where id=$1 and account_type in ('client','engineer') and approval_status='pending'
+     where id=$1 and company_id=$4 and account_type in ('client','engineer') and approval_status='pending'
      returning id,display_name,email,account_type,approval_status,reviewed_at`,
-    [id(userId, 'user id'), session.id, approval],
+    [id(userId, 'user id'), session.id, approval, session.company_id],
   );
   if (!result.rows[0]) throw new ProjectServiceError('Account not found', 404, 'not_found');
   return result.rows[0];

@@ -81,7 +81,7 @@ export async function getVisibleProfile(session: SessionUser, userId: string) {
   if (!/^[1-9]\d{0,18}$/.test(userId)) throw new ApiError('Invalid profile', 400, 'invalid_id');
   const result = await getPool().query(`select ${profileColumns}
     from app_users u left join user_social_profiles p on p.user_id=u.id
-    where u.id=$1 and u.approval_status='approved'`, [userId]);
+    where u.id=$1 and u.company_id=$2 and u.approval_status='approved'`, [userId, session.company_id]);
   if (!result.rows[0]) throw new ApiError('Profile not found', 404, 'not_found');
   return result.rows[0];
 }
@@ -160,7 +160,7 @@ export async function getVisiblePhoto(session: SessionUser, userId: string): Pro
   if (!/^[1-9]\d{0,18}$/.test(userId)) throw new ApiError('Invalid profile', 400, 'invalid_id');
   const result = await getPool().query(`select p.photo_bytes from user_social_profiles p
     join app_users u on u.id=p.user_id
-    where p.user_id=$1 and u.approval_status='approved'`, [userId]);
+    where p.user_id=$1 and u.company_id=$2 and u.approval_status='approved'`, [userId, session.company_id]);
   if (!result.rows[0]?.photo_bytes) throw new ApiError('Photo not found', 404, 'not_found');
   return result.rows[0].photo_bytes;
 }

@@ -81,5 +81,5 @@ test('group replies are returned in the main chronological message list', async 
   const listQuery = queries.find(({ sql }) => sql.includes('from chat_messages msg join app_users u'));
   assert.ok(listQuery);
   assert.doesNotMatch(listQuery.sql, /parent_message_id is null/);
-  assert.deepEqual(listQuery.params, ['5', '12']);
+  assert.deepEqual(listQuery.params, ['5', '12', '1']);
 });

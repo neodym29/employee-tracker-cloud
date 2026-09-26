@@ -33,6 +33,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   <DashboardMenu />
                   {session.account_type !== 'admin' && <ActiveNavLink href="/projects">Projects</ActiveNavLink>}
                   <ChatInbox mode="nav" initialClientRequests={unreadRequests} />
+                  <ActiveNavLink href="/search">Search</ActiveNavLink>
                   {session.account_type !== 'admin' && <ActiveNavLink className="traceSetupNavLink" href="/trace-setup">Setup</ActiveNavLink>}
                   {session.account_type === 'admin' && <ActiveNavLink href="/admin/approve">Approvals</ActiveNavLink>}
               </div>

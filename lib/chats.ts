@@ -72,7 +72,7 @@ function chatUser(session: SessionUser) {
 async function memberConversation(db: PoolClient | ReturnType<typeof getPool>, session: SessionUser, conversationId: string) {
   const result = await db.query(`select c.id,c.company_id,c.kind,c.title,c.created_by,c.created_at,m.is_admin
     from chat_conversations c join chat_conversation_members m on m.conversation_id=c.id
-    where c.id=$1 and m.user_id=$2`, [conversationId, session.id]);
+    where c.id=$1 and m.user_id=$2 and c.company_id=$3`, [conversationId, session.id, session.company_id]);
   if (!result.rows[0]) throw new ApiError('Conversation not found', 404, 'not_found');
   return result.rows[0];
 }
@@ -85,8 +85,8 @@ export async function listChatPeople(session: SessionUser) {
     coalesce(p.bio,'') as bio,coalesce(p.status_text,'') as "statusText",
     coalesce(p.avatar_kind,'initials') as "avatarKind",p.avatar_preset as "avatarPreset",p.avatar_updated_at as "avatarUpdatedAt"
     from app_users u left join user_social_profiles p on p.user_id=u.id
-    where u.id<>$1 and u.approval_status='approved'
-      and u.account_type in ('admin','client','engineer') order by lower(coalesce(nullif(u.display_name,''),u.email)),u.id`, [session.id]);
+    where u.id<>$1 and u.company_id=$2 and u.approval_status='approved'
+      and u.account_type in ('admin','client','engineer') order by lower(coalesce(nullif(u.display_name,''),u.email)),u.id`, [session.id, session.company_id]);
   return result.rows;
 }
 
@@ -99,12 +99,12 @@ export async function listChats(session: SessionUser) {
       'bio',coalesce(p.bio,''),'statusText',coalesce(p.status_text,''),'avatarKind',coalesce(p.avatar_kind,'initials'),
       'avatarPreset',p.avatar_preset,'avatarUpdatedAt',p.avatar_updated_at) order by lower(coalesce(nullif(u.display_name,''),u.email)))
       from chat_conversation_members cm join app_users u on u.id=cm.user_id
-      left join user_social_profiles p on p.user_id=u.id where cm.conversation_id=c.id),'[]'::json) as members,
-    (select case when msg.deleted_at is null then msg.body else 'Message deleted' end from chat_messages msg where msg.conversation_id=c.id and (mine.cleared_at is null or msg.created_at>mine.cleared_at) order by msg.id desc limit 1) as last_message,
-    (select count(*)::int from chat_messages msg where msg.conversation_id=c.id and msg.created_at>greatest(mine.last_read_at,coalesce(mine.cleared_at,'-infinity'::timestamptz)) and msg.sender_id<>$1 and msg.deleted_at is null) as unread_count
+      left join user_social_profiles p on p.user_id=u.id where cm.conversation_id=c.id and u.company_id=$2),'[]'::json) as members,
+    (select case when msg.deleted_at is null then msg.body else 'Message deleted' end from chat_messages msg join app_users sender on sender.id=msg.sender_id and sender.company_id=$2 where msg.conversation_id=c.id and (mine.cleared_at is null or msg.created_at>mine.cleared_at) order by msg.id desc limit 1) as last_message,
+    (select count(*)::int from chat_messages msg join app_users sender on sender.id=msg.sender_id and sender.company_id=$2 where msg.conversation_id=c.id and msg.created_at>greatest(mine.last_read_at,coalesce(mine.cleared_at,'-infinity'::timestamptz)) and msg.sender_id<>$1 and msg.deleted_at is null) as unread_count
     from chat_conversations c join chat_conversation_members mine on mine.conversation_id=c.id and mine.user_id=$1
-    where mine.hidden_at is null or c.updated_at>mine.hidden_at
-    order by c.updated_at desc,c.id desc limit 200`, [session.id]);
+    where c.company_id=$2 and (mine.hidden_at is null or c.updated_at>mine.hidden_at)
+    order by c.updated_at desc,c.id desc limit 200`, [session.id, session.company_id]);
   return result.rows;
 }
 
@@ -119,11 +119,12 @@ export async function chatNotifications(session: SessionUser) {
     from chat_conversations c
     join chat_conversation_members mine on mine.conversation_id=c.id and mine.user_id=$1
     left join chat_conversation_members other on other.conversation_id=c.id and other.user_id<>$1 and c.kind='dm'
-    left join app_users peer on peer.id=other.user_id
+    left join app_users peer on peer.id=other.user_id and peer.company_id=$2
     join chat_messages msg on msg.conversation_id=c.id and msg.sender_id<>$1 and msg.deleted_at is null
       and msg.created_at>greatest(mine.last_read_at,coalesce(mine.cleared_at,'-infinity'::timestamptz))
-    where mine.hidden_at is null or c.updated_at>mine.hidden_at
-    group by c.id,peer.id order by max(msg.created_at) desc limit 20`, [session.id]);
+    join app_users sender on sender.id=msg.sender_id and sender.company_id=$2
+    where c.company_id=$2 and (mine.hidden_at is null or c.updated_at>mine.hidden_at)
+    group by c.id,peer.id order by max(msg.created_at) desc limit 20`, [session.id, session.company_id]);
   return { total: Number(result.rows[0]?.total_unread || 0), conversations: result.rows.map(row => ({
     id: String(row.id), name: row.kind === 'dm' ? row.peer_name || 'Direct message' : row.title || 'Group',
     count: Number(row.unread_count), latestAt: row.latest_at,
@@ -144,7 +145,7 @@ export async function createChat(session: SessionUser, input: Record<string, unk
   const db = await getPool().connect();
   try {
     await db.query('begin');
-    const approved = await db.query(`select id from app_users where id=any($1::bigint[]) and approval_status='approved' and account_type in ('admin','client','engineer')`, [participants]);
+    const approved = await db.query(`select id from app_users where id=any($1::bigint[]) and company_id=$2 and approval_status='approved' and account_type in ('admin','client','engineer')`, [participants, session.company_id]);
     if (approved.rows.length !== participants.length) throw new ApiError('One or more people are unavailable', 400, 'invalid_members');
     let conversationId: string;
     if (kind === 'dm') {
@@ -153,7 +154,8 @@ export async function createChat(session: SessionUser, input: Record<string, unk
         values($1,'dm',$2,$3) on conflict(dm_key) do nothing returning id`, [session.company_id, dmKey, session.id]);
       conversationId = inserted.rows[0]?.id;
       if (!conversationId) {
-        const existing = await db.query(`select id from chat_conversations where dm_key=$1`, [dmKey]);
+        const existing = await db.query(`select id from chat_conversations where dm_key=$1 and company_id=$2`, [dmKey, session.company_id]);
+        if (!existing.rows[0]) throw new ApiError('Conversation not available', 404, 'not_found');
         conversationId = existing.rows[0].id;
       }
     } else {
@@ -181,11 +183,11 @@ export async function listChatMessages(session: SessionUser, value: unknown) {
   const result = await db.query(`select msg.id,msg.parent_message_id,case when msg.deleted_at is null then msg.body else 'Message deleted' end as body,msg.created_at,msg.edited_at,msg.deleted_at,msg.sender_id,
     case when parent.deleted_at is null then parent.body else 'Message deleted' end as parent_body,
     coalesce(nullif(u.display_name,''),split_part(u.email,'@',1)) as sender_name
-    from chat_messages msg join app_users u on u.id=msg.sender_id
+    from chat_messages msg join app_users u on u.id=msg.sender_id and u.company_id=$3
     left join chat_messages parent on parent.conversation_id=msg.conversation_id and parent.id=msg.parent_message_id
     join chat_conversation_members mine on mine.conversation_id=msg.conversation_id and mine.user_id=$2
     where msg.conversation_id=$1 and (mine.cleared_at is null or msg.created_at>mine.cleared_at)
-    order by msg.id desc limit 150`, [conversationId, session.id]);
+    order by msg.id desc limit 150`, [conversationId, session.id, session.company_id]);
   await db.query(`update chat_conversation_members set last_read_at=now() where conversation_id=$1 and user_id=$2`, [conversationId, session.id]);
   return result.rows.reverse();
 }

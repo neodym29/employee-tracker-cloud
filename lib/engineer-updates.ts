@@ -77,10 +77,10 @@ export async function listClientEngineerUpdates(session: SessionUser, projectVal
        from projects p
        ${access.join}
        join project_memberships assigned on assigned.project_id=p.id and assigned.membership_status='active'
-       join app_users engineer on engineer.id=assigned.user_id and engineer.account_type='engineer' and engineer.approval_status='approved'
+       join app_users engineer on engineer.id=assigned.user_id and engineer.company_id=$3 and engineer.account_type='engineer' and engineer.approval_status='approved'
       where ${access.predicate} and p.status<>'archived' and ($2::bigint is null or p.id=$2)
       order by engineer.display_name,engineer.id,p.title,p.id`,
-    [session.id, project],
+    [session.id, project, session.company_id],
   )).rows;
 
   if (!memberships.length) return [];
@@ -91,13 +91,13 @@ export async function listClientEngineerUpdates(session: SessionUser, projectVal
        join projects p on p.id=e.project_id and p.status<>'archived' and p.approval_status='approved'
        ${access.join}
        join files_agent_devices device on device.id=e.device_id and device.revoked_at is null
-       join app_users engineer on engineer.id=device.user_id and engineer.account_type='engineer' and engineer.approval_status='approved'
+       join app_users engineer on engineer.id=device.user_id and engineer.company_id=$3 and engineer.account_type='engineer' and engineer.approval_status='approved'
        join project_memberships assigned on assigned.project_id=p.id and assigned.user_id=engineer.id and assigned.membership_status='active'
        join project_tracemini_roots root on root.id=e.root_id and root.project_id=p.id and root.device_id=device.id
       where ${access.predicate} and ($2::bigint is null or p.id=$2)
         and e.kind in ('commit','file_change','file_activity','non_git','dirty','merge','rewrite')
       order by e.occurred_at desc,e.id desc limit ${EVENT_LIMIT}`,
-    [session.id, project],
+    [session.id, project, session.company_id],
   )).rows;
 
   const groups = new Map<string, EngineerUpdateGroup>();
