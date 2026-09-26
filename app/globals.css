@@ -1517,6 +1517,7 @@ body { font-weight:300; letter-spacing:.005em; }
   letter-spacing:-.055em;
   text-shadow:1px 2px 0 color-mix(in srgb,var(--paper) 44%,transparent), 10px 14px 15px color-mix(in srgb,var(--ink) 7%,transparent);
 }
+.nexusChatSidebar h1 { text-shadow:none; }
 :is(h2,h3,h4,.brand) { font-weight:300; letter-spacing:-.025em; }
 :is(.navLink,.accountMenu > summary,.dashboardMenu > summary) { font-weight:350; }
 :is(button,.button,.primaryButton,.secondaryButton,.navButton,.nexusLandingPrimary,.nexusLandingSecondary) { font-weight:420; letter-spacing:.015em; }

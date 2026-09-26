@@ -24,4 +24,5 @@ test('the default font is a lightweight self-hosted geometric face', async () =>
   assert.match(appearance, /id: 'system', label: 'Geometric'/);
   assert.match(css, /--app-font: var\(--font-outfit\)/);
   assert.match(css, /font-weight:200;/);
+  assert.match(css, /\.nexusChatSidebar h1 \{ text-shadow:none; \}/);
 });
