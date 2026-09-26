@@ -17,11 +17,19 @@ export const APPEARANCE_FONTS = [
   { id: 'compact', label: 'Compact', sample: 'More on screen' },
 ] as const;
 
+export const APPEARANCE_SIZES = [
+  { id: 'small', label: 'Small' },
+  { id: 'normal', label: 'Default' },
+  { id: 'large', label: 'Large' },
+  { id: 'extra-large', label: 'Extra large' },
+] as const;
+
 export type AppearanceTheme = (typeof APPEARANCE_THEMES)[number]['id'];
 export type AppearanceFont = (typeof APPEARANCE_FONTS)[number]['id'];
-export type Appearance = { theme: AppearanceTheme; font: AppearanceFont };
+export type AppearanceSize = (typeof APPEARANCE_SIZES)[number]['id'];
+export type Appearance = { theme: AppearanceTheme; font: AppearanceFont; size: AppearanceSize };
 
-export const DEFAULT_APPEARANCE: Appearance = { theme: 'classic', font: 'system' };
+export const DEFAULT_APPEARANCE: Appearance = { theme: 'classic', font: 'system', size: 'normal' };
 
 export function isAppearanceTheme(value: unknown): value is AppearanceTheme {
   return APPEARANCE_THEMES.some(option => option.id === value);
@@ -29,4 +37,8 @@ export function isAppearanceTheme(value: unknown): value is AppearanceTheme {
 
 export function isAppearanceFont(value: unknown): value is AppearanceFont {
   return APPEARANCE_FONTS.some(option => option.id === value);
+}
+
+export function isAppearanceSize(value: unknown): value is AppearanceSize {
+  return APPEARANCE_SIZES.some(option => option.id === value);
 }

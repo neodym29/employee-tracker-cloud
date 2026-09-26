@@ -63,15 +63,16 @@ test('Kakegurui portraits remain valid after moving into Anime', async () => {
   }
 });
 
-test('appearance is account-scoped and rejects unknown themes or fonts', async () => {
+test('appearance is account-scoped and rejects unknown themes, fonts, or sizes', async () => {
   const queries = poolFor();
-  await assert.rejects(profiles.setOwnAppearance(session, { theme: 'unknown', font: 'system' }), error => error.status === 400);
-  await assert.rejects(profiles.setOwnAppearance(session, { theme: 'forest', font: 'unknown' }), error => error.status === 400);
-  await profiles.setOwnAppearance(session, { theme: 'ocean', font: 'editorial' });
+  await assert.rejects(profiles.setOwnAppearance(session, { theme: 'unknown', font: 'system', size: 'normal' }), error => error.status === 400);
+  await assert.rejects(profiles.setOwnAppearance(session, { theme: 'forest', font: 'unknown', size: 'normal' }), error => error.status === 400);
+  await assert.rejects(profiles.setOwnAppearance(session, { theme: 'forest', font: 'system', size: 'huge' }), error => error.status === 400);
+  await profiles.setOwnAppearance(session, { theme: 'ocean', font: 'editorial', size: 'large' });
   const write = queries.find(item => item.sql.includes('appearance_theme,appearance_font'));
-  assert.deepEqual(write.params, ['12', 'ocean', 'editorial']);
-  await profiles.setOwnAppearance(session, { theme: 'night', font: 'system' });
-  assert.deepEqual(queries.at(-1).params, ['12', 'night', 'system']);
+  assert.deepEqual(write.params, ['12', 'ocean', 'editorial', 'large']);
+  await profiles.setOwnAppearance(session, { theme: 'night', font: 'system', size: 'small' });
+  assert.deepEqual(queries.at(-1).params, ['12', 'night', 'system', 'small']);
 });
 
 test('photos require a supported format and are normalized before storage', async () => {

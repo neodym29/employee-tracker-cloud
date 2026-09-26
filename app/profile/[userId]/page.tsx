@@ -15,7 +15,7 @@ export default async function TeammateProfilePage({ params }: Props) {
   const profile = await getVisibleProfile(session, userId);
   return <div className="socialProfilePage socialProfilePublic">
     <div className="socialProfileBanner" aria-hidden="true"><span>✦</span><span>✶</span><span>✦</span></div>
-    <div className="socialProfileShell"><section className="socialProfileHero"><ProfileAvatar profile={profile} size="xl" alt={`${profile.name}'s profile picture`} /><div className="socialProfileIdentity"><span className="socialProfileEyebrow">NEO-NEXUS TEAMMATE</span><h1>{profile.name}</h1><div className="socialProfilePills"><span>{profile.accountType}</span>{profile.statusText && <span className="socialProfileStatus"><i aria-hidden="true" />{profile.statusText}</span>}</div></div><a className="socialProfileBack" href="/chats">Back to chats</a></section>
+    <div className="socialProfileShell"><section className="socialProfileHero"><ProfileAvatar profile={profile} size="xl" alt={`${profile.name}'s profile picture`} /><div className="socialProfileIdentity"><span className="socialProfileEyebrow">NEO-NEXUS TEAMMATE</span><h1>{profile.name}</h1><div className="socialProfilePills"><span>{profile.accountType}</span>{profile.statusText && <span className="socialProfileStatus"><i aria-hidden="true" />{profile.statusText}</span>}</div></div></section>
       <section className="socialPublicAbout"><h2>About</h2><p>{profile.bio || 'No bio yet.'}</p></section>
     </div>
   </div>;

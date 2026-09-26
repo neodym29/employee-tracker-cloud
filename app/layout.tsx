@@ -23,7 +23,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     catch { unreadRequests = 0; }
   }
   return (
-    <html lang="en" data-theme={appearance.theme} data-font={appearance.font}>
+    <html lang="en" data-theme={appearance.theme} data-font={appearance.font} data-font-size={appearance.size}>
       <body>
         <header className="siteHeader">
           <nav className="nav" aria-label="Primary navigation">

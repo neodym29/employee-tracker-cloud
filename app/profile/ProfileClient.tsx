@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import ProfileAvatar, { type AvatarProfile } from '@/app/components/ProfileAvatar';
 import { PROFILE_PRESETS, profilePreset } from '@/lib/profile-presets';
-import { APPEARANCE_FONTS, APPEARANCE_THEMES, DEFAULT_APPEARANCE, isAppearanceFont, isAppearanceTheme, type Appearance, type AppearanceFont, type AppearanceTheme } from '@/lib/appearance';
+import { APPEARANCE_FONTS, APPEARANCE_SIZES, APPEARANCE_THEMES, DEFAULT_APPEARANCE, isAppearanceFont, isAppearanceSize, isAppearanceTheme, type Appearance, type AppearanceFont, type AppearanceSize, type AppearanceTheme } from '@/lib/appearance';
 import { alertsEnabled, disableAlerts, enableAlerts } from '@/lib/message-alerts';
 
 type Profile = AvatarProfile & {
@@ -16,6 +16,7 @@ type Profile = AvatarProfile & {
   hasPhoto: boolean;
   appearanceTheme: AppearanceTheme;
   appearanceFont: AppearanceFont;
+  appearanceSize: AppearanceSize;
 };
 type ProfileDraft = Pick<Profile, 'name' | 'bio' | 'statusText' | 'avatarKind' | 'avatarPreset'>;
 
@@ -37,6 +38,8 @@ export default function ProfileClient({ userId }: { userId: string }) {
   const [pictureCategory, setPictureCategory] = useState<(typeof PROFILE_PRESETS)[number]['category']>('Games');
   const [appearanceTheme, setAppearanceTheme] = useState<AppearanceTheme>(DEFAULT_APPEARANCE.theme);
   const [appearanceFont, setAppearanceFont] = useState<AppearanceFont>(DEFAULT_APPEARANCE.font);
+  const [appearanceSize, setAppearanceSize] = useState<AppearanceSize>(DEFAULT_APPEARANCE.size);
+  const [editingName, setEditingName] = useState(false);
   const [appearanceBusy, setAppearanceBusy] = useState(false);
   const [messageAlerts, setMessageAlerts] = useState(false);
   const [alertStatus, setAlertStatus] = useState('');
@@ -47,6 +50,8 @@ export default function ProfileClient({ userId }: { userId: string }) {
   const [error, setError] = useState('');
   const [saveError, setSaveError] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const scrollPictureOnOpen = useRef(false);
   const draftRef = useRef<ProfileDraft>({ name: '', bio: '', statusText: '', avatarKind: 'initials', avatarPreset: null });
   const savedRef = useRef('');
   const saveQueue = useRef<Promise<boolean>>(Promise.resolve(true));
@@ -64,11 +69,13 @@ export default function ProfileClient({ userId }: { userId: string }) {
     const appearance: Appearance = {
       theme: isAppearanceTheme(next.appearanceTheme) ? next.appearanceTheme : DEFAULT_APPEARANCE.theme,
       font: isAppearanceFont(next.appearanceFont) ? next.appearanceFont : DEFAULT_APPEARANCE.font,
+      size: isAppearanceSize(next.appearanceSize) ? next.appearanceSize : DEFAULT_APPEARANCE.size,
     };
     appearanceRef.current = appearance;
-    setAppearanceTheme(appearance.theme); setAppearanceFont(appearance.font);
+    setAppearanceTheme(appearance.theme); setAppearanceFont(appearance.font); setAppearanceSize(appearance.size);
     document.documentElement.dataset.theme = appearance.theme;
     document.documentElement.dataset.font = appearance.font;
+    document.documentElement.dataset.fontSize = appearance.size;
     window.dispatchEvent(new Event('profile:updated'));
   }
 
@@ -76,21 +83,23 @@ export default function ProfileClient({ userId }: { userId: string }) {
     if (!profile || appearanceBusy) return;
     const previous = appearanceRef.current;
     appearanceRef.current = next;
-    setAppearanceTheme(next.theme); setAppearanceFont(next.font);
+    setAppearanceTheme(next.theme); setAppearanceFont(next.font); setAppearanceSize(next.size);
     document.documentElement.dataset.theme = next.theme;
     document.documentElement.dataset.font = next.font;
+    document.documentElement.dataset.fontSize = next.size;
     setAppearanceBusy(true); setError(''); setMessage('');
     try {
       const response = await fetch('/api/profile/appearance', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(next) });
       const data = await response.json();
       if (!data.ok) throw new Error(data.error || 'Could not save appearance');
-      setProfile(current => current ? { ...current, appearanceTheme: next.theme, appearanceFont: next.font } : current);
+      setProfile(current => current ? { ...current, appearanceTheme: next.theme, appearanceFont: next.font, appearanceSize: next.size } : current);
       setMessage('Appearance saved for your account.');
     } catch (cause) {
       appearanceRef.current = previous;
-      setAppearanceTheme(previous.theme); setAppearanceFont(previous.font);
+      setAppearanceTheme(previous.theme); setAppearanceFont(previous.font); setAppearanceSize(previous.size);
       document.documentElement.dataset.theme = previous.theme;
       document.documentElement.dataset.font = previous.font;
+      document.documentElement.dataset.fontSize = previous.size;
       setError((cause as Error).message);
     } finally { setAppearanceBusy(false); }
   }
@@ -102,6 +111,14 @@ export default function ProfileClient({ userId }: { userId: string }) {
       acceptProfile(data.profile);
     }).catch(cause => setError((cause as Error).message));
   }, []);
+
+  useEffect(() => { if (editingName) nameInputRef.current?.focus(); }, [editingName]);
+  useEffect(() => {
+    if (pictureOpen && scrollPictureOnOpen.current) {
+      document.getElementById('profile-picture-options')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      scrollPictureOnOpen.current = false;
+    }
+  }, [pictureOpen]);
 
   async function toggleMessageAlerts() {
     if (messageAlerts) {
@@ -154,6 +171,19 @@ export default function ProfileClient({ userId }: { userId: string }) {
     updateDraft({ avatarKind: kind, avatarPreset: preset }, true);
   }
 
+  function openPictureChoices(fromHero = false) {
+    scrollPictureOnOpen.current = fromHero && !pictureOpen;
+    setPictureOpen(open => !open);
+  }
+
+  function cancelNameEdit() {
+    if (profile) {
+      setName(profile.name);
+      updateDraft({ name: profile.name }, true);
+    }
+    setEditingName(false);
+  }
+
   async function uploadPhoto(file: File | undefined) {
     if (!file || busy) return;
     if (file.size > 2 * 1024 * 1024) { setError('Choose a photo under 2 MB.'); return; }
@@ -201,20 +231,18 @@ export default function ProfileClient({ userId }: { userId: string }) {
     <div className="socialProfileBanner" aria-hidden="true"><span>✦</span><span>✶</span><span>✦</span></div>
     <div className="socialProfileShell">
       <section className="socialProfileHero" aria-label="Your profile preview">
-        <ProfileAvatar profile={preview} size="xl" alt={`${name || 'Your'} profile picture`} />
-        <div className="socialProfileIdentity"><span className="socialProfileEyebrow">YOUR NEO-NEXUS PROFILE</span><h1>{name || 'Your profile'}</h1><p>{profile?.email || ''}</p><div className="socialProfilePills"><span>{profile?.accountType || 'Member'}</span>{statusText && <span className="socialProfileStatus"><i aria-hidden="true" />{statusText}</span>}</div></div>
-        <a className="socialProfileBack" href="/chats">Back to chats</a>
+        <button type="button" className="socialProfileAvatarEdit" aria-label="Change profile picture" aria-expanded={pictureOpen} disabled={!profile} onClick={() => openPictureChoices(true)}><ProfileAvatar profile={preview} size="xl" alt="" /><span aria-hidden="true">✎</span></button>
+        <div className="socialProfileIdentity"><h1>{editingName ? <input ref={nameInputRef} aria-label="Display name" value={name} maxLength={60} onChange={event => { setName(event.target.value); updateDraft({ name: event.target.value }); }} onBlur={() => { setEditingName(false); void persistDraft(); }} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') cancelNameEdit(); }} /> : <button type="button" className="socialProfileNameEdit" aria-label="Edit display name" disabled={!profile} onClick={() => setEditingName(true)}>{name || 'Your profile'}<span aria-hidden="true">✎</span></button>}</h1><p>{profile?.email || ''}</p><div className="socialProfilePills"><span>{profile?.accountType || 'Member'}</span>{statusText && <span className="socialProfileStatus"><i aria-hidden="true" />{statusText}</span>}</div></div>
       </section>
       {bio && <p className="socialProfileBioPreview">{bio}</p>}
       <div className="socialProfileEditor">
         <section className="socialProfileCard"><div className="socialProfileCardHeading socialProfileAutosaveHeading"><h2>About you</h2><span role="status">{saving ? 'Saving…' : message === 'Saved' ? 'Saved' : ''}</span></div>
-          <label>Display name<input value={name} disabled={!profile} onChange={event => { setName(event.target.value); updateDraft({ name: event.target.value }); }} onBlur={() => void persistDraft()} maxLength={60} placeholder="Your name" /></label>
           <label>Status<input value={statusText} disabled={!profile} onChange={event => { setStatusText(event.target.value); updateDraft({ statusText: event.target.value }); }} onBlur={() => void persistDraft()} maxLength={80} placeholder="What are you working on?" /></label>
           <label>Bio<textarea value={bio} disabled={!profile} onChange={event => { setBio(event.target.value); updateDraft({ bio: event.target.value }); }} onBlur={() => void persistDraft()} maxLength={280} rows={4} placeholder="A few words about you..." /><small>{bio.length}/280</small></label>
         </section>
         <div className="socialProfileSide">
           <section className="socialProfileCard"><div className="socialProfileCardHeading"><h2>Profile picture</h2></div>
-            <div className="socialPictureSummary"><ProfileAvatar profile={preview} size="lg" /><div><strong>{pictureLabel}</strong></div><button type="button" className="socialPictureToggle" aria-expanded={pictureOpen} aria-controls="profile-picture-options" onClick={() => setPictureOpen(open => !open)}>{pictureOpen ? 'Close' : 'Change picture'}</button></div>
+            <button type="button" className="socialPicturePreview" aria-label="Change profile picture" aria-expanded={pictureOpen} aria-controls="profile-picture-options" disabled={!profile} onClick={() => openPictureChoices()}><ProfileAvatar profile={preview} size="lg" /><strong>{pictureLabel}</strong><span aria-hidden="true">✎</span></button>
             {pictureOpen && <div id="profile-picture-options" className="socialPictureOptions">
               <div className="socialPictureCategory" aria-label="Avatar category">{(['Games', 'Anime', 'Cartoons'] as const).map(category => <button key={category} type="button" aria-pressed={pictureCategory === category} onClick={() => setPictureCategory(category)}>{category}</button>)}</div>
               <div className="socialAvatarChoices">{PROFILE_PRESETS.filter(preset => preset.category === pictureCategory).map(preset => <PortraitChoice key={preset.id} label={preset.label} image={preset.image} chosen={avatarKind === 'preset' && avatarPreset === preset.id} onClick={() => chooseAvatar('preset', preset.id)} />)}</div>
@@ -224,8 +252,9 @@ export default function ProfileClient({ userId }: { userId: string }) {
             </div>}
           </section>
           <section className="socialProfileCard"><div className="socialProfileCardHeading"><h2>Appearance</h2></div>
-            <div className="socialAppearanceSection"><h3>Color theme</h3><div className="socialThemeChoices">{APPEARANCE_THEMES.map(option => <button key={option.id} type="button" disabled={!profile || appearanceBusy} aria-pressed={appearanceTheme === option.id} onClick={() => void changeAppearance({ theme: option.id, font: appearanceFont })}><i style={{ backgroundColor: option.swatch }} aria-hidden="true" /><span>{option.label}</span></button>)}</div></div>
-            <div className="socialAppearanceSection"><h3>Font</h3><div className="socialFontChoices">{APPEARANCE_FONTS.map(option => <button key={option.id} type="button" disabled={!profile || appearanceBusy} aria-pressed={appearanceFont === option.id} onClick={() => void changeAppearance({ theme: appearanceTheme, font: option.id })}><strong>{option.label}</strong><span>{option.sample}</span></button>)}</div></div>
+            <div className="socialAppearanceSection"><h3>Color theme</h3><div className="socialThemeChoices">{APPEARANCE_THEMES.map(option => <button key={option.id} type="button" disabled={!profile || appearanceBusy} aria-pressed={appearanceTheme === option.id} onClick={() => void changeAppearance({ theme: option.id, font: appearanceFont, size: appearanceSize })}><i style={{ backgroundColor: option.swatch }} aria-hidden="true" /><span>{option.label}</span></button>)}</div></div>
+            <div className="socialAppearanceSection"><h3>Font</h3><div className="socialFontChoices">{APPEARANCE_FONTS.map(option => <button key={option.id} type="button" disabled={!profile || appearanceBusy} aria-pressed={appearanceFont === option.id} onClick={() => void changeAppearance({ theme: appearanceTheme, font: option.id, size: appearanceSize })}><strong>{option.label}</strong><span>{option.sample}</span></button>)}</div></div>
+            <div className="socialAppearanceSection"><h3>Font size</h3><div className="socialFontSizeChoices">{APPEARANCE_SIZES.map(option => <button key={option.id} type="button" disabled={!profile || appearanceBusy} aria-pressed={appearanceSize === option.id} onClick={() => void changeAppearance({ theme: appearanceTheme, font: appearanceFont, size: option.id })}>{option.label}</button>)}</div></div>
           </section>
           <section className="socialProfileCard"><div className="socialProfileCardHeading"><h2>Message alerts</h2></div>
             <button type="button" className="socialAlertToggle" aria-pressed={messageAlerts} onClick={() => void toggleMessageAlerts()}>{messageAlerts ? 'Browser alerts on' : 'Turn on browser alerts'}</button>

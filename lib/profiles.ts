@@ -3,7 +3,7 @@ import type { SessionUser } from './auth';
 import { ApiError } from './api';
 import { getPool } from './db';
 import { profilePreset } from './profile-presets';
-import { DEFAULT_APPEARANCE, isAppearanceFont, isAppearanceTheme, type Appearance } from './appearance';
+import { DEFAULT_APPEARANCE, isAppearanceFont, isAppearanceSize, isAppearanceTheme, type Appearance } from './appearance';
 
 let schemaReady: Promise<void> | null = null;
 
@@ -21,11 +21,13 @@ export async function ensureProfilesSchema() {
       avatar_updated_at timestamptz not null default now(),
       appearance_theme text not null default 'classic',
       appearance_font text not null default 'system',
+      appearance_size text not null default 'normal',
       updated_at timestamptz not null default now()
     );
     alter table user_social_profiles
       add column if not exists appearance_theme text not null default 'classic',
-      add column if not exists appearance_font text not null default 'system';
+      add column if not exists appearance_font text not null default 'system',
+      add column if not exists appearance_size text not null default 'normal';
   `).then(() => undefined).catch((error) => { schemaReady = null; throw error; });
   return schemaReady;
 }
@@ -37,28 +39,30 @@ const profileColumns = `u.id::text as id,
   coalesce(p.avatar_kind,'initials') as "avatarKind", p.avatar_preset as "avatarPreset",
   p.avatar_updated_at as "avatarUpdatedAt", p.photo_bytes is not null as "hasPhoto",
   coalesce(p.appearance_theme,'classic') as "appearanceTheme",
-  coalesce(p.appearance_font,'system') as "appearanceFont"`;
+  coalesce(p.appearance_font,'system') as "appearanceFont",
+  coalesce(p.appearance_size,'normal') as "appearanceSize"`;
 
 export async function getOwnAppearance(userId: string): Promise<Appearance> {
   await ensureProfilesSchema();
-  const result = await getPool().query(`select appearance_theme,appearance_font from user_social_profiles where user_id=$1`, [userId]);
+  const result = await getPool().query(`select appearance_theme,appearance_font,appearance_size from user_social_profiles where user_id=$1`, [userId]);
   const row = result.rows[0];
   return {
     theme: isAppearanceTheme(row?.appearance_theme) ? row.appearance_theme : DEFAULT_APPEARANCE.theme,
     font: isAppearanceFont(row?.appearance_font) ? row.appearance_font : DEFAULT_APPEARANCE.font,
+    size: isAppearanceSize(row?.appearance_size) ? row.appearance_size : DEFAULT_APPEARANCE.size,
   };
 }
 
 export async function setOwnAppearance(session: SessionUser, input: Record<string, unknown>): Promise<Appearance> {
-  if (!isAppearanceTheme(input.theme) || !isAppearanceFont(input.font)) {
-    throw new ApiError('Choose a valid color theme and font', 400, 'invalid_appearance');
+  if (!isAppearanceTheme(input.theme) || !isAppearanceFont(input.font) || !isAppearanceSize(input.size)) {
+    throw new ApiError('Choose a valid color theme, font, and size', 400, 'invalid_appearance');
   }
   await ensureProfilesSchema();
-  await getPool().query(`insert into user_social_profiles(user_id,appearance_theme,appearance_font)
-    values($1,$2,$3)
+  await getPool().query(`insert into user_social_profiles(user_id,appearance_theme,appearance_font,appearance_size)
+    values($1,$2,$3,$4)
     on conflict(user_id) do update set appearance_theme=excluded.appearance_theme,
-    appearance_font=excluded.appearance_font,updated_at=now()`, [session.id, input.theme, input.font]);
-  return { theme: input.theme, font: input.font };
+    appearance_font=excluded.appearance_font,appearance_size=excluded.appearance_size,updated_at=now()`, [session.id, input.theme, input.font, input.size]);
+  return { theme: input.theme, font: input.font, size: input.size };
 }
 
 export async function getVisibleProfile(session: SessionUser, userId: string) {
