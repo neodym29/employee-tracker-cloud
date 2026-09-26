@@ -48,11 +48,20 @@ button, a, select, input { -webkit-tap-highlight-color: transparent; }
 .nav { width: min(1180px, calc(100% - 40px)); min-height: 72px; margin: 0 auto; display: grid; grid-template-columns: minmax(170px,1fr) auto minmax(170px,1fr); align-items: center; column-gap: 18px; }
 .brand { display: inline-flex; align-items: center; gap: 10px; font-size: calc(18px * var(--type-scale)); font-weight: 760; letter-spacing: -.035em; }
 .logo { width: 34px; height: 34px; flex:none; }
+.brandGyro { display: inline-grid; place-items: center; width: 36px; height: 36px; flex: none; perspective: 150px; }
+.brandGyro .logo { transform-origin: center; transform-style: preserve-3d; filter: drop-shadow(0 3px 2px color-mix(in srgb, var(--ink) 20%, transparent)); }
 .nexusMarkOuter,.nexusMarkInner { transform-box:view-box; transform-origin:32px 32px; }
 @keyframes nexusOrbit { to { transform:rotate(360deg); } }
+@keyframes nexusGyro {
+  0%,100% { transform: rotateX(18deg) rotateY(-24deg) rotateZ(-8deg); }
+  25% { transform: rotateX(-24deg) rotateY(10deg) rotateZ(7deg); }
+  50% { transform: rotateX(8deg) rotateY(25deg) rotateZ(14deg); }
+  75% { transform: rotateX(25deg) rotateY(-9deg) rotateZ(-5deg); }
+}
 @media (prefers-reduced-motion:no-preference) {
-  .nexusMarkOuter { animation:nexusOrbit 24s linear infinite; }
-  .nexusMarkInner { animation:nexusOrbit 15s linear infinite reverse; }
+  .brandGyro .logo { animation: nexusGyro 10s ease-in-out infinite; }
+  .nexusMarkOuter { animation:nexusOrbit 12s linear infinite; }
+  .nexusMarkInner { animation:nexusOrbit 8s linear infinite reverse; }
 }
 .navPrimary,.navAccount { display: flex; align-items: center; gap: 4px; }
 .navPrimary { justify-content: center; min-width: 0; }

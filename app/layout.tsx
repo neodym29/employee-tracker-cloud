@@ -31,7 +31,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body>
         <header className="siteHeader">
           <nav className="nav" aria-label="Primary navigation">
-            <a className="brand" href="/" aria-label="Neo-Nexus home"><NexusMark className="logo" /><span>Neo-Nexus</span></a>
+            <a className="brand" href="/" aria-label="Neo-Nexus home"><span className="brandGyro"><NexusMark className="logo" /></span><span>Neo-Nexus</span></a>
             {session ? <>
               <div className="navPrimary">
                   <DashboardMenu />
