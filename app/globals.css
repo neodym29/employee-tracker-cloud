@@ -1433,6 +1433,11 @@ html[data-theme='epicenter'] :is(.clientRequestTray,.projectChatActions,.actionL
 html[data-theme='epicenter'] :is(.projectChatComposer textarea,.agentComposer textarea,.nexusComposer textarea,.nexusDirectBubble) { color:var(--ink); background:#382f51; }
 html[data-theme='epicenter'] .nexusDirectMessage.own .nexusDirectBubble { color:#fff; background:#60509b; }
 html[data-theme='epicenter'] .nexusChatSidebar { border-color:#3b3354; background:#1d192e; }
+html[data-theme='epicenter'] .projectsSidebar { border-color:#413955; background:#211c35; }
+html[data-theme='epicenter'] :is(.projectsSidebarHeader .sectionLabel,.projectsSidebarLabel) { color:#b9a9ff; }
+html[data-theme='epicenter'] .projectsSidebarNew { border-color:#51456d; background:#332b4b; }
+html[data-theme='epicenter'] .projectsSidebarNew:hover,html[data-theme='epicenter'] .projectsSidebar nav button:hover,html[data-theme='epicenter'] .projectsSidebar nav button.isOpen { background:#403658; }
+html[data-theme='epicenter'] .projectsSidebarRename input { background:#171426; }
 html[data-theme='epicenter'] .nexusChatSidebar .nexusConversation.selected { background:#5c4d91; }
 html[data-theme='epicenter'] .nexusDmMessageList { background-color:#1d192e; background-image:radial-gradient(circle at 18px 18px,rgba(185,169,255,.12) 1.3px,transparent 1.5px),radial-gradient(circle at 53px 55px,rgba(123,227,212,.08) 1.2px,transparent 1.3px); }
 html[data-theme='epicenter'] .nexusLandingQuestion { background:#504382; }

@@ -24,6 +24,7 @@ test('Epicenter theme and app logo respect reduced motion', async () => {
   ]);
   assert.match(theme, /id: 'epicenter', label: 'Epicenter'/);
   assert.match(css, /html\[data-theme='epicenter'\] \{ color-scheme:dark/);
+  assert.match(css, /html\[data-theme='epicenter'\] \.projectsSidebar/);
   assert.match(css, /@media \(prefers-reduced-motion:no-preference\)/);
   assert.match(mark, /className="nexusMarkOuter"/);
   assert.match(mark, /className="nexusMarkInner"/);
