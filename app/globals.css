@@ -51,7 +51,22 @@ button, a, select, input { -webkit-tap-highlight-color: transparent; }
 .brandGyro { display: inline-grid; place-items: center; width: 36px; height: 36px; flex: none; perspective: 150px; }
 .brandGyro .logo { transform-origin: center; transform-style: preserve-3d; filter: drop-shadow(0 3px 2px color-mix(in srgb, var(--ink) 20%, transparent)); }
 .nexusMarkOuter,.nexusMarkInner { transform-box:view-box; transform-origin:32px 32px; }
-@keyframes nexusOrbit { to { transform:rotate(360deg); } }
+@keyframes nexusOuterPulse {
+  0% { transform:rotate(0deg) scale(1); }
+  50% { transform:rotate(115deg) scale(1); animation-timing-function:cubic-bezier(.88,0,1,.45); }
+  62% { transform:rotate(205deg) scale(.14); animation-timing-function:cubic-bezier(.12,.8,.22,1); }
+  77% { transform:rotate(310deg) scale(1.07); animation-timing-function:ease-out; }
+  88% { transform:rotate(338deg) scale(1); }
+  100% { transform:rotate(360deg) scale(1); }
+}
+@keyframes nexusInnerPulse {
+  0% { transform:rotate(0deg) scale(1); }
+  50% { transform:rotate(-140deg) scale(1); animation-timing-function:cubic-bezier(.88,0,1,.45); }
+  62% { transform:rotate(-235deg) scale(.2); animation-timing-function:cubic-bezier(.12,.8,.22,1); }
+  77% { transform:rotate(-315deg) scale(1.08); animation-timing-function:ease-out; }
+  88% { transform:rotate(-340deg) scale(1); }
+  100% { transform:rotate(-360deg) scale(1); }
+}
 @keyframes nexusGyro {
   0%,100% { transform: rotateX(18deg) rotateY(-24deg) rotateZ(-8deg); }
   25% { transform: rotateX(-24deg) rotateY(10deg) rotateZ(7deg); }
@@ -60,8 +75,8 @@ button, a, select, input { -webkit-tap-highlight-color: transparent; }
 }
 @media (prefers-reduced-motion:no-preference) {
   .brandGyro .logo { animation: nexusGyro 10s ease-in-out infinite; }
-  .nexusMarkOuter { animation:nexusOrbit 12s linear infinite; }
-  .nexusMarkInner { animation:nexusOrbit 8s linear infinite reverse; }
+  .nexusMarkOuter { animation:nexusOuterPulse 10s linear infinite; }
+  .nexusMarkInner { animation:nexusInnerPulse 10s linear infinite; }
 }
 .navPrimary,.navAccount { display: flex; align-items: center; gap: 4px; }
 .navPrimary { justify-content: center; min-width: 0; }

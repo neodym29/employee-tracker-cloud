@@ -16,5 +16,9 @@ test('the mark has 3D gyro motion that respects reduced-motion settings', async 
   const css = await readFile(new URL('../app/globals.css', import.meta.url), 'utf8');
   assert.match(css, /\.brandGyro\s*\{[^}]*perspective:/);
   assert.match(css, /@keyframes nexusGyro\s*\{/);
+  assert.match(css, /@keyframes nexusOuterPulse\s*\{/);
+  assert.match(css, /@keyframes nexusInnerPulse\s*\{/);
+  assert.match(css, /62% \{ transform:rotate\(205deg\) scale\(\.14\)/);
+  assert.match(css, /62% \{ transform:rotate\(-235deg\) scale\(\.2\)/);
   assert.match(css, /@media \(prefers-reduced-motion:no-preference\)\s*\{[^}]*\.brandGyro \.logo\s*\{[^}]*animation: nexusGyro/);
 });

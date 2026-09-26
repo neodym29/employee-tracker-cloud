@@ -13,7 +13,8 @@ test('app publishes a real favicon through Next metadata', async () => {
   assert.match(svg, /stroke="currentColor"/);
   assert.doesNotMatch(svg, /<rect\b|#[0-9a-f]{6}"/i);
   assert.match(svg, /prefers-reduced-motion: no-preference/);
-  assert.match(svg, /animation: orbit 24s linear infinite/);
+  assert.match(svg, /animation: outerPulse 10s linear infinite/);
+  assert.match(svg, /animation: innerPulse 10s linear infinite/);
   assert.doesNotMatch(svg, /<text\b/);
 });
 

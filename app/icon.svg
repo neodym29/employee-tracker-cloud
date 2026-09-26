@@ -2,14 +2,26 @@
   <style>
     :root { color: #27252a; }
     @media (prefers-color-scheme: dark) { :root { color: #f4f3ef; } }
-    @keyframes orbit { to { transform: rotate(360deg); } }
+    @keyframes outerPulse {
+      0% { transform: rotate(0deg) scale(1); }
+      50% { transform: rotate(115deg) scale(1); animation-timing-function: cubic-bezier(.88,0,1,.45); }
+      62% { transform: rotate(205deg) scale(.14); animation-timing-function: cubic-bezier(.12,.8,.22,1); }
+      77% { transform: rotate(310deg) scale(1.07); }
+      100% { transform: rotate(360deg) scale(1); }
+    }
+    @keyframes innerPulse {
+      0% { transform: rotate(0deg) scale(1); }
+      50% { transform: rotate(-140deg) scale(1); animation-timing-function: cubic-bezier(.88,0,1,.45); }
+      62% { transform: rotate(-235deg) scale(.2); animation-timing-function: cubic-bezier(.12,.8,.22,1); }
+      77% { transform: rotate(-315deg) scale(1.08); }
+      100% { transform: rotate(-360deg) scale(1); }
+    }
     @media (prefers-reduced-motion: no-preference) {
-      .outer { transform-origin: 32px 32px; animation: orbit 24s linear infinite; }
-      .inner { transform-origin: 32px 32px; animation: orbit 15s linear infinite reverse; }
+      .outer { transform-origin: 32px 32px; animation: outerPulse 10s linear infinite; }
+      .inner { transform-origin: 32px 32px; animation: innerPulse 10s linear infinite; }
     }
   </style>
-  <circle cx="32" cy="32" r="26" fill="none" stroke="currentColor" stroke-width="3" opacity=".24"/>
-  <circle class="outer" cx="32" cy="32" r="26" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-dasharray="100 64" opacity=".7"/>
-  <circle class="inner" cx="32" cy="32" r="17" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="79 28"/>
+  <circle class="outer" cx="32" cy="32" r="26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="120 44" opacity=".62"/>
+  <circle class="inner" cx="32" cy="32" r="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="72 29"/>
   <circle cx="32" cy="32" r="3.5" fill="currentColor"/>
 </svg>
