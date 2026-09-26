@@ -19,11 +19,11 @@ export const PROFILE_PRESETS = [
   { id: 'levi', label: 'Levi', image: '/avatars/levi.webp', category: 'Anime' },
   { id: 'spike', label: 'Spike', image: '/avatars/spike.webp', category: 'Anime' },
   { id: 'guts', label: 'Guts', image: '/avatars/guts.webp', category: 'Anime' },
-  { id: 'yumeko-jabami', label: 'Yumeko Jabami', image: '/avatars/yumeko-jabami.webp', category: 'Kakegurui' },
-  { id: 'mary-saotome', label: 'Mary Saotome', image: '/avatars/mary-saotome.webp', category: 'Kakegurui' },
-  { id: 'kirari-momobami', label: 'Kirari Momobami', image: '/avatars/kirari-momobami.webp', category: 'Kakegurui' },
-  { id: 'ririka-momobami', label: 'Ririka Momobami', image: '/avatars/ririka-momobami.webp', category: 'Kakegurui' },
-  { id: 'midari-ikishima', label: 'Midari Ikishima', image: '/avatars/midari-ikishima.webp', category: 'Kakegurui' },
+  { id: 'yumeko-jabami', label: 'Yumeko Jabami', image: '/avatars/yumeko-jabami.webp', category: 'Anime' },
+  { id: 'mary-saotome', label: 'Mary Saotome', image: '/avatars/mary-saotome.webp', category: 'Anime' },
+  { id: 'kirari-momobami', label: 'Kirari Momobami', image: '/avatars/kirari-momobami.webp', category: 'Anime' },
+  { id: 'ririka-momobami', label: 'Ririka Momobami', image: '/avatars/ririka-momobami.webp', category: 'Anime' },
+  { id: 'midari-ikishima', label: 'Midari Ikishima', image: '/avatars/midari-ikishima.webp', category: 'Anime' },
 ] as const;
 
 export type ProfilePresetId = (typeof PROFILE_PRESETS)[number]['id'];

@@ -22,6 +22,7 @@ html[data-theme='lavender'] { --canvas:#f4f1fc; --paper:#fff; --ink:#241e37; --m
 html[data-theme='ocean'] { --canvas:#eef7f9; --paper:#fff; --ink:#17313b; --muted:#647d84; --line:#dbeaed; --line-dark:#c9dde1; --dark:#184352; --violet:#1688a6; --accent:#1688a6; --nav-bg:rgba(238,247,249,.93); --profile-gradient:linear-gradient(118deg,#276884,#4c9caf 55%,#85c4ba); }
 html[data-theme='forest'] { --canvas:#f0f6ef; --paper:#fff; --ink:#203229; --muted:#68796d; --line:#dce9dc; --line-dark:#cbdccf; --dark:#254936; --violet:#3d8c61; --accent:#3d8c61; --nav-bg:rgba(240,246,239,.93); --profile-gradient:linear-gradient(118deg,#416d4a,#6c9b72 55%,#a1b782); }
 html[data-theme='sunset'] { --canvas:#fcf2ee; --paper:#fff; --ink:#3d2928; --muted:#806d6a; --line:#f0dfd9; --line-dark:#e3cfc7; --dark:#633b42; --violet:#c8696e; --accent:#c8696e; --nav-bg:rgba(252,242,238,.93); --profile-gradient:linear-gradient(118deg,#9f5771,#c98b84 55%,#e3ad79); }
+html[data-theme='night'] { color-scheme:dark; --canvas:#11131a; --paper:#1b1e28; --ink:#f1f2f7; --muted:#b2b6c7; --faint:#9499ab; --line:#343949; --line-dark:#4a5062; --dark:#4b4679; --violet:#a79af5; --accent:#b7a9ff; --accent-strong:#c9beff; --green:#6fd0a3; --amber:#f1bc67; --red:#f28786; --shadow:0 22px 65px rgba(0,0,0,.27); --nav-bg:rgba(20,22,31,.94); --profile-gradient:linear-gradient(118deg,#332b62,#41466e 54%,#24545b); }
 html[data-font='readable'] { --app-font:Verdana,Geneva,Tahoma,sans-serif; }
 html[data-font='editorial'] { --app-font:Georgia,"Times New Roman",serif; }
 html[data-font='mono'] { --app-font:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
@@ -276,6 +277,54 @@ h3 { letter-spacing: -.025em; }
 .projectDangerZone h2 { margin:.35rem 0; }
 .projectDangerZone p { margin:.25rem 0 0; }
 @media (max-width:700px) { .projectDangerZone { align-items:stretch; flex-direction:column; } }
+
+/* Account-wide dark palette: keep application surfaces, chats and forms legible. */
+html[data-theme='night'] :is(select,input,textarea) { color:var(--ink); background:var(--paper); }
+html[data-theme='night'] :is(input,textarea)::placeholder { color:var(--faint); }
+html[data-theme='night'] :is(.eyebrow,.heroText,.changeMain span b,.socialProfileBioPreview,.socialPublicAbout p,.nexusProfileBio,.nexusComposer label) { color:var(--muted); }
+html[data-theme='night'] h1 span { color:var(--faint); }
+html[data-theme='night'] :is(.changePreview,.statRow,.summaryDay,.engineerUpdateCard,.requestInboxEmpty,.healthCard) { background:var(--paper); }
+html[data-theme='night'] :is(.previewFooter,.appLauncherCard,.telemetrySummary,.telemetryCard,.healthSummary,.healthCard,.computeFeatureGrid article,.cliSteps li,.chatForm) { background:#222633; }
+html[data-theme='night'] :is(.engineerUpdates,.workspaceHealth) { border-color:var(--line); background:linear-gradient(135deg,#222634,#1b1e28); }
+html[data-theme='night'] .previewRow + .previewRow,html[data-theme='night'] .changeRow + .changeRow { border-color:var(--line); }
+html[data-theme='night'] :is(.projectChatWindow,.projectChatWindowHeader,.projectChatComposer,.chatInboxRows a,.clientRequestItem,.agentComposer,.proposedAction,.nexusChatsPage,.nexusChatMain,.nexusMessageMenu,.nexusMessageMenu button,.nexusHeaderMenu,.nexusSidebarMenu,.nexusProfileCard) { color:var(--ink); background:var(--paper); }
+html[data-theme='night'] :is(.projectChatAvatar,.projectChatEmpty > span,.agentMark,.nexusWelcomeIcon) { border-color:var(--line); color:var(--accent); background:#2a2d40; }
+html[data-theme='night'] :is(.projectChatWindowControls button:hover,.projectChatWindowControls a:hover,.starterPrompts button,.nexusMessageMenu button:hover,.nexusHeaderMenu button:hover,.nexusHeaderMenuButton:hover,.nexusSidebarMenu .nexusSidebarViewProfile:hover,.socialProfileBack:hover) { color:var(--ink); background:#303448; }
+html[data-theme='night'] :is(.clientRequestTray,.projectChatActions,.actionList,.nexusReplyDraft) { border-color:var(--line); color:var(--ink); background:#262a38; }
+html[data-theme='night'] .clientRequestItem.issue { background:#392a32; border-color:#75545f; }
+html[data-theme='night'] .projectChatMessages { background:linear-gradient(180deg,#171a25,var(--paper) 65%); }
+html[data-theme='night'] :is(.projectChatMessage,.projectChatTyping,.message,.agentWorking) { color:var(--ink); background:#2b2f3c; }
+html[data-theme='night'] :is(.projectChatComposer textarea,.agentComposer textarea,.nexusComposer textarea) { color:var(--ink); background:#252936; border-color:var(--line-dark); }
+html[data-theme='night'] .agentConversation { border-color:var(--line); background:linear-gradient(180deg,#1b1e28,#232635); }
+html[data-theme='night'] .nexusDmMessageList { background-color:#181b26; background-image:radial-gradient(circle at 18px 18px,rgba(183,169,255,.1) 1.3px,transparent 1.5px),radial-gradient(circle at 53px 55px,rgba(111,208,163,.07) 1.2px,transparent 1.3px); }
+html[data-theme='night'] .nexusNoSelection { background:radial-gradient(circle at center,#252942,var(--paper) 60%); }
+html[data-theme='night'] .nexusDirectBubble { color:var(--ink); background:#33394a; }
+html[data-theme='night'] .nexusDirectMessage.own .nexusDirectBubble { color:#fff; background:#514b94; }
+html[data-theme='night'] :is(.nexusMessageSender,.nexusDirectMeta,.nexusDayDivider,.nexusConversationHeader > span) { color:var(--muted); }
+html[data-theme='night'] .nexusDayDivider::before,html[data-theme='night'] .nexusDayDivider::after { background:var(--line); }
+html[data-theme='night'] .nexusMessageMenuButton { color:var(--ink); background:#303448; }
+html[data-theme='night'] .nexusMobileBack { color:var(--ink); }
+html[data-theme='night'] :is(.nexusConversation.selected,.nexusConversation:hover) { color:var(--ink); background:#333149; }
+html[data-theme='night'] .nexusChatSidebar :is(.nexusConversation.selected,.nexusConversation:hover) { color:#fff; }
+html[data-theme='night'] :is(.nexusChatIcon,.nexusAvatar) { color:var(--accent); background:#34324f; }
+html[data-theme='night'] :is(.profileAvatar,.socialProfilePills > span) { color:var(--ink); }
+html[data-theme='night'] :is(.profileNavLink .profileAvatar,.socialProfileHero > .profileAvatar,.nexusProfileCard > .profileAvatar) { border-color:var(--paper); }
+html[data-theme='night'] :is(.socialAvatarChoice,.socialAvatarChoice:hover,.socialAvatarChoice.chosen) { color:var(--ink); background:#272b3a; }
+html[data-theme='night'] .socialProfilePills .socialProfileStatus { color:#a0dfbb; background:#214334; }
+html[data-theme='night'] :is(.socialProfileNotice,.successPanel,.clientRequestNotice) { color:#a0dfbb; background:#214334; border-color:#37634b; }
+html[data-theme='night'] :is(.socialProfileError,.errorBanner,.projectChatError,.nexusChatError) { color:#ffc1bc; background:#47272e; border-color:#77434a; }
+html[data-theme='night'] :is(.noticeBanner,.chatUnavailable) { color:#f3d49b; background:#3d3127; border-color:#68533a; }
+html[data-theme='night'] :is(.bindingCommand,.statusBadge.subtle,.statusBadge.namingBadge,.appLauncherMark,.telemetryMark.amber) { color:var(--accent); background:#2c2944; border-color:#504a75; }
+html[data-theme='night'] :is(.liveStatus,.statusChip,.telemetryState.online) { color:#a0dfbb; background:#214334; border-color:#37634b; }
+html[data-theme='night'] :is(.statusChip.offline,.telemetryState.offline,.health-down) { color:#ffc1bc; background:#47272e; }
+html[data-theme='night'] :is(.health-degraded,.health-stale) { color:#f3d49b; background:#3d3127; }
+html[data-theme='night'] :is(.nexusMessageMenu button.danger,.nexusHeaderMenu button.danger,.nexusSidebarMenu button) { color:#ffaaa6; }
+html[data-theme='night'] .nexusSidebarMenu button:hover { background:#47272e; }
+html[data-theme='night'] :is(.nexusProfileRole,.nexusGroupMember button,.nexusDirectMeta button) { color:var(--accent); }
+html[data-theme='night'] :is(.nexusProfileStatus,.nexusGroupMember small) { color:var(--green); }
+html[data-theme='night'] .nexusProfileActions a:first-child { color:var(--ink); background:var(--paper); }
+html[data-theme='night'] .socialThemeChoices i { border-color:#73788b; }
+html[data-theme='night'] :is(.progressTrack,.assessmentProgress) { background:#343849; }
 @media (max-width:700px) {
   .appLauncherPanel { padding: 18px; }
   .appLauncherHeader { align-items: flex-start; flex-direction: column; gap: 6px; }
@@ -1144,7 +1193,7 @@ body:has(.nexusChatsPage) main { display: flex; flex: 1; min-height: 0; width: 1
 .socialPictureOptions .socialAvatarChoices { grid-template-columns:repeat(4,minmax(0,1fr)); }
 .socialAppearanceSection + .socialAppearanceSection { margin-top:22px; border-top:1px solid var(--line); padding-top:20px; }
 .socialAppearanceSection h3 { margin:0 0 10px; color:var(--ink); font-size:13px; }
-.socialThemeChoices { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:7px; }
+.socialThemeChoices { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; }
 .socialThemeChoices button { min-width:0; min-height:72px; display:grid; justify-items:center; align-content:center; gap:6px; border-color:var(--line); padding:8px 3px; color:var(--ink); background:var(--paper); box-shadow:none; font-size:10px; }
 .socialThemeChoices button[aria-pressed='true'],.socialFontChoices button[aria-pressed='true'] { border-color:var(--accent); box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent); }
 .socialThemeChoices i { width:28px; height:28px; border:1px solid rgba(0,0,0,.12); border-radius:50%; }

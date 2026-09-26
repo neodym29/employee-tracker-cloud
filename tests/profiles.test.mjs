@@ -54,7 +54,7 @@ test('profile edits update only the authenticated account and allow a short mult
   assert.ok(queries.some(item => item.sql === 'commit'));
 });
 
-test('new Kakegurui and game portraits are valid profile choices', async () => {
+test('Kakegurui portraits remain valid after moving into Anime', async () => {
   for (const avatarPreset of ['yumeko-jabami', 'mary-saotome', 'kirari-momobami', 'ririka-momobami', 'midari-ikishima', 'kratos', 'lara-croft', 'leon-kennedy', 'aloy', 'sephiroth', 'lady-dimitrescu', 'cj-johnson', 'trevor-philips', 'malenia', 'ranni']) {
     const queries = poolFor();
     await profiles.updateOwnProfile(session, { name: 'Ibrahim', bio: '', statusText: '', avatarKind: 'preset', avatarPreset });
@@ -70,6 +70,8 @@ test('appearance is account-scoped and rejects unknown themes or fonts', async (
   await profiles.setOwnAppearance(session, { theme: 'ocean', font: 'editorial' });
   const write = queries.find(item => item.sql.includes('appearance_theme,appearance_font'));
   assert.deepEqual(write.params, ['12', 'ocean', 'editorial']);
+  await profiles.setOwnAppearance(session, { theme: 'night', font: 'system' });
+  assert.deepEqual(queries.at(-1).params, ['12', 'night', 'system']);
 });
 
 test('photos require a supported format and are normalized before storage', async () => {
