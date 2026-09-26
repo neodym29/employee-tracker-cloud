@@ -1,4 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Neo-Nexus">
-  <rect width="64" height="64" rx="16" fill="#1d1d1a"/>
-  <text x="32" y="43" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="700" text-anchor="middle">N</text>
+  <rect width="64" height="64" rx="16" fill="#211D35"/>
+  <path d="M17 45V19L47 45V19" fill="none" stroke="#FAF9FF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="17" cy="19" r="4" fill="#AB99FF"/>
+  <circle cx="47" cy="45" r="4" fill="#76E0D0"/>
 </svg>

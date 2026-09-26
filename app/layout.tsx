@@ -8,6 +8,7 @@ import { unreadClientRequestCount } from '@/lib/client-requests';
 import { DEFAULT_APPEARANCE } from '@/lib/appearance';
 import { getOwnAppearance } from '@/lib/profiles';
 import AccountMenu from '@/app/components/AccountMenu';
+import NexusMark from '@/app/components/NexusMark';
 
 export const metadata: Metadata = {
   title: 'Neo-Nexus | Project collaboration',
@@ -27,7 +28,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body>
         <header className="siteHeader">
           <nav className="nav" aria-label="Primary navigation">
-            <a className="brand" href="/" aria-label="Neo-Nexus home"><span className="logo" aria-hidden="true">N</span><span>Neo-Nexus</span></a>
+            <a className="brand" href="/" aria-label="Neo-Nexus home"><NexusMark className="logo" /><span>Neo-Nexus</span></a>
             {session ? <>
               <div className="navPrimary">
                   <DashboardMenu />
