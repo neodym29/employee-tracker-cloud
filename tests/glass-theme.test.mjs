@@ -37,7 +37,10 @@ test('navigation floats as a centered glass capsule and initials remain semantic
   assert.match(css, /\.siteHeader \{\s*width:min\(1080px,calc\(100% - 32px\)\)/);
   assert.match(css, /\.siteHeader::before \{/);
   assert.match(css, /@media \(max-width:900px\) \{\s*\.siteHeader/);
+  assert.match(css, /\.siteHeader \.navPrimary \{ justify-content:space-between; flex-wrap:nowrap; gap:0; \}/);
   assert.match(home, /<span className="heroInitial">K<\/span>now/);
   assert.match(home, /<span className="heroInitial">K<\/span>eep/);
+  assert.match(home, /aria-label="Know what’s happening\. Keep work moving\."/);
+  assert.match(css, /\.nexusLandingCopy h1 \.heroInitial \{ display:inline-block; color:inherit;/);
   assert.match(menu, /<span>Profile<\/span>/);
 });
