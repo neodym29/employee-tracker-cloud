@@ -1,13 +1,13 @@
 @font-face {
   font-family: 'Neo Nexus Display';
-  src: url('/fonts/neo-nexus-display.ttf?v=2') format('truetype');
+  src: url('/fonts/neo-nexus-display.ttf?v=3') format('truetype');
   font-style: normal;
   font-weight: 400;
   font-display: swap;
 }
 @font-face {
   font-family: 'Neo Nexus UI';
-  src: url('/fonts/neo-nexus-ui.ttf?v=2') format('truetype');
+  src: url('/fonts/neo-nexus-ui.ttf?v=3') format('truetype');
   font-style: normal;
   font-weight: 400;
   font-display: swap;

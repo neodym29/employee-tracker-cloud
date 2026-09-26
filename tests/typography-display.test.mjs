@@ -26,6 +26,6 @@ test('the display face is a real bundled font, not a screenshot', async () => {
   assert.equal(uiFont.subarray(0, 4).toString('hex'), '00010000');
   assert.ok(font.length > 4000);
   assert.ok(uiFont.length > 4000);
-  assert.match(css, /url\('\/fonts\/neo-nexus-display\.ttf\?v=2'\)/);
-  assert.match(css, /url\('\/fonts\/neo-nexus-ui\.ttf\?v=2'\)/);
+  assert.match(css, /url\('\/fonts\/neo-nexus-display\.ttf\?v=3'\)/);
+  assert.match(css, /url\('\/fonts\/neo-nexus-ui\.ttf\?v=3'\)/);
 });

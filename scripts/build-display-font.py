@@ -43,7 +43,7 @@ GLYPHS = {
     'F': (91, [line((3, 100), (3, 0), (88, 0)), line((3, 50), (73, 50))]),
     'G': (100, [arc(50, 50, 46, 50, -65, -296), line((54, 51), (97, 51), (97, 84))]),
     'H': (93, [line((3, 0), (3, 100)), line((90, 0), (90, 100)), line((3, 50), (90, 50))]),
-    'I': (56, [line((3, 0), (53, 0)), line((28, 0), (28, 100)), line((3, 100), (53, 100))]),
+    'I': (56, [line((3, 0), (3, 100), (53, 100))]),
     'J': (84, [line((77, 0), (77, 62)), arc(45, 61, 32, 39, 0, 168)]),
     'K': (91, [line((3, 0), (3, 100)), line((87, 0), (38, 49), (89, 100))]),
     'L': (83, [line((3, 0), (3, 100), (80, 100))]),
@@ -105,6 +105,8 @@ def build(family, filename, thickness):
     metrics = {'.notdef': (700, 35), 'space': (315, 0)}
     mapping = {32: 'space'}
     for char, (width, paths) in GLYPHS.items():
+        if family == 'Neo Nexus UI' and char == 'I':
+            paths = [line((3, 0), (53, 0)), line((28, 0), (28, 100)), line((3, 100), (53, 100))]
         glyphs[char] = glyph_for(paths, thickness)
         metrics[char] = ((width + 10) * 7, 35)
         mapping[ord(char)] = char
