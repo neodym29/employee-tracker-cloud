@@ -21,6 +21,6 @@ export default function VerifyEmailClient() {
   }
 
   return <div className="verifyEmailPage"><h1>Verify your email</h1>
-    {done ? <><p>Your email is verified. The blue badge is now on your profile.</p><a className="primaryButton" href="/profile">View profile</a></> : <><p>Confirm that this is the address you use for Neo-Nexus.</p><button type="button" disabled={!token || busy} onClick={() => void verify()}>{busy ? 'Verifying…' : 'Verify email'}</button>{!token && <p role="alert">This verification link is missing its token.</p>}{error && <p role="alert">{error}</p>}</>}
+    {done ? <><p>Your email is verified. The blue badge is now on your profile.</p><a className="primaryButton" href="/profile">View profile</a></> : <><p>Confirm that this is the address you use for Neo Nexus.</p><button type="button" disabled={!token || busy} onClick={() => void verify()}>{busy ? 'Verifying…' : 'Verify email'}</button>{!token && <p role="alert">This verification link is missing its token.</p>}{error && <p role="alert">{error}</p>}</>}
   </div>;
 }

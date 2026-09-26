@@ -1,3 +1,17 @@
+@font-face {
+  font-family: 'Neo Nexus Display';
+  src: url('/fonts/neo-nexus-display.ttf?v=2') format('truetype');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Neo Nexus UI';
+  src: url('/fonts/neo-nexus-ui.ttf?v=2') format('truetype');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
 * { box-sizing: border-box; }
 :root {
   --canvas: #f4f2ed;
@@ -1592,21 +1606,31 @@ body { font-weight:300; letter-spacing:.005em; }
 .siteHeader .nav { position:relative; width:100%; min-height:66px; padding:0 22px; }
 .siteHeader .brand { font-size:calc(18px * var(--type-scale)); font-weight:300; letter-spacing:.03em; }
 .siteHeader .brand > span { display:inline-block; }
-.siteHeader .brand > span::first-letter { font-size:1.24em; font-weight:400; }
-.siteHeader .navLink { font-size:calc(13px * var(--type-scale)); font-weight:300; letter-spacing:.035em; }
+.siteHeader .navLink { color:var(--ink); font-size:calc(15px * var(--type-scale)); font-weight:300; letter-spacing:.035em; -webkit-text-stroke:.28px currentColor; }
 .siteHeader a.navLink { display:inline-block; }
-.siteHeader a.navLink::first-letter,.siteHeader .dashboardNavLink > span::first-letter,.siteHeader .accountMenuTrigger > span::first-letter { font-size:1.18em; font-weight:430; }
 .siteHeader .dashboardNavLink > span,.siteHeader .accountMenuTrigger > span { display:inline-block; }
 .siteHeader .navLink.active { box-shadow:inset 0 1px 0 rgba(255,255,255,.24),0 6px 12px color-mix(in srgb,var(--ink) 13%,transparent); }
-main h1::first-letter { font-size:1.18em; text-transform:uppercase; }
-.nexusLandingCopy h1::first-letter { font-size:1em; }
-.nexusLandingCopy h1 .heroInitial { display:inline-block; color:inherit; font-size:1.14em; line-height:.8; font-weight:250; letter-spacing:-.07em; }
-/* Carry the enlarged initial through headings and short UI copy, never prose. */
-main :where(h1,h2,h3,h4,h5,h6,button,summary,legend,label,.button,.primaryButton,.secondaryButton,.nexusLandingPrimary,.nexusLandingSecondary,.sectionLabel,.previewKicker,.pill,.eyebrow,.projectsSidebarLabel,.projectsSidebarHeader strong,.projectsSidebarName,.projectUpdateSection header a,.nexusLandingSteps strong,.nexusLandingVisualTitle strong,.nexusLandingUpdate > span:last-child,.summaryDay > span,.summaryDay > strong,.sectionHeading > span,.nexusNoSelection strong,.nexusEmptyMessages strong,.nexusConversationText strong,.projectChatEmpty strong)::first-letter {
-  font-size:1.2em;
-  font-weight:450;
+/* The reference's open, geometric strokes are a full display alphabet, not a bold initial. */
+:is(.siteHeader .brand > span:last-child,.siteHeader .navLink,.siteHeader .dashboardNavLink > span,.siteHeader .accountMenuTrigger > span),
+main :where(h1,h2,h3,h4,h5,h6,button,summary,legend,label,.button,.primaryButton,.secondaryButton,.nexusLandingPrimary,.nexusLandingSecondary,.sectionLabel,.previewKicker,.pill,.eyebrow,.projectsSidebarLabel,.projectsSidebarHeader strong,.projectsSidebarName,.projectUpdateSection header a,.nexusLandingSteps strong,.nexusLandingVisualTitle strong,.nexusLandingUpdate > span:last-child,.summaryDay > span,.summaryDay > strong,.sectionHeading > span,.nexusNoSelection strong,.nexusEmptyMessages strong,.nexusConversationText strong,.projectChatEmpty strong) {
+  font-family:'Neo Nexus UI',var(--app-font);
+  font-weight:400;
+  font-synthesis:none;
   text-transform:uppercase;
+  letter-spacing:.07em;
+  word-spacing:.15em;
 }
+:is(.siteHeader .brand > span:last-child,main h1,main h2,main h3) {
+  font-family:'Neo Nexus Display',var(--app-font);
+  letter-spacing:.075em;
+  word-spacing:.17em;
+}
+:is(.siteHeader .brand > span:last-child,main h1,main h2,main h3,main .projectUpdateSection header a) {
+  text-shadow:.035em .04em 0 color-mix(in srgb,var(--ink) 8%,transparent),.08em .09em 0 color-mix(in srgb,var(--ink) 5%,transparent),.16em .18em .2em color-mix(in srgb,var(--ink) 12%,transparent);
+}
+main :where(button,summary,label,legend,.button,.primaryButton,.secondaryButton,.pill,.sectionLabel,.eyebrow) { -webkit-text-stroke:.12px currentColor; }
+.siteHeader .brand > span:last-child { font-size:calc(19px * var(--type-scale)); -webkit-text-stroke:.28px currentColor; }
+.nexusLandingCopy h1 { max-width:700px; font-size:calc(clamp(40px,4.4vw,62px) * var(--type-scale)); line-height:1.17; }
 .projectUpdateSection header a,.nexusLandingSteps strong,.projectsSidebarHeader strong,.sectionHeading > span { display:inline-block; }
 @media (max-width:900px) {
   .siteHeader { border-radius:24px; }
@@ -1618,7 +1642,7 @@ main :where(h1,h2,h3,h4,h5,h6,button,summary,legend,label,.button,.primaryButton
   .siteHeader { width:calc(100% - 16px); top:6px; margin-top:8px; border-radius:21px; }
   .siteHeader .nav { width:100%; padding:8px 12px; }
   .siteHeader .navPrimary { justify-content:space-between; flex-wrap:nowrap; gap:0; }
-  .siteHeader .navLink { padding:6px 5px; font-size:calc(11px * var(--type-scale)); letter-spacing:.01em; }
+  .siteHeader .navLink { padding:6px 5px; font-size:calc(12px * var(--type-scale)); letter-spacing:.01em; }
 }
 @media (max-width:360px) {
   .siteHeader .navPrimary { justify-content:center; flex-wrap:wrap; gap:1px; }

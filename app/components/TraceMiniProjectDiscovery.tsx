@@ -94,15 +94,15 @@ export default function TraceMiniProjectDiscovery({ projectId, selectedCandidate
   }
 
   return <div className="traceProjectSetup" style={{ minWidth: 0, marginBlock: 16 }} aria-busy={busy || loading}>
-    <h3>Connect a repository with Neo-Nexus</h3>
+    <h3>Connect a repository with Neo Nexus</h3>
     <p className="muted">Install once, detect repositories, then choose one for this project. Creating a workspace does not activate tracking.</p>
-    <p role="status">{loading ? 'Checking Neo-Nexus CLI…' : !fresh ? 'CLI status unavailable' : !devices.length ? 'No Neo-Nexus CLI connected' : online ? 'CLI connected · recently seen' : 'CLI offline · start the installed CLI, then refresh'}</p>
+    <p role="status">{loading ? 'Checking Neo Nexus CLI…' : !fresh ? 'CLI status unavailable' : !devices.length ? 'No Neo Nexus CLI connected' : online ? 'CLI connected · recently seen' : 'CLI offline · start the installed CLI, then refresh'}</p>
     <div className="rowActions">
       {devices.length > 0 && <label>Device to scan<select value={deviceId} disabled={locked} onChange={event => { setDeviceId(event.target.value); setScan(null); setMessage(''); }}>{devices.map(device => <option key={device.id} value={device.id}>{device.device_label || device.hostname || `Device ${device.id}`}</option>)}</select></label>}
       <button type="button" disabled={locked || !online || Boolean(scan && ['queued', 'running'].includes(scan.state))} onClick={detect}>Detect projects</button>
       <button type="button" className="secondaryButton" disabled={disabled || busy} onClick={() => void load()}>Refresh CLI status</button>
     </div>
-    <details><summary>Install or reconnect the Neo-Nexus CLI</summary><DesktopCliConnection projectId={projectId} /></details>
+    <details><summary>Install or reconnect the Neo Nexus CLI</summary><DesktopCliConnection projectId={projectId} /></details>
     {scan && <p role="status">Scan: {scan.state}{scan.count !== undefined ? ` · ${scan.count} repositories found` : ''}{scan.error ? ` · ${scan.error}` : ''}{['queued', 'running'].includes(scan.state) ? ' · Waiting for the selected device. An offline or older CLI may not complete this request.' : ''}</p>}
     {error && <p className="errorBanner" role="alert">{error} Refresh to retry; no activation is assumed.</p>}
     {message && <p role="status">{message}</p>}

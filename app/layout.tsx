@@ -14,7 +14,7 @@ import NexusMark from '@/app/components/NexusMark';
 const outfit = Outfit({ subsets: ['latin'], weight: 'variable', variable: '--font-outfit', display: 'swap' });
 
 export const metadata: Metadata = {
-  title: 'Neo-Nexus | Project collaboration',
+  title: 'Neo Nexus | Project collaboration',
   description: 'One place for clients and engineers to ask, build, and see project progress.',
 };
 
@@ -31,7 +31,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body>
         <header className="siteHeader">
           <nav className="nav" aria-label="Primary navigation">
-            <a className="brand" href="/" aria-label="Neo-Nexus home"><span className="brandGyro"><NexusMark className="logo" /></span><span>Neo-Nexus</span></a>
+            <a className="brand" href="/" aria-label="Neo Nexus home"><span className="brandGyro"><NexusMark className="logo" /></span><span>Neo Nexus</span></a>
             {session ? <>
               <div className="navPrimary">
                   <DashboardMenu />

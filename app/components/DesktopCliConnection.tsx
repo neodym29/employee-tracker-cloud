@@ -18,7 +18,7 @@ export default function DesktopCliConnection({ projectId, projectName }: { proje
   ] : [];
   return <>
     {projectId && <section className="card install-card project-setup-options" aria-labelledby="project-setup-options-title">
-      <h2 id="project-setup-options-title">Add this project to Neo-Nexus</h2>
+      <h2 id="project-setup-options-title">Add this project to Neo Nexus</h2>
       <p className="muted">Copy the prompt into your coding agent, or run the visible commands one at a time.</p>
       <div className="setup-alternatives">
         <button type="button" className="button primary" onClick={() => void copy(addProjectPrompt, 'project-prompt')}>{copied === 'project-prompt' ? 'Prompt copied' : 'Copy add-project prompt'}</button>

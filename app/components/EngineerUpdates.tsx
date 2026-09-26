@@ -32,6 +32,6 @@ export default function EngineerUpdates({ groups, projectScoped = false }: { gro
         <div><time dateTime={update.occurredAt}>{dateLabel(update.occurredAt)}</time>{update.importedHistory && <span>Earlier history</span>}</div>
       </li>)}</ol> : <div className="engineerUpdatesEmpty"><p>No recorded changes yet.</p><div>{group.projects.map((project) => <a key={project.id} href={`/projects/${project.id}`}>{project.title}</a>)}</div></div>}
     </article>)}</div> : <div className="engineerUpdatesEmpty"><p>No engineers are connected to these projects yet.</p></div>}
-    <p className="engineerUpdatesNote">Grouped by the engineer whose connected Neo-Nexus device reported the work.</p>
+    <p className="engineerUpdatesNote">Grouped by the engineer whose connected Neo Nexus device reported the work.</p>
   </section>;
 }

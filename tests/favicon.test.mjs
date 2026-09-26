@@ -8,7 +8,7 @@ test('app publishes a real favicon through Next metadata', async () => {
   const svg = await readFile(new URL('app/icon.svg', root), 'utf8');
 
   assert.match(svg, /^<svg\b/);
-  assert.match(svg, /aria-label="Neo-Nexus"/);
+  assert.match(svg, /aria-label="Neo Nexus"/);
   assert.match(svg, /cx="32" cy="32" r="3\.5"/);
   assert.match(svg, /stroke="currentColor"/);
   assert.doesNotMatch(svg, /<rect\b|#[0-9a-f]{6}"/i);

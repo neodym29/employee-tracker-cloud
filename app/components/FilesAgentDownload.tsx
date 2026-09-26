@@ -124,10 +124,10 @@ export default function FilesAgentDownload({ projectId }: Props = {}) {
   return (
     <section className={projectId ? 'dashboardPanel desktopCliPanel' : 'card desktopCliPanel'} style={{ marginTop: 16 }}>
       <span className="pill">Desktop connection</span>
-      <h2>Connect the Neo-Nexus desktop CLI</h2>
+      <h2>Connect the Neo Nexus desktop CLI</h2>
       <p className="muted">
         Install the CLI on your computer, connect an approved project folder, then run Codex, Claude, or Hermes
-        through it. Neo-Nexus records file changes made by that approved AI CLI process tree only. It reports
+        through it. Neo Nexus records file changes made by that approved AI CLI process tree only. It reports
         file-change metadata only and does not collect file contents, screenshots, input, browser activity,
         clipboard data, audio, or unrelated operating-system files.
       </p>
@@ -137,7 +137,7 @@ export default function FilesAgentDownload({ projectId }: Props = {}) {
         <li><strong>Run an approved AI CLI</strong><code>files-agent exec --agent codex -- codex</code></li>
       </ol>
       <button type="button" aria-label="Download AI files tracker" onClick={download} disabled={busy}>
-        {busy ? 'Preparing secure download…' : 'Download Neo-Nexus desktop CLI'}
+        {busy ? 'Preparing secure download…' : 'Download Neo Nexus desktop CLI'}
       </button>
       <p className="muted smallNote">The download contains a short-lived, one-time enrollment token tied to your signed-in account. Do not share the package.</p>
 

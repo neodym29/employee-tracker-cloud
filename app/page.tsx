@@ -12,7 +12,7 @@ export default async function Home() {
     <section className="nexusLandingHero">
       <div className="nexusLandingCopy">
         <span className="nexusLandingEyebrow">ONE HOME FOR PROJECT WORK</span>
-        <h1 aria-label="Know what’s happening. Keep work moving."><span className="heroInitial">K</span>now what’s happening.<br /><em><span className="heroInitial">K</span>eep work moving.</em></h1>
+        <h1>Know what’s happening.<br /><em>Keep work moving.</em></h1>
         <p>Connect clients and engineers. Ask about a project, turn requests into tasks, and see updates from the work happening in Codex.</p>
         <div className="nexusLandingActions">
           <a className="nexusLandingPrimary" href={primaryAction.href}>{primaryAction.label}<span aria-hidden="true">↗</span></a>
@@ -34,7 +34,7 @@ export default async function Home() {
         </div>
       </div>
     </section>
-    <section className="nexusLandingSteps" aria-label="How Neo-Nexus works">
+    <section className="nexusLandingSteps" aria-label="How Neo Nexus works">
       <div><span>01</span><strong>Ask</strong><p>Clients ask questions and flag issues in project chat.</p></div>
       <div><span>02</span><strong>Build</strong><p>Engineers work in Codex and stay connected to the project.</p></div>
       <div><span>03</span><strong>See progress</strong><p>Everyone sees recent work and next steps in one place.</p></div>

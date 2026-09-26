@@ -6,7 +6,7 @@ import ProfileAvatar from '@/app/components/ProfileAvatar';
 
 type Props = { params: Promise<{ userId: string }> };
 export const dynamic = 'force-dynamic';
-export const metadata: Metadata = { title: 'Teammate profile | Neo-Nexus' };
+export const metadata: Metadata = { title: 'Teammate profile | Neo Nexus' };
 
 export default async function TeammateProfilePage({ params }: Props) {
   const session = await requireApprovedSession();

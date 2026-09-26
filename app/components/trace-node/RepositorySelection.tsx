@@ -184,14 +184,14 @@ export default function RepositorySelection({workspaceId, candidates, agents, us
     return aRelevant - bRelevant || a.name.localeCompare(b.name);
   });
   return <section className="card settings-card repository-selection-card">
-    <div className="stacked-heading">{!creationOnly&&<span>Local Git discovery</span>}<h2 className="heading-with-tip">{creationOnly ? 'Choose a scanned repository' : 'Account repositories'} {!creationOnly&&<InfoTip label="Repository discovery">The running Node CLI checks safe readable folders in your home and local mounted drives every 10 minutes. Choose a repository here before Neo-Nexus connects or tracks it.</InfoTip>}</h2></div>
+    <div className="stacked-heading">{!creationOnly&&<span>Local Git discovery</span>}<h2 className="heading-with-tip">{creationOnly ? 'Choose a scanned repository' : 'Account repositories'} {!creationOnly&&<InfoTip label="Repository discovery">The running Node CLI checks safe readable folders in your home and local mounted drives every 10 minutes. Choose a repository here before Neo Nexus connects or tracks it.</InfoTip>}</h2></div>
     <div className="repository-actions">
       <button type="button" className="button secondary" disabled={scanning || scanActive || ownAgents.length === 0} onClick={()=>void requestScan()}>{scanning ? <BusyIndicator label="Requesting scan…" /> : scanActive ? <BusyIndicator label="Scanning repositories…" /> : "Scan repositories now"}</button>
       <button type="button" className="button secondary" disabled={!reviewDismissed && dismissedAvailable.length === 0} aria-pressed={reviewDismissed} onClick={()=>{setReviewDismissed(current=>!current);setSearch('');}}>{reviewDismissed?'Back to current repositories':`Review dismissed repositories (${dismissedAvailable.length})`}</button>
       {creationOnly&&<button type="button" className="button secondary" onClick={async()=>{setError('');try{await copyText(repositoryDiscoveryPrompt());setFinderCopied(true);}catch(caught){setError(caught instanceof Error?caught.message:'Could not copy the repository finder prompt.');}}}>{finderCopied?'Repository finder copied':'Copy repository finder prompt'}</button>}
     </div>
-    {!creationOnly&&<p className="muted">Neo-Nexus scans safe readable folders in your home and local mounted drives. Repository metadata appears here; connecting and tracking still require your choice.</p>}
-    {ownAgents.length === 0 && <p className="muted">Open or reconnect the Neo-Nexus device agent before requesting an immediate scan. Automatic scans resume when it is online.</p>}
+    {!creationOnly&&<p className="muted">Neo Nexus scans safe readable folders in your home and local mounted drives. Repository metadata appears here; connecting and tracking still require your choice.</p>}
+    {ownAgents.length === 0 && <p className="muted">Open or reconnect the Neo Nexus device agent before requesting an immediate scan. Automatic scans resume when it is online.</p>}
     {scanActive && <div className="alert progress action-progress" role="status" aria-live="polite" aria-busy="true">
       <BusyIndicator label={scanRequests.some(scan => scan.status === "running") ? "Scanning safe user folders and local drives…" : "Waiting for your devices to begin scanning…"} />
       <span>Waiting for an authenticated Node poll. Offline devices cannot complete this scan.</span>
@@ -241,19 +241,19 @@ export default function RepositorySelection({workspaceId, candidates, agents, us
           try{
             const created=await request(`/workspaces/${workspaceId}/repository-candidates/${candidate.id}`,{body:JSON.stringify({action:'create',title,...(creation.accountType==='engineer'?{clientId}:{}),revision:candidate.revision})});
             await startTrace(candidate.id,String(created.projectId));
-            if(active()){setCreating(undefined);setMessage('Project created. Neo-Nexus is starting and the repository’s full Git history will be imported.');await reload();onComplete?.();}
+            if(active()){setCreating(undefined);setMessage('Project created. Neo Nexus is starting and the repository’s full Git history will be imported.');await reload();onComplete?.();}
           }catch(e){if(active())setCreationError(e instanceof Error?e.message:'Could not create project. Retry here.');}
           finally{createBusy.current=false;if(active())setChanging(undefined);}
         }}>
           <label htmlFor={`project-name-${candidate.id}`}>Project name</label>
           <input id={`project-name-${candidate.id}`} name="title" autoFocus required maxLength={120} value={title} disabled={changing===candidate.id} onChange={event=>setTitle(event.target.value)} aria-describedby={`create-note-${candidate.id}`}/>
           {creation.accountType==='engineer' && <><label htmlFor={`project-client-${candidate.id}`}>Client</label><select id={`project-client-${candidate.id}`} required value={clientId} disabled={changing===candidate.id} onChange={event=>setClientId(event.target.value)}><option value="">Choose project client</option>{creation.clients.map(client=><option key={client.id} value={client.id}>{client.display_name || `Client ${client.id}`}</option>)}</select>{!creation.clients.length&&<p>No approved clients in your company. A client account must be approved before creating a project.</p>}</>}
-          <p id={`create-note-${candidate.id}`}>Creating this project starts Neo-Nexus tracking for this repository and imports its full Git history.</p>
+          <p id={`create-note-${candidate.id}`}>Creating this project starts Neo Nexus tracking for this repository and imports its full Git history.</p>
           {creationError&&<p role="alert">{creationError}</p>}
           <div className="repository-create-actions"><button type="submit" disabled={changing===candidate.id||!title.trim()||(creation.accountType==='engineer'&&!clientId)}>{changing===candidate.id?'Creating and starting tracking…':'Create project and start tracking'}</button><button type="button" disabled={changing===candidate.id} onClick={closeCreation}>Cancel</button></div>
         </form>}
       </div>;
     })}</div> : <p className="muted">{reviewDismissed?'No dismissed repository matches that search. Clear the search or return to current repositories.':'No repository matches that search. Clear the search or review dismissed repositories.'}</p>}
-    </> : <p className="muted">No repositories found yet. Request a scan while the Neo-Nexus device agent is online.</p>}
+    </> : <p className="muted">No repositories found yet. Request a scan while the Neo Nexus device agent is online.</p>}
   </section>;
 }

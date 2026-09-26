@@ -418,14 +418,14 @@ export default function WorkspaceClient({ projectId, accountType, canManageTrace
 
         <section className="dashboardPanel traceMiniPanel" aria-labelledby="tracemini-title">
           <div className="overviewSectionHeader traceMiniHeader">
-                <div><span className="sectionLabel">Neo-Nexus repository activity</span><h2 id="tracemini-title">Project activity</h2></div>
+                <div><span className="sectionLabel">Neo Nexus repository activity</span><h2 id="tracemini-title">Project activity</h2></div>
             <span className={`statusBadge ${traceView?.state === 'fresh' ? '' : 'subtle'}`}>{traceView?.state || 'loading'}</span>
           </div>
           {traceView?.lastSuccessfulSync && <p className="traceFreshness">Last successful refresh {formatTimestamp(traceView.lastSuccessfulSync)}{traceView.stale ? ' · showing stale cached data' : ''}</p>}
           {traceView?.lastError && <p className="errorBanner" role="status">{traceView.lastError}</p>}
           {!traceView?.data ? <p className="emptyOverview">{traceView?.state === 'unconfigured' ? 'Repository activity is not configured for this project.' : traceView?.state === 'disabled' ? 'Repository activity is paused for this project.' : traceView?.state === 'unavailable' ? 'Repository activity data is unavailable. The rest of this project remains available.' : 'Loading repository activity...'}</p> : <>
             <p><strong>{traceView.data.matchStatus === 'matched' ? 'Matched' : traceView.data.matchStatus === 'ambiguous' ? 'Ambiguous' : 'No match'}</strong>{traceView.data.matchedRepository ? ` · ${traceView.data.matchedRepository.name}` : ''} · {traceView.data.hasLocalClone ? `Local clone available (${traceView.data.localCloneCount})` : 'No local clone reported'}</p>
-            <p className="muted">Neo-Nexus reports activity from the selected repository. Progress reflects recorded changes; uncommitted work, test execution, deployment, and business outcomes are not inferred from Git history.</p>
+            <p className="muted">Neo Nexus reports activity from the selected repository. Progress reflects recorded changes; uncommitted work, test execution, deployment, and business outcomes are not inferred from Git history.</p>
             <section className="analyticsGrid traceMiniStats" aria-label="Repository activity totals">
               <article><span>Activity events</span><strong>{traceView.data.activityTotal}</strong></article>
               <article><span>Repositories</span><strong>{traceView.data.repositories.length}</strong></article>
@@ -446,7 +446,7 @@ export default function WorkspaceClient({ projectId, accountType, canManageTrace
             {canManageTraceMini && <details className="dashboardPanel traceMiniSettings">
           <summary>Repository activity settings</summary>
           <form onSubmit={saveTraceMini}>
-            <p className="muted">Neo-Nexus uses approved local agents and project roots. No external URL, workspace, or session token is required.</p>
+            <p className="muted">Neo Nexus uses approved local agents and project roots. No external URL, workspace, or session token is required.</p>
                 <p className="muted">Approved roots: {traceConfig?.approvedRoots ?? 0} · Retention: {traceConfig?.retentionDays ?? 90} days</p>
                 <p className="muted">Root/device approval · Select · Revoke</p>
                 <label>From date<input type="date" aria-label="From date" /></label><label>To date<input type="date" aria-label="To date" /></label>

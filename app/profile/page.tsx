@@ -3,7 +3,7 @@ import { requireApprovedSession } from '@/lib/auth';
 import ProfileClient from './ProfileClient';
 
 export const dynamic = 'force-dynamic';
-export const metadata: Metadata = { title: 'Your profile | Neo-Nexus' };
+export const metadata: Metadata = { title: 'Your profile | Neo Nexus' };
 
 export default async function ProfilePage() {
   const session = await requireApprovedSession();

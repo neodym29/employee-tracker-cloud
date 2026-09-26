@@ -27,7 +27,7 @@ test('the default font is a lightweight self-hosted geometric face', async () =>
   assert.match(css, /\.nexusChatSidebar h1 \{ text-shadow:none; \}/);
 });
 
-test('navigation floats as a centered glass capsule and initials remain semantic text', async () => {
+test('navigation floats as a centered glass capsule and display headings remain semantic text', async () => {
   const [css, home, menu] = await Promise.all([
     readFile(new URL('../app/globals.css', import.meta.url), 'utf8'),
     readFile(new URL('../app/page.tsx', import.meta.url), 'utf8'),
@@ -38,9 +38,8 @@ test('navigation floats as a centered glass capsule and initials remain semantic
   assert.match(css, /\.siteHeader::before \{/);
   assert.match(css, /@media \(max-width:900px\) \{\s*\.siteHeader/);
   assert.match(css, /\.siteHeader \.navPrimary \{ justify-content:space-between; flex-wrap:nowrap; gap:0; \}/);
-  assert.match(home, /<span className="heroInitial">K<\/span>now/);
-  assert.match(home, /<span className="heroInitial">K<\/span>eep/);
-  assert.match(home, /aria-label="Know what’s happening\. Keep work moving\."/);
-  assert.match(css, /\.nexusLandingCopy h1 \.heroInitial \{ display:inline-block; color:inherit;/);
+  assert.match(home, /<h1>Know what’s happening\.<br \/><em>Keep work moving\.<\/em><\/h1>/);
+  assert.doesNotMatch(home, /heroInitial/);
+  assert.match(css, /font-family:'Neo Nexus Display',var\(--app-font\)/);
   assert.match(menu, /<span>Profile<\/span>/);
 });
