@@ -12,7 +12,7 @@ export default async function Home() {
     <section className="nexusLandingHero">
       <div className="nexusLandingCopy">
         <span className="nexusLandingEyebrow">ONE HOME FOR PROJECT WORK</span>
-        <h1>Know what’s happening.<br /><em>Keep work moving.</em></h1>
+        <h1><span className="heroInitial">K</span>now what’s happening.<br /><em><span className="heroInitial">K</span>eep work moving.</em></h1>
         <p>Connect clients and engineers. Ask about a project, turn requests into tasks, and see updates from the work happening in Codex.</p>
         <div className="nexusLandingActions">
           <a className="nexusLandingPrimary" href={primaryAction.href}>{primaryAction.label}<span aria-hidden="true">↗</span></a>

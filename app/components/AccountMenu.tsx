@@ -53,7 +53,7 @@ export default function AccountMenu() {
   }
 
   return <details ref={menuRef} className={`accountMenu ${pathname?.startsWith('/profile') ? 'active' : ''}`}>
-    <summary className="navLink accountMenuTrigger" aria-label="Open profile menu">Profile <svg viewBox="0 0 12 8" aria-hidden="true"><path d="m1 1.5 5 5 5-5" /></svg></summary>
+    <summary className="navLink accountMenuTrigger" aria-label="Open profile menu"><span>Profile</span><svg viewBox="0 0 12 8" aria-hidden="true"><path d="m1 1.5 5 5 5-5" /></svg></summary>
     <div className="accountMenuPanel">
       <a href="/profile" onClick={() => { if (menuRef.current) menuRef.current.open = false; }}>View profile</a>
       <a href="/profile#appearance" onClick={() => { if (menuRef.current) menuRef.current.open = false; }}>Appearance settings</a>

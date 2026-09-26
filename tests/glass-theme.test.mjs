@@ -26,3 +26,18 @@ test('the default font is a lightweight self-hosted geometric face', async () =>
   assert.match(css, /font-weight:200;/);
   assert.match(css, /\.nexusChatSidebar h1 \{ text-shadow:none; \}/);
 });
+
+test('navigation floats as a centered glass capsule and initials remain semantic text', async () => {
+  const [css, home, menu] = await Promise.all([
+    readFile(new URL('../app/globals.css', import.meta.url), 'utf8'),
+    readFile(new URL('../app/page.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../app/components/AccountMenu.tsx', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(css, /\.siteHeader \{\s*width:min\(1080px,calc\(100% - 32px\)\)/);
+  assert.match(css, /\.siteHeader::before \{/);
+  assert.match(css, /@media \(max-width:900px\) \{\s*\.siteHeader/);
+  assert.match(home, /<span className="heroInitial">K<\/span>now/);
+  assert.match(home, /<span className="heroInitial">K<\/span>eep/);
+  assert.match(menu, /<span>Profile<\/span>/);
+});
