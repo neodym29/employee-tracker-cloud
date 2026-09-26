@@ -5,6 +5,7 @@ export const APPEARANCE_THEMES = [
   { id: 'forest', label: 'Forest', swatch: '#e1eee4' },
   { id: 'sunset', label: 'Sunset', swatch: '#f8e5df' },
   { id: 'night', label: 'Dark', swatch: '#242632' },
+  { id: 'epicenter', label: 'Epicenter', swatch: '#7468bd' },
 ] as const;
 
 export const APPEARANCE_FONTS = [
