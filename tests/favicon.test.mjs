@@ -9,8 +9,9 @@ test('app publishes a real favicon through Next metadata', async () => {
 
   assert.match(svg, /^<svg\b/);
   assert.match(svg, /aria-label="Neo-Nexus"/);
-  assert.match(svg, /cx="32" cy="32" r="6"/);
-  assert.match(svg, /a22 22 0 0 1 40 0/);
+  assert.match(svg, /cx="32" cy="32" r="5\.5"/);
+  assert.match(svg, /stroke="currentColor"/);
+  assert.doesNotMatch(svg, /<rect\b|#[0-9a-f]{6}"/i);
   assert.match(svg, /prefers-reduced-motion: no-preference/);
   assert.match(svg, /animation: orbit 24s linear infinite/);
   assert.doesNotMatch(svg, /<text\b/);
@@ -28,4 +29,7 @@ test('Epicenter theme and app logo respect reduced motion', async () => {
   assert.match(css, /@media \(prefers-reduced-motion:no-preference\)/);
   assert.match(mark, /className="nexusMarkOuter"/);
   assert.match(mark, /className="nexusMarkInner"/);
+  assert.match(mark, /stroke="currentColor"/);
+  assert.doesNotMatch(mark, /<rect\b|#[0-9a-f]{6}"/i);
+  assert.doesNotMatch(css.match(/\.logo \{[^}]*\}/)?.[0] ?? '', /box-shadow|background|border-radius/);
 });
