@@ -325,7 +325,7 @@ export default function WorkspaceClient({ projectId, accountType, canManageTrace
 
   return <div className="workspaceShell agentWorkspace chat-only-project">
     <div className="workspaceTopbar">
-      <a className="backLink" href="/projects">← Back to projects</a>
+      <h1 className="workspaceTitle">{project.title}</h1>
       <div className="workspaceDeploymentActions">
         {project.deploymentUrl && <a className="liveDeploymentButton" href={project.deploymentUrl} target="_blank" rel="noreferrer">Open live app <span aria-hidden="true">↗</span></a>}
         {canDeleteProject && <details className="topDeploymentEditor">

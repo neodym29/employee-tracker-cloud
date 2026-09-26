@@ -91,7 +91,6 @@ function ProjectDashboard({ accountType, data, error }: Extract<Props, { mode: '
   return <>
     <section className="dashboardHeading">
       <div><div className="eyebrow"><span className="liveDot" /> {client ? 'Client workspace' : 'Engineer workspace'}</div><h1>Compute &amp; APIs</h1><p>Open Neodym apps, check live services, and review the project activity available to your account.</p></div>
-      <div className="dashboardCtas"><a className="primaryButton" href="/projects">{client ? 'Manage projects' : 'Find projects'}</a></div>
     </section>
     {error && <div className="errorBanner" role="alert">Could not load your dashboard. Please try again.</div>}
     <ChatInbox mode="dashboard" />

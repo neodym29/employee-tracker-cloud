@@ -266,7 +266,7 @@ export default function ChatsClient({ userId }: { userId: string }) {
 
   return <div className={`nexusChatsPage ${selected ? 'hasChat' : ''}`}>
     <aside className="nexusChatSidebar" aria-label="Chats sidebar">
-      <div className="nexusSidebarTop"><span>NEO-NEXUS</span><div><h1>Chats</h1><button type="button" onClick={() => { setMode('group'); setMemberIds([]); }} aria-label="New group" title="New group">+</button></div></div>
+      <div className="nexusSidebarTop"><span>NEO-NEXUS</span><div><h1>Chats</h1></div></div>
       <label className="nexusChatSearch"><span className="srOnly">Search chats and people</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search chats and people" /></label>
       <div className="nexusSidebarScroll" onScroll={() => setSidebarMenu(null)}>
         <section className="nexusSidebarSection" aria-label="Groups"><div className="nexusSectionHeading"><h2>Groups</h2><button type="button" onClick={() => { setMode('group'); setMemberIds([]); }} aria-label="Create group" title="Create group">+</button></div>
