@@ -295,7 +295,7 @@ html[data-theme='night'] :is(select,input,textarea) { color:var(--ink); backgrou
 html[data-theme='night'] :is(input,textarea)::placeholder { color:var(--faint); }
 html[data-theme='night'] :is(.eyebrow,.heroText,.changeMain span b,.socialProfileBioPreview,.socialPublicAbout p,.nexusProfileBio,.nexusComposer label) { color:var(--muted); }
 html[data-theme='night'] h1 span { color:var(--faint); }
-html[data-theme='night'] :is(.changePreview,.statRow,.summaryDay,.engineerUpdateCard,.requestInboxEmpty,.healthCard) { background:var(--paper); }
+html[data-theme='night'] :is(.changePreview,.statRow,.summaryDay,.engineerUpdateCard,.healthCard) { background:var(--paper); }
 html[data-theme='night'] :is(.previewFooter,.appLauncherCard,.telemetrySummary,.telemetryCard,.healthSummary,.healthCard,.computeFeatureGrid article,.cliSteps li,.chatForm) { background:#222633; }
 html[data-theme='night'] :is(.engineerUpdates,.workspaceHealth) { border-color:var(--line); background:linear-gradient(135deg,#222634,#1b1e28); }
 html[data-theme='night'] .previewRow + .previewRow,html[data-theme='night'] .changeRow + .changeRow { border-color:var(--line); }
@@ -546,7 +546,6 @@ pre { overflow: auto; border-radius: 12px; padding: 16px; color: #e9e9e5; backgr
 .clientRequestInbox > .sectionHeading { align-items: flex-end; }
 .clientRequestInbox .sectionHeading h2 { margin: 3px 0 0; }
 .requestInboxCard { min-height: 190px; }
-.requestInboxEmpty { border: 1px dashed #d6d1bc; border-radius: 17px; padding: 28px; background: rgba(255,255,255,.55); }
 .sectionHeading { display: flex; align-items: center; justify-content: space-between; margin: 30px 0 14px; }
 
 /* GPT-like project navigation with LinkedIn-style multi-chat windows */
@@ -575,9 +574,6 @@ pre { overflow: auto; border-radius: 12px; padding: 16px; color: #e9e9e5; backgr
 .projectsSidebarBadge { min-width: 21px; height: 21px; display: grid; place-items: center; border-radius: 999px; padding: 0 6px; color: #1e1f1b; background: #ffcf55; font-size: calc(10px * var(--type-scale)); font-weight: 900; }
 .projectsSidebar nav button:has(.projectsSidebarBadge) { grid-template-columns: 29px minmax(0,1fr) auto; }
 .projectsSidebar nav p { margin: 3px 9px; color: #a6a79f; font-size: calc(12px * var(--type-scale)); line-height: 1.45; }
-.projectsSidebarHint { display: grid; grid-template-columns: 26px minmax(0,1fr); gap: 8px; align-items: start; border-top: 1px solid rgba(255,255,255,.09); padding: 13px 8px 2px; color: #a7a8a1; }
-.projectsSidebarHint > span { color: #aa9fff; }
-.projectsSidebarHint p { margin: 0; font-size: calc(11px * var(--type-scale)); line-height: 1.45; }
 #client-project-create { scroll-margin-top: 94px; }
 
 .projectChatDock { position: fixed; right: 18px; bottom: 0; z-index: 60; max-width: calc(100vw - 36px); display: flex; align-items: flex-end; gap: 10px; overflow-x: auto; padding: 10px 2px 0; scrollbar-width: none; }
@@ -880,7 +876,7 @@ button:disabled { cursor: not-allowed; opacity: .55; transform: none; box-shadow
   .projectsSidebar { position: static; height: auto; min-height: 0; padding: 14px 11px 10px; }
   .projectsSidebarHeader { padding-bottom: 10px; }
   .projectsSidebar nav { flex-direction: row; overflow-x: auto; overflow-y: hidden; margin: 13px 0 5px; padding: 0 0 4px; }
-  .projectsSidebarLabel,.projectsSidebarHint { display: none; }
+  .projectsSidebarLabel { display: none; }
   .projectsSidebar nav button { width: 190px; flex: 0 0 190px; }
   .projectChatDock { right: 7px; max-width: calc(100vw - 14px); gap: 7px; }
   .projectChatWindow,.projectChatWindow.isMinimized { width: calc(100vw - 18px); flex-basis: calc(100vw - 18px); }
