@@ -9,6 +9,7 @@ test('app publishes a real favicon through Next metadata', async () => {
 
   assert.match(svg, /^<svg\b/);
   assert.match(svg, /aria-label="Neo-Nexus"/);
-  assert.match(svg, /M17 45V19L47 45V19/);
+  assert.match(svg, /cx="32" cy="32" r="6"/);
+  assert.match(svg, /a22 22 0 0 1 40 0/);
   assert.doesNotMatch(svg, /<text\b/);
 });
