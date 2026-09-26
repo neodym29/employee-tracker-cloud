@@ -1,5 +1,6 @@
 import './globals.css';
 import type { Metadata } from 'next';
+import { Outfit } from 'next/font/google';
 import { currentSession } from '@/lib/auth';
 import ActiveNavLink from '@/app/components/ActiveNavLink';
 import DashboardMenu from '@/app/components/DashboardMenu';
@@ -9,6 +10,8 @@ import { DEFAULT_APPEARANCE } from '@/lib/appearance';
 import { getOwnAppearance } from '@/lib/profiles';
 import AccountMenu from '@/app/components/AccountMenu';
 import NexusMark from '@/app/components/NexusMark';
+
+const outfit = Outfit({ subsets: ['latin'], weight: 'variable', variable: '--font-outfit', display: 'swap' });
 
 export const metadata: Metadata = {
   title: 'Neo-Nexus | Project collaboration',
@@ -24,7 +27,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     catch { unreadRequests = 0; }
   }
   return (
-    <html lang="en" data-theme={appearance.theme} data-font={appearance.font} data-font-size={appearance.size}>
+    <html lang="en" className={outfit.variable} data-theme={appearance.theme} data-font={appearance.font} data-font-size={appearance.size}>
       <body>
         <header className="siteHeader">
           <nav className="nav" aria-label="Primary navigation">

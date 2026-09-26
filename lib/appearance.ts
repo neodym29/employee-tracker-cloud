@@ -9,7 +9,7 @@ export const APPEARANCE_THEMES = [
 ] as const;
 
 export const APPEARANCE_FONTS = [
-  { id: 'system', label: 'Standard', sample: 'Clean and familiar' },
+  { id: 'system', label: 'Geometric', sample: 'Light, clean letterforms' },
   { id: 'readable', label: 'Readable', sample: 'Roomier letter shapes' },
   { id: 'editorial', label: 'Editorial', sample: 'A softer serif style' },
   { id: 'mono', label: 'Mono', sample: 'A developer feel' },

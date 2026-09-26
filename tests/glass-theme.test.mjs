@@ -11,3 +11,17 @@ test('glass surfaces stay theme-aware and keep dark sidebar inputs legible', asy
   assert.match(css, /@media \(prefers-reduced-transparency: reduce\)/);
   assert.match(css, /h1,\.nexusLandingCopy h1 \{ font-weight: 380/);
 });
+
+test('the default font is a lightweight self-hosted geometric face', async () => {
+  const [layout, appearance, css] = await Promise.all([
+    readFile(new URL('../app/layout.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../lib/appearance.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../app/globals.css', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(layout, /import \{ Outfit \} from 'next\/font\/google'/);
+  assert.match(layout, /className=\{outfit\.variable\}/);
+  assert.match(appearance, /id: 'system', label: 'Geometric'/);
+  assert.match(css, /--app-font: var\(--font-outfit\)/);
+  assert.match(css, /font-weight:200;/);
+});
