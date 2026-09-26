@@ -1501,8 +1501,9 @@ strong,b { font-weight: 560; }
 .nexusChatsPage { background:transparent; }
 .nexusChatMain { background:var(--glass-surface); -webkit-backdrop-filter:blur(20px); backdrop-filter:blur(20px); }
 .nexusChatSidebar { background:color-mix(in srgb,#252725 91%,transparent); -webkit-backdrop-filter:blur(24px); backdrop-filter:blur(24px); }
-.nexusChatSearch input { color:#fff; background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.18); }
-:is(.projectsSidebar,.nexusChatSidebar) { box-shadow:inset -1px 0 0 rgba(255,255,255,.1); }
+.nexusChatSearch input:not([type='checkbox']):not([type='radio']):not([type='file']) { color:#fff; background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.18); box-shadow:inset 0 1px 4px rgba(0,0,0,.08); }
+.projectsSidebar { background:color-mix(in srgb,#20211d 89%,transparent); -webkit-backdrop-filter:blur(24px); backdrop-filter:blur(24px); }
+:is(.projectsSidebar,.nexusChatSidebar) { box-shadow:inset -1px 0 0 rgba(255,255,255,.1), 0 16px 38px color-mix(in srgb,var(--ink) 10%,transparent); }
 @media (prefers-reduced-transparency: reduce) {
   :root { --glass-surface:var(--paper); --glass-surface-strong:var(--paper); }
   .siteHeader,.nexusChatSidebar,.nexusChatMain { -webkit-backdrop-filter:none; backdrop-filter:none; }
