@@ -1178,6 +1178,10 @@ body:has(.nexusChatsPage) main { display: flex; flex: 1; min-height: 0; width: 1
 .socialProfileSide { min-width:0; display:grid; gap:18px; }
 .socialProfileCard,.socialPublicAbout { border: 1px solid var(--line); border-radius: 17px; padding: 25px; background: var(--paper); box-shadow: 0 12px 40px rgba(30,31,27,.045); }
 .socialProfileCardHeading { margin-bottom: 22px; }
+.socialProfileAutosaveHeading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.socialProfileAutosaveHeading > span { color:var(--green); font-size:11px; font-weight:700; }
+.socialProfileRetry { min-height:0; border:0; padding:0 3px; color:inherit; background:transparent; box-shadow:none; font-size:12px; text-decoration:underline; }
+.socialProfileRetry:hover { transform:none; box-shadow:none; }
 .socialProfileCard h2,.socialPublicAbout h2 { margin: 0 0 5px; font-size: 21px; }
 .socialProfileCardHeading p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .socialProfileCard > label { display: block; margin: 0 0 16px; color: var(--ink); font-size: 12px; font-weight: 750; }
@@ -1237,9 +1241,6 @@ body:has(.nexusChatsPage) main { display: flex; flex: 1; min-height: 0; width: 1
 .socialPhotoActions .socialRemovePhoto { border-color: #ead4d1; color: #a83229; background: var(--paper); }
 .socialPhotoActions .socialPictureSecondary { border-color:var(--line-dark); color:var(--ink); background:var(--paper); }
 .socialPhotoNote { display: block; margin-top: 9px; color: var(--muted); font-size: 10px; }
-.socialProfileFooter { display: flex; align-items: center; justify-content: flex-end; gap: 18px; margin-top: 20px; }
-.socialProfileFooter p { margin: 0; color: var(--muted); font-size: 12px; }
-.socialProfileFooter button { min-height: 42px; }
 .socialProfileNotice,.socialProfileError { margin: 14px 0 0; border-radius: 9px; padding: 10px 13px; font-size: 12px; }
 .socialProfileNotice { color: #205b3f; background: #eaf7ee; }
 .socialProfileError { color: #8a2b25; background: #fff0ee; }
@@ -1292,8 +1293,6 @@ body:has(.nexusChatsPage) main { display: flex; flex: 1; min-height: 0; width: 1
   .socialThemeChoices { grid-template-columns:repeat(3,minmax(0,1fr)); }
   .socialPictureOptions .socialAvatarChoices { grid-template-columns:repeat(3,minmax(0,1fr)); }
   .socialAvatarChoices, .socialAvatarGroup .socialAvatarChoices, .socialAvatarUtilityChoices { grid-template-columns: repeat(3,minmax(0,1fr)); }
-  .socialProfileFooter { align-items: flex-start; flex-direction: column; }
-  .socialProfileFooter button { width: 100%; }
   .nexusDirectMessage { max-width: 93%; }
 }
 @media (hover: none) {
