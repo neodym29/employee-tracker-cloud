@@ -21,17 +21,17 @@ export async function searchWork(session: SessionUser, raw: unknown) {
     db.query(`select msg.id::text as id,c.id::text as conversation_id,c.kind,c.title,
         coalesce(nullif(sender.display_name,''),split_part(sender.email,'@',1)) as sender_name,
         coalesce(nullif(peer.display_name,''),split_part(peer.email,'@',1)) as peer_name,
-        substring(msg.body from greatest(1,strpos(lower(msg.body),lower($3))-55) for 210) as excerpt,msg.created_at
+        substring(msg.body from greatest(1,strpos(lower(msg.body),lower($2))-55) for 210) as excerpt,msg.created_at
       from chat_messages msg
-      join chat_conversations c on c.id=msg.conversation_id and c.company_id=$2
+      join chat_conversations c on c.id=msg.conversation_id
       join chat_conversation_members mine on mine.conversation_id=c.id and mine.user_id=$1
-      join app_users sender on sender.id=msg.sender_id and sender.company_id=$2
+      join app_users sender on sender.id=msg.sender_id
       left join chat_conversation_members other on other.conversation_id=c.id and other.user_id<>$1 and c.kind='dm'
-      left join app_users peer on peer.id=other.user_id and peer.company_id=$2
-      where msg.deleted_at is null and strpos(lower(msg.body),lower($3))>0
+      left join app_users peer on peer.id=other.user_id
+      where msg.deleted_at is null and strpos(lower(msg.body),lower($2))>0
         and (mine.cleared_at is null or msg.created_at>mine.cleared_at)
         and (mine.hidden_at is null or c.updated_at>mine.hidden_at)
-      order by msg.created_at desc,msg.id desc limit 30`, [session.id, session.company_id, term]),
+      order by msg.created_at desc,msg.id desc limit 30`, [session.id, term]),
     db.query(`select msg.id::text as id,p.id::text as project_id,p.title as project_title,msg.role,
         substring(msg.body from greatest(1,strpos(lower(msg.body),lower($2))-55) for 210) as excerpt,msg.created_at
       from project_chat_messages msg join projects p on p.id=msg.project_id ${access.join}
