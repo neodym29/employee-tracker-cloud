@@ -54,17 +54,19 @@ button, a, select, input { -webkit-tap-highlight-color: transparent; }
 @keyframes nexusOuterPulse {
   0% { transform:rotate(0deg) scale(1); }
   50% { transform:rotate(115deg) scale(1); animation-timing-function:cubic-bezier(.88,0,1,.45); }
-  62% { transform:rotate(205deg) scale(.14); animation-timing-function:cubic-bezier(.12,.8,.22,1); }
-  77% { transform:rotate(310deg) scale(1.07); animation-timing-function:ease-out; }
-  88% { transform:rotate(338deg) scale(1); }
+  62% { transform:rotate(205deg) scale(.14); }
+  67% { transform:rotate(245deg) scale(.14); animation-timing-function:cubic-bezier(.12,.8,.22,1); }
+  82% { transform:rotate(320deg) scale(1.07); animation-timing-function:ease-out; }
+  90% { transform:rotate(342deg) scale(1); }
   100% { transform:rotate(360deg) scale(1); }
 }
 @keyframes nexusInnerPulse {
   0% { transform:rotate(0deg) scale(1); }
   50% { transform:rotate(-140deg) scale(1); animation-timing-function:cubic-bezier(.88,0,1,.45); }
-  62% { transform:rotate(-235deg) scale(.2); animation-timing-function:cubic-bezier(.12,.8,.22,1); }
-  77% { transform:rotate(-315deg) scale(1.08); animation-timing-function:ease-out; }
-  88% { transform:rotate(-340deg) scale(1); }
+  62% { transform:rotate(-235deg) scale(.2); }
+  67% { transform:rotate(-270deg) scale(.2); animation-timing-function:cubic-bezier(.12,.8,.22,1); }
+  82% { transform:rotate(-330deg) scale(1.08); animation-timing-function:ease-out; }
+  90% { transform:rotate(-345deg) scale(1); }
   100% { transform:rotate(-360deg) scale(1); }
 }
 @keyframes nexusGyro {

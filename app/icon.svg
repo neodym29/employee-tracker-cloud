@@ -5,15 +5,17 @@
     @keyframes outerPulse {
       0% { transform: rotate(0deg) scale(1); }
       50% { transform: rotate(115deg) scale(1); animation-timing-function: cubic-bezier(.88,0,1,.45); }
-      62% { transform: rotate(205deg) scale(.14); animation-timing-function: cubic-bezier(.12,.8,.22,1); }
-      77% { transform: rotate(310deg) scale(1.07); }
+      62% { transform: rotate(205deg) scale(.14); }
+      67% { transform: rotate(245deg) scale(.14); animation-timing-function: cubic-bezier(.12,.8,.22,1); }
+      82% { transform: rotate(320deg) scale(1.07); }
       100% { transform: rotate(360deg) scale(1); }
     }
     @keyframes innerPulse {
       0% { transform: rotate(0deg) scale(1); }
       50% { transform: rotate(-140deg) scale(1); animation-timing-function: cubic-bezier(.88,0,1,.45); }
-      62% { transform: rotate(-235deg) scale(.2); animation-timing-function: cubic-bezier(.12,.8,.22,1); }
-      77% { transform: rotate(-315deg) scale(1.08); }
+      62% { transform: rotate(-235deg) scale(.2); }
+      67% { transform: rotate(-270deg) scale(.2); animation-timing-function: cubic-bezier(.12,.8,.22,1); }
+      82% { transform: rotate(-330deg) scale(1.08); }
       100% { transform: rotate(-360deg) scale(1); }
     }
     @media (prefers-reduced-motion: no-preference) {
