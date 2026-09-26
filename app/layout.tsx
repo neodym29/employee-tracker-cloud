@@ -7,6 +7,7 @@ import ChatInbox from '@/app/components/ChatInbox';
 import { unreadClientRequestCount } from '@/lib/client-requests';
 import { DEFAULT_APPEARANCE } from '@/lib/appearance';
 import { getOwnAppearance } from '@/lib/profiles';
+import AccountMenu from '@/app/components/AccountMenu';
 
 export const metadata: Metadata = {
   title: 'Neo-Nexus | Project collaboration',
@@ -36,8 +37,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   {session.account_type === 'admin' && <ActiveNavLink href="/admin/approve">Approvals</ActiveNavLink>}
               </div>
               <div className="navAccount">
-                <ActiveNavLink className="navProfileLink" href="/profile">Profile</ActiveNavLink>
-                <form className="inlineForm" action="/api/logout?next=/login" method="post"><button className="navButton navSignOut" type="submit">Sign out</button></form>
+                <AccountMenu />
               </div>
             </> : <div className="navAccount navGuestActions"><ActiveNavLink className="authNavLink" href="/signup" exact>Sign up</ActiveNavLink><ActiveNavLink className="authNavLink" href="/login" exact>Sign in</ActiveNavLink></div>}
           </nav>

@@ -28,6 +28,16 @@ export async function ensureProfilesSchema() {
       add column if not exists appearance_theme text not null default 'classic',
       add column if not exists appearance_font text not null default 'system',
       add column if not exists appearance_size text not null default 'normal';
+    alter table app_users add column if not exists email_verified_at timestamptz;
+    alter table app_users add column if not exists password_changed_at timestamptz;
+    alter table app_users add column if not exists session_version integer not null default 0;
+    create table if not exists email_verification_tokens (
+      user_id bigint primary key references app_users(id) on delete cascade,
+      email text not null,
+      token_hash text not null unique,
+      expires_at timestamptz not null,
+      sent_at timestamptz not null default now()
+    );
   `).then(() => undefined).catch((error) => { schemaReady = null; throw error; });
   return schemaReady;
 }
@@ -40,7 +50,8 @@ const profileColumns = `u.id::text as id,
   p.avatar_updated_at as "avatarUpdatedAt", p.photo_bytes is not null as "hasPhoto",
   coalesce(p.appearance_theme,'classic') as "appearanceTheme",
   coalesce(p.appearance_font,'system') as "appearanceFont",
-  coalesce(p.appearance_size,'normal') as "appearanceSize"`;
+  coalesce(p.appearance_size,'normal') as "appearanceSize",
+  u.email_verified_at is not null as "emailVerified"`;
 
 export async function getOwnAppearance(userId: string): Promise<Appearance> {
   await ensureProfilesSchema();

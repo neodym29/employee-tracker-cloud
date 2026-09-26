@@ -17,6 +17,7 @@ type Profile = AvatarProfile & {
   appearanceTheme: AppearanceTheme;
   appearanceFont: AppearanceFont;
   appearanceSize: AppearanceSize;
+  emailVerified: boolean;
 };
 type ProfileDraft = Pick<Profile, 'name' | 'bio' | 'statusText' | 'avatarKind' | 'avatarPreset'>;
 
@@ -43,6 +44,12 @@ export default function ProfileClient({ userId }: { userId: string }) {
   const [appearanceBusy, setAppearanceBusy] = useState(false);
   const [messageAlerts, setMessageAlerts] = useState(false);
   const [alertStatus, setAlertStatus] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [securityBusy, setSecurityBusy] = useState(false);
+  const [securityMessage, setSecurityMessage] = useState('');
+  const [securityError, setSecurityError] = useState('');
   const appearanceRef = useRef<Appearance>(DEFAULT_APPEARANCE);
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -93,6 +100,7 @@ export default function ProfileClient({ userId }: { userId: string }) {
       const data = await response.json();
       if (!data.ok) throw new Error(data.error || 'Could not save appearance');
       setProfile(current => current ? { ...current, appearanceTheme: next.theme, appearanceFont: next.font, appearanceSize: next.size } : current);
+      window.dispatchEvent(new Event('appearance:updated'));
       setMessage('Appearance saved for your account.');
     } catch (cause) {
       appearanceRef.current = previous;
@@ -112,6 +120,20 @@ export default function ProfileClient({ userId }: { userId: string }) {
     }).catch(cause => setError((cause as Error).message));
   }, []);
 
+  useEffect(() => {
+    const syncAppearance = () => {
+      const current = document.documentElement.dataset;
+      if (isAppearanceTheme(current.theme) && isAppearanceFont(current.font) && isAppearanceSize(current.fontSize)) {
+        const next = { theme: current.theme, font: current.font, size: current.fontSize };
+        appearanceRef.current = next;
+        setAppearanceTheme(next.theme); setAppearanceFont(next.font); setAppearanceSize(next.size);
+        setProfile(profile => profile ? { ...profile, appearanceTheme: next.theme, appearanceFont: next.font, appearanceSize: next.size } : profile);
+      }
+    };
+    window.addEventListener('appearance:updated', syncAppearance);
+    return () => window.removeEventListener('appearance:updated', syncAppearance);
+  }, []);
+
   useEffect(() => { if (editingName) nameInputRef.current?.focus(); }, [editingName]);
   useEffect(() => {
     if (pictureOpen && scrollPictureOnOpen.current) {
@@ -128,6 +150,33 @@ export default function ProfileClient({ userId }: { userId: string }) {
     const result = await enableAlerts();
     if (result === 'enabled') { setMessageAlerts(true); setAlertStatus('Message alerts on.'); }
     else setAlertStatus(result === 'unsupported' ? 'This browser does not support notifications.' : 'Allow notifications in your browser to turn on alerts.');
+  }
+
+  async function changePassword(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSecurityError(''); setSecurityMessage('');
+    if (newPassword !== confirmPassword) { setSecurityError('New passwords do not match.'); return; }
+    setSecurityBusy(true);
+    try {
+      const response = await fetch('/api/profile/password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ currentPassword, newPassword }) });
+      const data = await response.json();
+      if (!data.ok) throw new Error(data.error || 'Could not change password');
+      setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
+      setSecurityMessage('Password changed. Other sessions have been signed out.');
+    } catch (cause) { setSecurityError((cause as Error).message); }
+    finally { setSecurityBusy(false); }
+  }
+
+  async function sendVerificationEmail() {
+    setSecurityBusy(true); setSecurityError(''); setSecurityMessage('');
+    try {
+      const response = await fetch('/api/profile/verify-email', { method: 'POST' });
+      const data = await response.json();
+      if (!data.ok) throw new Error(data.error || 'Could not send verification email');
+      if (data.alreadyVerified) setProfile(current => current ? { ...current, emailVerified: true } : current);
+      setSecurityMessage(data.alreadyVerified ? 'Email already verified.' : 'Verification link sent. Check your inbox.');
+    } catch (cause) { setSecurityError((cause as Error).message); }
+    finally { setSecurityBusy(false); }
   }
 
   function persistDraft(): Promise<boolean> {
@@ -232,7 +281,7 @@ export default function ProfileClient({ userId }: { userId: string }) {
     <div className="socialProfileShell">
       <section className="socialProfileHero" aria-label="Your profile preview">
         <button type="button" className="socialProfileAvatarEdit" aria-label="Change profile picture" aria-expanded={pictureOpen} disabled={!profile} onClick={() => openPictureChoices(true)}><ProfileAvatar profile={preview} size="xl" alt="" /><span aria-hidden="true">✎</span></button>
-        <div className="socialProfileIdentity"><h1>{editingName ? <input ref={nameInputRef} aria-label="Display name" value={name} maxLength={60} onChange={event => { setName(event.target.value); updateDraft({ name: event.target.value }); }} onBlur={() => { setEditingName(false); void persistDraft(); }} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') cancelNameEdit(); }} /> : <button type="button" className="socialProfileNameEdit" aria-label="Edit display name" disabled={!profile} onClick={() => setEditingName(true)}>{name || 'Your profile'}<span aria-hidden="true">✎</span></button>}</h1><p>{profile?.email || ''}</p><div className="socialProfilePills"><span>{profile?.accountType || 'Member'}</span>{statusText && <span className="socialProfileStatus"><i aria-hidden="true" />{statusText}</span>}</div></div>
+        <div className="socialProfileIdentity"><h1>{editingName ? <input ref={nameInputRef} aria-label="Display name" value={name} maxLength={60} onChange={event => { setName(event.target.value); updateDraft({ name: event.target.value }); }} onBlur={() => { setEditingName(false); void persistDraft(); }} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') cancelNameEdit(); }} /> : <button type="button" className="socialProfileNameEdit" aria-label="Edit display name" disabled={!profile} onClick={() => setEditingName(true)}>{name || 'Your profile'}<span aria-hidden="true">✎</span></button>}{profile?.emailVerified && <span className="verifiedBadge" title="Email verified" aria-label="Email verified">✓</span>}</h1><p>{profile?.email || ''}</p><div className="socialProfilePills"><span>{profile?.accountType || 'Member'}</span>{statusText && <span className="socialProfileStatus"><i aria-hidden="true" />{statusText}</span>}</div></div>
       </section>
       {bio && <p className="socialProfileBioPreview">{bio}</p>}
       <div className="socialProfileEditor">
@@ -251,7 +300,7 @@ export default function ProfileClient({ userId }: { userId: string }) {
               <small className="socialPhotoNote">PNG, JPEG, or WebP · 2 MB maximum</small>
             </div>}
           </section>
-          <section className="socialProfileCard"><div className="socialProfileCardHeading"><h2>Appearance</h2></div>
+          <section id="appearance" className="socialProfileCard"><div className="socialProfileCardHeading"><h2>Appearance</h2></div>
             <div className="socialAppearanceSection"><h3>Color theme</h3><div className="socialThemeChoices">{APPEARANCE_THEMES.map(option => <button key={option.id} type="button" disabled={!profile || appearanceBusy} aria-pressed={appearanceTheme === option.id} onClick={() => void changeAppearance({ theme: option.id, font: appearanceFont, size: appearanceSize })}><i style={{ backgroundColor: option.swatch }} aria-hidden="true" /><span>{option.label}</span></button>)}</div></div>
             <div className="socialAppearanceSection"><h3>Font</h3><div className="socialFontChoices">{APPEARANCE_FONTS.map(option => <button key={option.id} type="button" disabled={!profile || appearanceBusy} aria-pressed={appearanceFont === option.id} onClick={() => void changeAppearance({ theme: appearanceTheme, font: option.id, size: appearanceSize })}><strong>{option.label}</strong><span>{option.sample}</span></button>)}</div></div>
             <div className="socialAppearanceSection"><h3>Font size</h3><div className="socialFontSizeChoices">{APPEARANCE_SIZES.map(option => <button key={option.id} type="button" disabled={!profile || appearanceBusy} aria-pressed={appearanceSize === option.id} onClick={() => void changeAppearance({ theme: appearanceTheme, font: appearanceFont, size: option.id })}>{option.label}</button>)}</div></div>
@@ -259,6 +308,18 @@ export default function ProfileClient({ userId }: { userId: string }) {
           <section className="socialProfileCard"><div className="socialProfileCardHeading"><h2>Message alerts</h2></div>
             <button type="button" className="socialAlertToggle" aria-pressed={messageAlerts} onClick={() => void toggleMessageAlerts()}>{messageAlerts ? 'Browser alerts on' : 'Turn on browser alerts'}</button>
             {alertStatus && <p className="socialAlertStatus" role="status">{alertStatus}</p>}
+          </section>
+          <section id="security" className="socialProfileCard socialSecurityCard"><div className="socialProfileCardHeading"><h2>Account security</h2></div>
+            <div className="socialSecurityEmail"><strong>Email verification</strong><span>{profile?.emailVerified ? <><span className="verifiedBadge" aria-hidden="true">✓</span> Verified</> : 'Not verified'}</span></div>
+            {!profile?.emailVerified && <button type="button" disabled={!profile || securityBusy} onClick={() => void sendVerificationEmail()}>Send verification email</button>}
+            <form onSubmit={event => void changePassword(event)}><h3>Change password</h3>
+              <label>Current password<input type="password" autoComplete="current-password" required value={currentPassword} onChange={event => setCurrentPassword(event.target.value)} /></label>
+              <label>New password<input type="password" autoComplete="new-password" required minLength={8} maxLength={1024} value={newPassword} onChange={event => setNewPassword(event.target.value)} /></label>
+              <label>Confirm new password<input type="password" autoComplete="new-password" required value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} /></label>
+              <button type="submit" disabled={securityBusy || !profile}>Change password</button>
+            </form>
+            {securityMessage && <p role="status" className="socialSecuritySuccess">{securityMessage}</p>}
+            {securityError && <p role="alert" className="socialProfileError">{securityError}</p>}
           </section>
         </div>
       </div>

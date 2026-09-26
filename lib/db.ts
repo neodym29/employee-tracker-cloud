@@ -275,6 +275,7 @@ async function ensureSchemaNow() {
   await db.query(`alter table app_users add column if not exists enrollment_token text unique`);
   await db.query(`alter table app_users add column if not exists approved_at timestamptz`);
   await db.query(`alter table app_users add column if not exists password_hash text`);
+  await db.query(`alter table app_users add column if not exists session_version integer not null default 0`);
   await db.query(`alter table app_users add column if not exists display_name text`);
   await db.query(`alter table app_users add column if not exists account_type text`);
   await db.query(`alter table app_users add column if not exists reviewed_at timestamptz`);
@@ -1352,7 +1353,7 @@ export async function loginUser(email: string, password: string) {
   const db = getPool();
   await ensureSchema();
   const result = await db.query(
-    `select app_users.id, app_users.company_id, app_users.email, app_users.password_hash, app_users.role, app_users.account_type, app_users.approval_status, companies.domain as company_domain
+    `select app_users.id, app_users.company_id, app_users.email, app_users.password_hash, app_users.role, app_users.account_type, app_users.approval_status, app_users.session_version, companies.domain as company_domain
      from app_users join companies on companies.id=app_users.company_id
      where app_users.email=$1`,
     [normalized],
@@ -1370,6 +1371,7 @@ export async function loginUser(email: string, password: string) {
     account_type: user.account_type as 'admin' | 'client' | 'engineer',
     approval_status: user.approval_status as string,
     company_domain: user.company_domain as string,
+    session_version: user.session_version as number,
   };
 }
 

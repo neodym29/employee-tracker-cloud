@@ -47,6 +47,22 @@ button, a, select, input { -webkit-tap-highlight-color: transparent; }
 .navPrimary { justify-content: center; min-width: 0; }
 .navAccount { justify-content: flex-end; min-width: 0; gap: 8px; }
 .navGuestActions { grid-column: 3; }
+.accountMenu { position:relative; }
+.accountMenu > summary { display:inline-flex; align-items:center; gap:7px; border-radius:10px; cursor:pointer; list-style:none; }
+.accountMenu > summary::-webkit-details-marker { display:none; }
+.accountMenu > summary svg { width:11px; height:8px; fill:none; stroke:currentColor; stroke-linecap:round; stroke-linejoin:round; stroke-width:1.7; transition:transform .16s ease; }
+.accountMenu[open] > summary svg { transform:rotate(180deg); }
+.accountMenu.active > summary { color:#fff; background:var(--dark); }
+.accountMenuPanel { position:absolute; top:calc(100% + 10px); right:0; z-index:35; display:grid; gap:2px; width:min(270px,calc(100vw - 28px)); border:1px solid var(--line); border-radius:15px; padding:8px; color:var(--ink); background:var(--paper); box-shadow:0 20px 50px rgba(30,31,27,.18); }
+.accountMenuPanel > a,.accountMenuPanel form button { width:100%; min-height:38px; justify-content:flex-start; border:0; border-radius:9px; padding:9px 11px; color:var(--ink); background:transparent; box-shadow:none; font-size:calc(13px * var(--type-scale)); font-weight:600; text-align:left; }
+.accountMenuPanel > a:hover,.accountMenuPanel > a:focus-visible,.accountMenuPanel form button:hover { color:var(--accent); background:color-mix(in srgb,var(--accent) 10%,var(--paper)); transform:none; box-shadow:none; }
+.accountMenuPanel form { border-top:1px solid var(--line); padding-top:4px; }
+.accountMenuThemes { border-top:1px solid var(--line); padding:11px 10px 12px; }
+.accountMenuThemes > span { display:block; margin-bottom:9px; color:var(--muted); font-size:calc(11px * var(--type-scale)); font-weight:750; }
+.accountMenuThemes > div { display:flex; flex-wrap:wrap; gap:8px; }
+.accountMenuThemes button { width:25px; height:25px; min-height:25px; border:2px solid var(--paper); border-radius:50%; padding:0; background:var(--theme-swatch); box-shadow:0 0 0 1px var(--line-dark); }
+.accountMenuThemes button.selected { box-shadow:0 0 0 2px var(--accent); }
+.accountMenuError { margin:4px 10px; color:var(--red); font-size:calc(11px * var(--type-scale)); }
 .navLink { padding: 10px 13px; color: var(--muted); font-size: calc(14px * var(--type-scale)); font-weight: 600; }
 .navProfileLink { border: 1px solid transparent; border-radius: 10px; }
 .navProfileLink:hover:not(.active) { color: var(--ink); background: color-mix(in srgb,var(--accent) 10%,var(--paper)); }
@@ -1176,6 +1192,7 @@ body:has(.nexusChatsPage) main { display: flex; flex: 1; min-height: 0; width: 1
 .socialProfileIdentity { flex: 1; min-width: 0; padding-bottom: 5px; }
 .socialProfileEyebrow { color: var(--accent); font-size: calc(10px * var(--type-scale)); font-weight: 850; letter-spacing: .13em; }
 .socialProfileIdentity h1 { margin: 5px 0; font-size: calc(clamp(28px,4vw,43px) * var(--type-scale)); line-height: 1.05; letter-spacing: -.05em; }
+.verifiedBadge { display:inline-grid; place-items:center; width:20px; height:20px; margin-left:8px; border-radius:50%; color:#fff; background:#1877d2; font:800 13px/1 var(--app-font); vertical-align:middle; letter-spacing:0; }
 .socialProfileNameEdit { display:inline-flex; align-items:baseline; gap:10px; max-width:100%; min-height:0; border:0; padding:0; color:var(--ink); background:transparent; box-shadow:none; font:inherit; letter-spacing:inherit; text-align:left; overflow-wrap:anywhere; }
 .socialProfileNameEdit > span { flex:none; color:var(--accent); font-size:calc(16px * var(--type-scale)); opacity:.55; }
 .socialProfileNameEdit:hover > span,.socialProfileNameEdit:focus-visible > span { opacity:1; }
@@ -1190,6 +1207,20 @@ body:has(.nexusChatsPage) main { display: flex; flex: 1; min-height: 0; width: 1
 .socialProfileSide { min-width:0; display:grid; gap:18px; }
 .socialProfileCard,.socialPublicAbout { border: 1px solid var(--line); border-radius: 17px; padding: 25px; background: var(--paper); box-shadow: 0 12px 40px rgba(30,31,27,.045); }
 .socialProfileCardHeading { margin-bottom: 22px; }
+.socialSecurityCard { scroll-margin-top:115px; }
+#appearance { scroll-margin-top:115px; }
+.socialSecurityEmail { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; font-size:calc(13px * var(--type-scale)); }
+.socialSecurityEmail > span { color:var(--muted); }
+.socialSecurityEmail .verifiedBadge { width:16px; height:16px; margin:0 4px 0 0; font-size:10px; }
+.socialSecurityCard form { display:grid; gap:12px; margin-top:24px; border-top:1px solid var(--line); padding-top:20px; }
+.socialSecurityCard form h3 { margin:0; font-size:calc(16px * var(--type-scale)); }
+.socialSecurityCard form label { display:grid; gap:6px; font-size:calc(12px * var(--type-scale)); font-weight:700; }
+.socialSecurityCard form input { margin:0!important; }
+.socialSecurityCard form button { justify-self:start; }
+.socialSecuritySuccess { margin:13px 0 0; color:var(--green); font-size:calc(12px * var(--type-scale)); }
+.verifyEmailPage { max-width:530px; margin:10vh auto; border:1px solid var(--line); border-radius:20px; padding:30px; background:var(--paper); }
+.verifyEmailPage h1 { font-size:calc(32px * var(--type-scale)); letter-spacing:-.04em; }
+.verifyEmailPage p { color:var(--muted); }
 .socialProfileAutosaveHeading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .socialProfileAutosaveHeading > span { color:var(--green); font-size:calc(11px * var(--type-scale)); font-weight:700; }
 .socialProfileRetry { min-height:0; border:0; padding:0 3px; color:inherit; background:transparent; box-shadow:none; font-size:calc(12px * var(--type-scale)); text-decoration:underline; }

@@ -11,11 +11,18 @@ export type SessionUser = {
   role: 'admin' | 'employee';
   account_type: 'admin' | 'client' | 'engineer';
   company_domain: string;
+  session_version?: number;
 };
 
 const COOKIE_NAME = 'trace_session_v2';
 const LEGACY_COOKIE_NAME = 'neodym_session';
 const SESSION_TOKEN_TTL_MS = 1000 * 60 * 60 * 12;
+let passwordSchemaReady: Promise<void> | null = null;
+
+function ensurePasswordSchema() {
+  if (!passwordSchemaReady) passwordSchemaReady = getPool().query('alter table app_users add column if not exists session_version integer not null default 0').then(() => undefined).catch(error => { passwordSchemaReady = null; throw error; });
+  return passwordSchemaReady;
+}
 
 function authSecret(): string {
   const secret = process.env.AUTH_SECRET || process.env.ADMIN_SETUP_KEY || process.env.INGEST_API_KEY;
@@ -49,6 +56,7 @@ export function parseSessionToken(token: string | undefined): SessionUser | null
     role: parsed.role,
     account_type: parsed.account_type,
     company_domain: parsed.company_domain,
+    session_version: typeof parsed.session_version === 'number' ? parsed.session_version : 0,
   };
 }
 
@@ -77,9 +85,10 @@ export async function clearSessionCookie() {
 async function getSessionUserFromDatabase(parsed: SessionUser): Promise<SessionUser | null> {
   if (!health().configured) return null;
   try {
+    await ensurePasswordSchema();
     const db = getPool();
     const result = await db.query(
-      `select app_users.id, app_users.company_id, app_users.email, app_users.role, app_users.account_type, companies.domain as company_domain
+      `select app_users.id, app_users.company_id, app_users.email, app_users.role, app_users.account_type, app_users.session_version, companies.domain as company_domain
        from app_users join companies on companies.id=app_users.company_id
        where app_users.id=$1
          and app_users.email=$2
@@ -90,6 +99,7 @@ async function getSessionUserFromDatabase(parsed: SessionUser): Promise<SessionU
     );
     const liveUser = result.rows[0];
     if (!liveUser) return null;
+    if (liveUser.session_version !== (parsed.session_version || 0)) return null;
     return {
       id: String(liveUser.id),
       company_id: String(liveUser.company_id),
@@ -97,6 +107,7 @@ async function getSessionUserFromDatabase(parsed: SessionUser): Promise<SessionU
       role: liveUser.role,
       account_type: liveUser.account_type,
       company_domain: liveUser.company_domain,
+      session_version: liveUser.session_version,
     };
   } catch {
     return null;
