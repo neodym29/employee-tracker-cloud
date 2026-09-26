@@ -6,7 +6,7 @@ test('enlarged initials cover headings and short UI copy without styling prose',
   const css = await readFile(new URL('../app/globals.css', import.meta.url), 'utf8');
   const rule = css.match(/main :where\(([^)]+)\)::first-letter\s*\{([^}]+)\}/);
   assert.ok(rule, 'shared initial-letter rule exists');
-  for (const selector of ['h1', 'h2', 'h3', 'button', 'summary', 'label', '.projectUpdateSection header a']) {
+  for (const selector of ['h1', 'h2', 'h3', 'button', 'summary', 'label', '.projectUpdateSection header a', '.nexusNoSelection strong', '.nexusConversationText strong']) {
     assert.ok(rule[1].split(',').includes(selector), `${selector} uses the shared style`);
   }
   assert.ok(!rule[1].split(',').includes('p'), 'paragraphs keep their normal typography');

@@ -1602,12 +1602,12 @@ main h1::first-letter { font-size:1.18em; text-transform:uppercase; }
 .nexusLandingCopy h1::first-letter { font-size:1em; }
 .nexusLandingCopy h1 .heroInitial { display:inline-block; color:inherit; font-size:1.14em; line-height:.8; font-weight:250; letter-spacing:-.07em; }
 /* Carry the enlarged initial through headings and short UI copy, never prose. */
-main :where(h1,h2,h3,h4,h5,h6,button,summary,legend,label,.button,.primaryButton,.secondaryButton,.nexusLandingPrimary,.nexusLandingSecondary,.sectionLabel,.previewKicker,.pill,.eyebrow,.projectsSidebarLabel,.projectsSidebarHeader strong,.projectsSidebarName,.projectUpdateSection header a,.nexusLandingSteps strong,.nexusLandingVisualTitle strong,.summaryDay > span,.summaryDay > strong)::first-letter {
+main :where(h1,h2,h3,h4,h5,h6,button,summary,legend,label,.button,.primaryButton,.secondaryButton,.nexusLandingPrimary,.nexusLandingSecondary,.sectionLabel,.previewKicker,.pill,.eyebrow,.projectsSidebarLabel,.projectsSidebarHeader strong,.projectsSidebarName,.projectUpdateSection header a,.nexusLandingSteps strong,.nexusLandingVisualTitle strong,.nexusLandingUpdate > span:last-child,.summaryDay > span,.summaryDay > strong,.sectionHeading > span,.nexusNoSelection strong,.nexusEmptyMessages strong,.nexusConversationText strong,.projectChatEmpty strong)::first-letter {
   font-size:1.2em;
   font-weight:450;
   text-transform:uppercase;
 }
-.projectUpdateSection header a,.nexusLandingSteps strong,.projectsSidebarHeader strong { display:inline-block; }
+.projectUpdateSection header a,.nexusLandingSteps strong,.projectsSidebarHeader strong,.sectionHeading > span { display:inline-block; }
 @media (max-width:900px) {
   .siteHeader { border-radius:24px; }
   .siteHeader .nav { grid-template-columns:minmax(0,1fr) auto; grid-template-areas:'brand account' 'primary primary'; gap:4px 8px; min-height:0; padding:9px 18px; }
