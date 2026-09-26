@@ -1,62 +1,43 @@
 import { currentSession } from '@/lib/auth';
 
-const changes = [
-  { action: 'Updated', path: 'src/auth/session.ts', time: 'just now', tone: 'violet' },
-  { action: 'Created', path: 'app/api/reports/route.ts', time: '2m', tone: 'green' },
-  { action: 'Renamed', path: 'lib/queue.ts → lib/jobs.ts', time: '6m', tone: 'amber' },
-  { action: 'Deleted', path: 'components/LegacyPanel.tsx', time: '11m', tone: 'red' },
-];
-
 export default async function Home() {
   const session = await currentSession();
-  let primaryAction = { href: '/signup', label: 'Get started' };
-  if (session?.account_type === 'admin') primaryAction = { href: '/admin/approve', label: 'Review accounts' };
-  else if (session) primaryAction = { href: '/projects', label: 'Open projects' };
-  return (
-    <div className="landing">
-      <section className="heroSimple">
-        <div className="heroCopy">
-          <div className="eyebrow"><span className="liveDot" /> Files only</div>
-          <h1>Every change.<br /><span>Nothing else.</span></h1>
-          <p className="heroText">See repository changes and project progress without tracking screens, clicks, browsers, text, or the rest of the computer.</p>
-          <div className="heroActions">
-            <a className="primaryButton" href={primaryAction.href}>{primaryAction.label} <span aria-hidden="true">→</span></a>
-            <span className="privacyNote"><span aria-hidden="true">✓</span> File metadata only</span>
-          </div>
-        </div>
+  const primaryAction = session?.account_type === 'admin'
+    ? { href: '/admin/approve', label: 'Open admin' }
+    : session
+      ? { href: '/projects', label: 'Open your projects' }
+      : { href: '/signup', label: 'Get started' };
 
-        <div className="changePreview" aria-label="Example file changes">
-          <div className="previewTopbar">
-            <div>
-              <span className="previewKicker">Illustrative</span>
-              <h2>Example changes</h2>
+  return <div className="nexusLanding">
+    <section className="nexusLandingHero">
+      <div className="nexusLandingCopy">
+        <span className="nexusLandingEyebrow">ONE HOME FOR PROJECT WORK</span>
+        <h1>Know what’s happening.<br /><em>Keep work moving.</em></h1>
+        <p>Neo-Nexus connects clients and engineers. Ask about a project, turn requests into tasks, and see updates from the work happening in Codex.</p>
+        <div className="nexusLandingActions">
+          <a className="nexusLandingPrimary" href={primaryAction.href}>{primaryAction.label}<span aria-hidden="true">↗</span></a>
+          {!session && <a className="nexusLandingSecondary" href="/login">Sign in</a>}
+        </div>
+      </div>
+      <div className="nexusLandingVisual" aria-label="Illustration of a Neo-Nexus project conversation">
+        <div className="nexusLandingGlow" aria-hidden="true" />
+        <div className="nexusLandingWindow">
+          <div className="nexusLandingWindowTop"><span><i aria-hidden="true" /> Project workspace</span><span aria-hidden="true">✦</span></div>
+          <div className="nexusLandingWindowBody">
+            <div className="nexusLandingVisualTitle"><span className="nexusLandingProjectIcon" aria-hidden="true">N</span><div><strong>One shared picture</strong><small>Questions, tasks, and updates together</small></div></div>
+            <div className="nexusLandingConversation">
+              <div className="nexusLandingQuestion"><span>Client</span><p>What changed this week?</p></div>
+              <div className="nexusLandingAnswer"><span>Project agent</span><p>See the latest work and what needs attention.</p></div>
             </div>
-            <span className="liveStatus">Demo</span>
-          </div>
-          <div className="previewList">
-            {changes.map((change) => (
-              <div className="previewRow" key={change.path}>
-                <span className={`actionIcon ${change.tone}`} aria-hidden="true" />
-                <div className="previewPath">
-                  <strong>{change.path}</strong>
-                  <span>{change.action}</span>
-                </div>
-                <time>{change.time}</time>
-              </div>
-            ))}
-          </div>
-          <div className="previewFooter">
-            <span>4 changes</span>
-            <span>Progress events</span>
+            <div className="nexusLandingUpdate"><span className="nexusLandingUpdateDot" aria-hidden="true" /><span>New work appears in the project timeline</span></div>
           </div>
         </div>
-      </section>
-
-      <section className="trustStrip" aria-label="Privacy boundaries">
-        <div><strong>Change observed</strong><span>Selected repositories only</span></div>
-        <div><strong>Workspace-scoped</strong><span>OS and runtime files stay out</span></div>
-        <div><strong>Metadata-only</strong><span>No file contents are collected</span></div>
-      </section>
-    </div>
-  );
+      </div>
+    </section>
+    <section className="nexusLandingSteps" aria-label="How Neo-Nexus works">
+      <div><span>01</span><strong>Ask</strong><p>Clients ask questions and flag issues in project chat.</p></div>
+      <div><span>02</span><strong>Build</strong><p>Engineers work in Codex and stay connected to the project.</p></div>
+      <div><span>03</span><strong>See progress</strong><p>Everyone sees recent work and next steps in one place.</p></div>
+    </section>
+  </div>;
 }

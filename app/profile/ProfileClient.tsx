@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import ProfileAvatar, { type AvatarProfile } from '@/app/components/ProfileAvatar';
 import { PROFILE_PRESETS, profilePreset } from '@/lib/profile-presets';
 import { APPEARANCE_FONTS, APPEARANCE_THEMES, DEFAULT_APPEARANCE, isAppearanceFont, isAppearanceTheme, type Appearance, type AppearanceFont, type AppearanceTheme } from '@/lib/appearance';
+import { alertsEnabled, disableAlerts, enableAlerts } from '@/lib/message-alerts';
 
 type Profile = AvatarProfile & {
   name: string;
@@ -36,6 +37,8 @@ export default function ProfileClient({ userId }: { userId: string }) {
   const [appearanceTheme, setAppearanceTheme] = useState<AppearanceTheme>(DEFAULT_APPEARANCE.theme);
   const [appearanceFont, setAppearanceFont] = useState<AppearanceFont>(DEFAULT_APPEARANCE.font);
   const [appearanceBusy, setAppearanceBusy] = useState(false);
+  const [messageAlerts, setMessageAlerts] = useState(false);
+  const [alertStatus, setAlertStatus] = useState('');
   const appearanceRef = useRef<Appearance>(DEFAULT_APPEARANCE);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -82,11 +85,22 @@ export default function ProfileClient({ userId }: { userId: string }) {
   }
 
   useEffect(() => {
+    setMessageAlerts(alertsEnabled() && 'Notification' in window && Notification.permission === 'granted');
     void fetch('/api/profile', { cache: 'no-store' }).then(response => response.json()).then(data => {
       if (!data.ok) throw new Error(data.error || 'Profile unavailable');
       acceptProfile(data.profile);
     }).catch(cause => setError((cause as Error).message));
   }, []);
+
+  async function toggleMessageAlerts() {
+    if (messageAlerts) {
+      disableAlerts(); setMessageAlerts(false); setAlertStatus('Message alerts off.');
+      return;
+    }
+    const result = await enableAlerts();
+    if (result === 'enabled') { setMessageAlerts(true); setAlertStatus('Message alerts on.'); }
+    else setAlertStatus(result === 'unsupported' ? 'This browser does not support notifications.' : 'Allow notifications in your browser to turn on alerts.');
+  }
 
   async function save() {
     if (busy || appearanceBusy) return;
@@ -148,29 +162,33 @@ export default function ProfileClient({ userId }: { userId: string }) {
       </section>
       {bio && <p className="socialProfileBioPreview">{bio}</p>}
       <div className="socialProfileEditor">
-        <section className="socialProfileCard"><div className="socialProfileCardHeading"><h2>About you</h2><p>Give teammates a little context when they see you in chat.</p></div>
+        <section className="socialProfileCard"><div className="socialProfileCardHeading"><h2>About you</h2></div>
           <label>Display name<input value={name} onChange={event => setName(event.target.value)} maxLength={60} placeholder="Your name" /></label>
           <label>Status<input value={statusText} onChange={event => setStatusText(event.target.value)} maxLength={80} placeholder="What are you working on?" /></label>
           <label>Bio<textarea value={bio} onChange={event => setBio(event.target.value)} maxLength={280} rows={4} placeholder="A few words about you..." /><small>{bio.length}/280</small></label>
         </section>
         <div className="socialProfileSide">
-          <section className="socialProfileCard"><div className="socialProfileCardHeading"><h2>Profile picture</h2><p>Shown beside your messages and on your profile.</p></div>
-            <div className="socialPictureSummary"><ProfileAvatar profile={preview} size="lg" /><div><strong>{pictureLabel}</strong><span>{pictureOpen ? 'Choose a new picture below' : 'Your current selection'}</span></div><button type="button" className="socialPictureToggle" aria-expanded={pictureOpen} aria-controls="profile-picture-options" onClick={() => setPictureOpen(open => !open)}>{pictureOpen ? 'Close' : 'Change picture'}</button></div>
+          <section className="socialProfileCard"><div className="socialProfileCardHeading"><h2>Profile picture</h2></div>
+            <div className="socialPictureSummary"><ProfileAvatar profile={preview} size="lg" /><div><strong>{pictureLabel}</strong></div><button type="button" className="socialPictureToggle" aria-expanded={pictureOpen} aria-controls="profile-picture-options" onClick={() => setPictureOpen(open => !open)}>{pictureOpen ? 'Close' : 'Change picture'}</button></div>
             {pictureOpen && <div id="profile-picture-options" className="socialPictureOptions">
-              <div className="socialPictureCategory" aria-label="Avatar category">{(['Games', 'Anime'] as const).map(category => <button key={category} type="button" aria-pressed={pictureCategory === category} onClick={() => setPictureCategory(category)}>{category}</button>)}</div>
+              <div className="socialPictureCategory" aria-label="Avatar category">{(['Games', 'Anime', 'Cartoons'] as const).map(category => <button key={category} type="button" aria-pressed={pictureCategory === category} onClick={() => setPictureCategory(category)}>{category}</button>)}</div>
               <div className="socialAvatarChoices">{PROFILE_PRESETS.filter(preset => preset.category === pictureCategory).map(preset => <PortraitChoice key={preset.id} label={preset.label} image={preset.image} chosen={avatarKind === 'preset' && avatarPreset === preset.id} onClick={() => { setAvatarKind('preset'); setAvatarPreset(preset.id); setPictureOpen(false); setMessage('Picture selected. Save your profile to use it in chats.'); }} />)}</div>
               <div className="socialPhotoActions"><button type="button" className="socialPictureSecondary" onClick={() => { setAvatarKind('initials'); setAvatarPreset(null); setPictureOpen(false); setMessage('Initials selected. Save your profile to use them in chats.'); }}>Use initials</button>{profile?.hasPhoto && <button type="button" className="socialPictureSecondary" onClick={() => { setAvatarKind('photo'); setAvatarPreset(null); setPictureOpen(false); setMessage('Your photo is selected. Save your profile to use it in chats.'); }}>Use uploaded photo</button>}<button type="button" disabled={busy} onClick={() => fileRef.current?.click()}>{busy ? 'Please wait…' : 'Upload photo'}</button>{profile?.hasPhoto && <button type="button" className="socialRemovePhoto" disabled={busy} onClick={() => void removePhoto()}>Remove uploaded photo</button>}</div>
               <input ref={fileRef} className="srOnly" type="file" accept="image/png,image/jpeg,image/webp" aria-label="Choose a profile photo" onChange={event => void uploadPhoto(event.target.files?.[0])} />
               <small className="socialPhotoNote">PNG, JPEG, or WebP · 2 MB maximum</small>
             </div>}
           </section>
-          <section className="socialProfileCard"><div className="socialProfileCardHeading"><h2>Appearance</h2><p>Saved to your account and used throughout Neo-Nexus.</p></div>
+          <section className="socialProfileCard"><div className="socialProfileCardHeading"><h2>Appearance</h2></div>
             <div className="socialAppearanceSection"><h3>Color theme</h3><div className="socialThemeChoices">{APPEARANCE_THEMES.map(option => <button key={option.id} type="button" disabled={!profile || appearanceBusy} aria-pressed={appearanceTheme === option.id} onClick={() => void changeAppearance({ theme: option.id, font: appearanceFont })}><i style={{ backgroundColor: option.swatch }} aria-hidden="true" /><span>{option.label}</span></button>)}</div></div>
             <div className="socialAppearanceSection"><h3>Font</h3><div className="socialFontChoices">{APPEARANCE_FONTS.map(option => <button key={option.id} type="button" disabled={!profile || appearanceBusy} aria-pressed={appearanceFont === option.id} onClick={() => void changeAppearance({ theme: appearanceTheme, font: option.id })}><strong>{option.label}</strong><span>{option.sample}</span></button>)}</div></div>
           </section>
+          <section className="socialProfileCard"><div className="socialProfileCardHeading"><h2>Message alerts</h2></div>
+            <button type="button" className="socialAlertToggle" aria-pressed={messageAlerts} onClick={() => void toggleMessageAlerts()}>{messageAlerts ? 'Browser alerts on' : 'Turn on browser alerts'}</button>
+            {alertStatus && <p className="socialAlertStatus" role="status">{alertStatus}</p>}
+          </section>
         </div>
       </div>
-      <div className="socialProfileFooter"><p>Visible to approved Neo-Nexus members.</p><button type="button" disabled={busy || appearanceBusy || !profile} onClick={() => void save()}>{busy ? 'Saving…' : 'Save profile'}</button></div>
+      <div className="socialProfileFooter"><button type="button" disabled={busy || appearanceBusy || !profile} onClick={() => void save()}>{busy ? 'Saving…' : 'Save profile'}</button></div>
       {message && <p className="socialProfileNotice" role="status">{message}</p>}{error && <p className="socialProfileError" role="alert">{error}</p>}
     </div>
   </div>;

@@ -20,3 +20,4 @@ docs/
 *.key
 secrets/
 QA_*
+.trace-flow-task.txt

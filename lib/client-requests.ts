@@ -145,3 +145,22 @@ export async function unreadClientRequestCount(session: SessionUser) {
   const count = Number(result.rows[0]?.unread ?? 0);
   return Number.isSafeInteger(count) && count > 0 ? count : 0;
 }
+
+export async function recentUnreadClientRequests(session: SessionUser) {
+  if (session.account_type !== 'engineer') return { total: 0, requests: [] };
+  const db = await ready();
+  const result = await db.query(
+    `select request.id,request.project_id,request.summary,notification.created_at,
+            count(*) over ()::int as total_unread
+       from project_request_notifications notification
+       join project_client_request_summaries request on request.id=notification.request_id and request.status<>'resolved'
+       join project_memberships membership on membership.project_id=request.project_id
+        and membership.user_id=$1 and membership.membership_status='active'
+      where notification.user_id=$1 and notification.read_at is null
+      order by notification.created_at desc,request.id desc limit 20`,
+    [session.id],
+  );
+  return { total: Number(result.rows[0]?.total_unread || 0), requests: result.rows.map(row => ({
+    id: String(row.id), projectId: String(row.project_id), summary: String(row.summary), createdAt: row.created_at,
+  })) };
+}

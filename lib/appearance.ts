@@ -12,6 +12,9 @@ export const APPEARANCE_FONTS = [
   { id: 'readable', label: 'Readable', sample: 'Roomier letter shapes' },
   { id: 'editorial', label: 'Editorial', sample: 'A softer serif style' },
   { id: 'mono', label: 'Mono', sample: 'A developer feel' },
+  { id: 'rounded', label: 'Rounded', sample: 'Soft and friendly' },
+  { id: 'humanist', label: 'Humanist', sample: 'Open and balanced' },
+  { id: 'compact', label: 'Compact', sample: 'More on screen' },
 ] as const;
 
 export type AppearanceTheme = (typeof APPEARANCE_THEMES)[number]['id'];

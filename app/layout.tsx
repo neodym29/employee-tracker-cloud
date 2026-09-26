@@ -11,7 +11,7 @@ import { getOwnAppearance } from '@/lib/profiles';
 
 export const metadata: Metadata = {
   title: 'Neo-Nexus | Project collaboration',
-  description: 'Match clients and engineers, keep project records, and confirm AI-assisted actions.',
+  description: 'One place for clients and engineers to ask, build, and see project progress.',
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
@@ -33,9 +33,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 <>
                   <DashboardMenu />
                   {session.account_type !== 'admin' && <ActiveNavLink href="/projects">Projects</ActiveNavLink>}
-                  <ChatInbox mode="nav" />
+                  <ChatInbox mode="nav" initialClientRequests={unreadRequests} />
                   <ProfileNav userId={session.id} fallbackName={session.email.split('@')[0]} />
-                  {session.account_type === 'engineer' && unreadRequests > 0 && <a className="navRequestAlert" href="/projects#client-requests" aria-label={`${unreadRequests} unread client ${unreadRequests === 1 ? 'request' : 'requests'}`}><span aria-hidden="true">!</span>{unreadRequests}</a>}
                   {session.account_type !== 'admin' && <ActiveNavLink className="traceSetupNavLink" href="/trace-setup">Set up Neo-Nexus CLI</ActiveNavLink>}
                   {session.account_type === 'admin' && <ActiveNavLink href="/admin/approve">Approvals</ActiveNavLink>}
                   <form className="inlineForm" action="/api/logout?next=/login" method="post"><button className="navButton navSignOut" type="submit">Sign out</button></form>

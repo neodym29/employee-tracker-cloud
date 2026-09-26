@@ -26,6 +26,9 @@ html[data-theme='night'] { color-scheme:dark; --canvas:#11131a; --paper:#1b1e28;
 html[data-font='readable'] { --app-font:Verdana,Geneva,Tahoma,sans-serif; }
 html[data-font='editorial'] { --app-font:Georgia,"Times New Roman",serif; }
 html[data-font='mono'] { --app-font:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+html[data-font='rounded'] { --app-font:"Trebuchet MS",Avenir,"Segoe UI",sans-serif; }
+html[data-font='humanist'] { --app-font:"Gill Sans","Gill Sans MT",Calibri,sans-serif; }
+html[data-font='compact'] { --app-font:Arial,Helvetica,sans-serif; }
 html[data-font='editorial'] h1,html[data-font='editorial'] h2,html[data-font='editorial'] h3,html[data-font='mono'] h1,html[data-font='mono'] h2,html[data-font='mono'] h3 { letter-spacing:-.025em; }
 html { background: var(--canvas); }
 body { margin: 0; color: var(--ink); background: var(--canvas); font-family: var(--app-font); -webkit-font-smoothing: antialiased; }
@@ -1204,6 +1207,13 @@ body:has(.nexusChatsPage) main { display: flex; flex: 1; min-height: 0; width: 1
 .socialFontChoices button:nth-child(2) { font-family:Verdana,Geneva,Tahoma,sans-serif; }
 .socialFontChoices button:nth-child(3) { font-family:Georgia,"Times New Roman",serif; }
 .socialFontChoices button:nth-child(4) { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+.socialFontChoices button:nth-child(5) { font-family:"Trebuchet MS",Avenir,"Segoe UI",sans-serif; }
+.socialFontChoices button:nth-child(6) { font-family:"Gill Sans","Gill Sans MT",Calibri,sans-serif; }
+.socialFontChoices button:nth-child(7) { font-family:Arial,Helvetica,sans-serif; }
+.socialAlertToggle { width:100%; justify-content:space-between; color:var(--ink); background:var(--paper); border-color:var(--line-dark); box-shadow:none; }
+.socialAlertToggle::after { content:""; width:28px; height:16px; border-radius:20px; background:var(--line-dark); box-shadow:inset 0 0 0 1px var(--line-dark); transition:background .18s ease; }
+.socialAlertToggle[aria-pressed='true']::after { background:var(--green); }
+.socialAlertStatus { margin:9px 0 0; color:var(--muted); font-size:12px; }
 .socialProfileCard textarea { resize: vertical; line-height: 1.45; }
 .socialProfileCard label small { display: block; margin-top: 4px; color: var(--faint); text-align: right; font-weight: 450; }
 .socialAvatarChoices { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 8px; }
@@ -1291,4 +1301,65 @@ body:has(.nexusChatsPage) main { display: flex; flex: 1; min-height: 0; width: 1
 }
 @media (prefers-reduced-motion: reduce) {
   .socialAvatarPortraitImage, .socialAvatarPortraitName { transition: none; }
+}
+
+/* Home: a concise introduction and a real route into project work. */
+.nexusLanding { min-height:calc(100vh - 196px); display:flex; flex-direction:column; justify-content:center; gap:clamp(40px,6vw,78px); }
+.nexusLandingHero { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,.94fr); gap:clamp(35px,5vw,72px); align-items:center; }
+.nexusLandingCopy { max-width:610px; }
+.nexusLandingEyebrow { display:inline-flex; align-items:center; gap:10px; color:var(--accent); font-size:11px; font-weight:800; letter-spacing:.13em; }
+.nexusLandingEyebrow::before { content:""; width:25px; height:2px; border-radius:2px; background:currentColor; }
+.nexusLandingCopy h1 { margin:22px 0 23px; font-size:clamp(48px,5.5vw,80px); line-height:1.02; letter-spacing:-.072em; }
+.nexusLandingCopy h1 em { color:var(--accent); font-style:normal; }
+.nexusLandingCopy > p { max-width:540px; margin:0; color:var(--muted); font-size:clamp(16px,1.55vw,19px); line-height:1.58; }
+.nexusLandingActions { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin-top:32px; }
+.nexusLandingPrimary,.nexusLandingSecondary { min-height:50px; display:inline-flex; align-items:center; justify-content:center; gap:20px; border:1px solid var(--ink); border-radius:12px; padding:12px 19px; font-size:14px; font-weight:750; transition:transform .18s ease,box-shadow .18s ease; }
+.nexusLandingPrimary { color:var(--paper); background:var(--ink); }
+.nexusLandingSecondary { color:var(--ink); background:transparent; }
+.nexusLandingPrimary:hover,.nexusLandingSecondary:hover { transform:translateY(-2px); box-shadow:0 12px 28px rgba(30,30,40,.13); }
+.nexusLandingPrimary > span { font-size:18px; font-weight:500; }
+.nexusLandingVisual { position:relative; min-width:0; padding:45px 0; isolation:isolate; }
+.nexusLandingGlow { position:absolute; inset:0; z-index:-1; border-radius:50%; background:radial-gradient(ellipse at center,color-mix(in srgb,var(--accent) 20%,transparent),transparent 68%); filter:blur(24px); }
+.nexusLandingWindow { overflow:hidden; border:1px solid var(--line-dark); border-radius:24px; background:var(--paper); box-shadow:0 28px 80px rgba(41,37,67,.14),0 2px 8px rgba(41,37,67,.05); transform:rotate(1deg); }
+.nexusLandingWindowTop { display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--line); padding:15px 21px; color:var(--muted); font-size:12px; font-weight:750; }
+.nexusLandingWindowTop > span:first-child { display:inline-flex; align-items:center; gap:10px; }
+.nexusLandingWindowTop i { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 0 4px color-mix(in srgb,var(--green) 15%,transparent); }
+.nexusLandingWindowTop > span:last-child { color:var(--accent); font-size:20px; }
+.nexusLandingWindowBody { padding:clamp(19px,2.5vw,32px); }
+.nexusLandingVisualTitle { display:flex; align-items:center; gap:12px; }
+.nexusLandingProjectIcon { width:42px; height:42px; flex:none; display:grid; place-items:center; border-radius:12px; color:#fff; background:var(--accent); font-size:18px; font-weight:800; }
+.nexusLandingVisualTitle strong,.nexusLandingVisualTitle small { display:block; }
+.nexusLandingVisualTitle strong { font-size:15px; }
+.nexusLandingVisualTitle small { margin-top:3px; color:var(--muted); font-size:11px; }
+.nexusLandingConversation { display:flex; flex-direction:column; align-items:flex-start; gap:13px; margin:29px 0 24px; }
+.nexusLandingQuestion,.nexusLandingAnswer { max-width:87%; border-radius:15px; padding:13px 16px; }
+.nexusLandingQuestion { align-self:flex-end; color:#fff; background:#24242a; border-bottom-right-radius:4px; }
+.nexusLandingAnswer { background:color-mix(in srgb,var(--accent) 10%,var(--canvas)); border-bottom-left-radius:4px; }
+.nexusLandingQuestion > span,.nexusLandingAnswer > span { display:block; margin-bottom:5px; font-size:10px; font-weight:800; opacity:.68; }
+.nexusLandingQuestion p,.nexusLandingAnswer p { margin:0; font-size:13px; line-height:1.42; }
+.nexusLandingUpdate { display:flex; align-items:center; gap:8px; border-top:1px solid var(--line); padding-top:18px; color:var(--muted); font-size:11px; }
+.nexusLandingUpdateDot { width:7px; height:7px; flex:none; border-radius:50%; background:var(--green); }
+.nexusLandingSteps { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); border-top:1px solid var(--line-dark); }
+.nexusLandingSteps > div { display:grid; grid-template-columns:34px minmax(0,1fr); column-gap:8px; align-content:start; padding:23px 25px 0 0; }
+.nexusLandingSteps > div + div { border-left:1px solid var(--line-dark); padding-left:25px; }
+.nexusLandingSteps span { grid-row:1 / 3; color:var(--accent); font-size:11px; font-weight:800; }
+.nexusLandingSteps strong { font-size:14px; }
+.nexusLandingSteps p { margin:6px 0 0; color:var(--muted); font-size:12px; line-height:1.5; }
+html[data-theme='night'] .nexusLandingPrimary { color:#17151d; }
+html[data-theme='night'] .nexusLandingQuestion { background:#4b4679; }
+@media (max-width:850px) {
+  .nexusLandingHero { grid-template-columns:1fr; gap:18px; }
+  .nexusLandingCopy { max-width:720px; }
+  .nexusLandingVisual { max-width:590px; width:100%; margin:0 auto; padding:10px 0; }
+}
+@media (max-width:600px) {
+  .nexusLanding { gap:25px; }
+  .nexusLandingCopy h1 { font-size:clamp(45px,12vw,66px); }
+  .nexusLandingActions > a { flex:1 1 auto; }
+  .nexusLandingSteps { grid-template-columns:1fr; }
+  .nexusLandingSteps > div,.nexusLandingSteps > div + div { border-left:0; border-bottom:1px solid var(--line); padding:14px 0; }
+  .nexusLandingWindow { transform:none; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .nexusLandingPrimary,.nexusLandingSecondary { transition:none; }
 }

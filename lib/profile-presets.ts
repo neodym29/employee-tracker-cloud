@@ -24,6 +24,9 @@ export const PROFILE_PRESETS = [
   { id: 'kirari-momobami', label: 'Kirari Momobami', image: '/avatars/kirari-momobami.webp', category: 'Anime' },
   { id: 'ririka-momobami', label: 'Ririka Momobami', image: '/avatars/ririka-momobami.webp', category: 'Anime' },
   { id: 'midari-ikishima', label: 'Midari Ikishima', image: '/avatars/midari-ikishima.webp', category: 'Anime' },
+  { id: 'violet-fox', label: 'Violet Fox', image: '/avatars/violet-fox.webp', category: 'Cartoons' },
+  { id: 'teal-mechanic', label: 'Teal Mechanic', image: '/avatars/teal-mechanic.webp', category: 'Cartoons' },
+  { id: 'midnight-owl', label: 'Midnight Owl', image: '/avatars/midnight-owl.webp', category: 'Cartoons' },
 ] as const;
 
 export type ProfilePresetId = (typeof PROFILE_PRESETS)[number]['id'];
